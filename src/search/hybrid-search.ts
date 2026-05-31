@@ -259,69 +259,76 @@ export class HybridSearchEngine {
     merged: Array<{ id: string; score: number; sources: SearchSource[] }>,
     limit: number,
   ): SearchResult[] {
+    const topItems = merged.slice(0, limit);
+    if (topItems.length === 0) return [];
+
+    const topIds = topItems.map((item) => item.id);
+    const placeholders = topIds.map(() => '?').join(',');
+    const symbolRows = this.db.all<{
+      id: string;
+      name: string;
+      kind: string;
+      filePath: string;
+      startLine: number;
+      endLine: number;
+      startColumn: number;
+      endColumn: number;
+    }>(
+      `SELECT s.id AS id,
+              s.name AS name,
+              s.kind AS kind,
+              f.path AS filePath,
+              s.start_line AS startLine,
+              s.end_line AS endLine,
+              s.start_column AS startColumn,
+              s.end_column AS endColumn
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE s.id IN (${placeholders})`,
+      topIds,
+    );
+    const symbolsById = new Map(symbolRows.map((row) => [String(row.id), row]));
+
+    const fileRows = this.db.all<{ id: string; path: string; language: string }>(
+      `SELECT id, path, language FROM files WHERE id IN (${placeholders})`,
+      topIds,
+    );
+    const filesById = new Map(fileRows.map((row) => [String(row.id), row]));
+
     const results: SearchResult[] = [];
 
-    for (const item of merged.slice(0, limit)) {
-      // Try to find in symbols table first
-      try {
-        const symResults = this.db.exec(
-          `SELECT name, kind, file_id, start_line, end_line, start_column, end_column
-           FROM symbols WHERE id = ?`,
-          [item.id],
-        );
-
-        if (symResults.length > 0 && symResults[0].values.length > 0) {
-          const row = symResults[0].values[0];
-          // Get file path
-          const filePathResult = this.db.exec(
-            'SELECT path FROM files WHERE id = ?',
-            [String(row[2])],
-          );
-          const filePath = filePathResult.length > 0 && filePathResult[0].values.length > 0
-            ? String(filePathResult[0].values[0][0])
-            : String(row[2]);
-
-          results.push({
-            id: item.id,
-            name: String(row[0]),
-            kind: String(row[1]) as SymbolKind,
-            filePath,
-            score: item.score,
-            sources: item.sources,
-            snippet: null,
-            lineRange: [Number(row[3]), Number(row[4])],
-            columnRange: [Number(row[5]), Number(row[6])],
-          });
-          continue;
-        }
-      } catch {
-        // Not a symbol, try as file
+    for (const item of topItems) {
+      const symbol = symbolsById.get(item.id);
+      if (symbol) {
+        results.push({
+          id: item.id,
+          name: String(symbol.name),
+          kind: String(symbol.kind) as SymbolKind,
+          filePath: String(symbol.filePath),
+          score: item.score,
+          sources: item.sources,
+          snippet: null,
+          lineRange: [Number(symbol.startLine), Number(symbol.endLine)],
+          columnRange: [Number(symbol.startColumn), Number(symbol.endColumn)],
+        });
+        continue;
       }
 
-      // Try as file
-      try {
-        const fileResults = this.db.exec(
-          'SELECT path, language FROM files WHERE id = ?',
-          [item.id],
-        );
-
-        if (fileResults.length > 0 && fileResults[0].values.length > 0) {
-          const row = fileResults[0].values[0];
-          results.push({
-            id: item.id,
-            name: String(row[0]).split('/').pop() || String(row[0]),
-            kind: 'file',
-            filePath: String(row[0]),
-            score: item.score,
-            sources: item.sources,
-            snippet: null,
-            lineRange: null,
-            columnRange: null,
-          });
-          continue;
-        }
-      } catch {
-        // Not a file either
+      const file = filesById.get(item.id);
+      if (file) {
+        const path = String(file.path);
+        results.push({
+          id: item.id,
+          name: path.split('/').pop() || path,
+          kind: 'file',
+          filePath: path,
+          score: item.score,
+          sources: item.sources,
+          snippet: null,
+          lineRange: null,
+          columnRange: null,
+        });
+        continue;
       }
 
       // Fallback: use ID as name

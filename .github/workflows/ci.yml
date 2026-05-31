@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - run: npm install -g npm@11.12.1
+      - run: node --version && npm --version
       - run: npm ci
       - run: npm run lint
       - run: npm run build
