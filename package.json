@@ -1,0 +1,48 @@
+{
+  "name": "code-memory",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI Project Cognitive Engine — Code Memory Graph with MCP integration",
+  "main": "dist/index.js",
+  "bin": {
+    "code-memory": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "code-intelligence",
+    "mcp",
+    "code-graph",
+    "symbol-index",
+    "ai-context",
+    "tree-sitter"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.30.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "chokidar": "^4.0.0",
+    "commander": "^13.0.0",
+    "ignore": "^6.0.0",
+    "nanoid": "^5.0.0",
+    "sql.js": "^1.14.1",
+    "web-tree-sitter": "^0.26.9",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

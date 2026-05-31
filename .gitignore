@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.code-memory/
+*.db
+*.db-wal
+*.db-shm
+.vitest/
+coverage/
+*.tsbuildinfo

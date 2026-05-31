@@ -1,0 +1,6 @@
+{
+  "name": "sample-ts-project",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts"
+}
