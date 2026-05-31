@@ -7,7 +7,7 @@ Code Memory is a local MCP-first code intelligence engine for coding agents. It 
 - Local CLI: `init`, `index`, `query`, `status`, `doctor`, `serve`
 - MCP tools for repo maps, search, definitions, references, call/dependency graphs, impact, related tests, context packs, project facts, and context ledger tracking
 - TypeScript/JavaScript-first graph indexing with symbol chunks and line-based locations
-- ContextLedger tools to record returned files/symbols/chunks and calculate context deltas for a session
+- ContextLedger tracking for returned files/symbols/chunks, including `get_context_pack` session deltas
 - SQLite/FTS keyword retrieval plus graph expansion
 
 ## Current Limits
@@ -72,6 +72,8 @@ Example MCP server config:
 
 Use the ledger tools when an agent wants to avoid repeating context in one task/session:
 
+- `get_context_pack`: pass `sessionId` to record returned context; pass `avoidRepeated: true` to omit files, symbols, and snippets already returned in that session.
+- `get_context_pack.levels`: cap returned detail (`L0` project card through `L4` code snippets) when a task needs a smaller context package.
 - `mark_context_used`: record files, symbols, chunks, token estimate, evidence IDs, and optional feedback.
 - `get_context_delta`: compare candidate context with what was already returned.
 - `avoid_repeated_context`: get a keep/drop recommendation.

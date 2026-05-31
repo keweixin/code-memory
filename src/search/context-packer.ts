@@ -51,9 +51,10 @@ export class ContextPacker {
       tokenBudget: number;
       includeProjectCard?: boolean;
       includeMemories?: boolean;
+      maxLevel?: ContextLevel;
     },
   ): Promise<ContextPack> {
-    const { tokenBudget, includeProjectCard = true, includeMemories = true } = options;
+    const { tokenBudget, includeProjectCard = true, includeMemories = true, maxLevel } = options;
 
     log.info(`Packing context for "${query}" with budget ${tokenBudget}`);
 
@@ -73,7 +74,7 @@ export class ContextPacker {
     };
 
     // Determine the maximum context level we can afford
-    const level = this.determineLevel(tokenBudget);
+    const level = this.resolveLevel(tokenBudget, maxLevel);
     pack.level = level;
 
     // L0: Project card
@@ -163,6 +164,15 @@ export class ContextPacker {
     if (budget <= this.budgets.L3) return 'L3';
     if (budget <= this.budgets.L4) return 'L4';
     return 'L5';
+  }
+
+  private resolveLevel(budget: number, requestedMaxLevel?: ContextLevel): ContextLevel {
+    const budgetLevel = this.determineLevel(budget);
+    if (!requestedMaxLevel) return budgetLevel;
+
+    return compareContextLevels(requestedMaxLevel, budgetLevel) < 0
+      ? requestedMaxLevel
+      : budgetLevel;
   }
 
   /**
@@ -554,4 +564,19 @@ function formatLocation(
   columnRange: [number, number],
 ): string {
   return `${filePath}:${lineRange[0]}:${columnRange[0]}-${lineRange[1]}:${columnRange[1]}`;
+}
+
+function compareContextLevels(a: ContextLevel, b: ContextLevel): number {
+  return contextLevelRank(a) - contextLevelRank(b);
+}
+
+function contextLevelRank(level: ContextLevel): number {
+  switch (level) {
+    case 'L0': return 0;
+    case 'L1': return 1;
+    case 'L2': return 2;
+    case 'L3': return 3;
+    case 'L4': return 4;
+    case 'L5': return 5;
+  }
 }
