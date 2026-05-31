@@ -65,6 +65,9 @@ interface ProjectCardRaw {
   total_chunks: number;
   total_memories: number;
   last_full_index: string | null;
+  index_completed: string | null;
+  embedding_provider: string | null;
+  embedding_model: string | null;
 }
 
 function getIndexMetadata(db: SqlJsDatabase): ProjectCardRaw {
@@ -83,6 +86,9 @@ function getIndexMetadata(db: SqlJsDatabase): ProjectCardRaw {
     total_chunks: 0,
     total_memories: 0,
     last_full_index: null,
+    index_completed: null,
+    embedding_provider: null,
+    embedding_model: null,
   };
 
   try {
@@ -105,6 +111,9 @@ function getIndexMetadata(db: SqlJsDatabase): ProjectCardRaw {
         case "total_files": defaultCard.total_files = parseInt(value, 10) || 0; break;
         case "total_symbols": defaultCard.total_symbols = parseInt(value, 10) || 0; break;
         case "last_full_index": defaultCard.last_full_index = value; break;
+        case "index_completed": defaultCard.index_completed = value; break;
+        case "embedding_provider": defaultCard.embedding_provider = value; break;
+        case "embedding_model": defaultCard.embedding_model = value; break;
       }
     }
   } catch {
@@ -181,6 +190,15 @@ function formatProjectCard(card: Record<string, unknown>): string {
   if (card.last_full_index) {
     lines.push(`Last Index: ${card.last_full_index}`);
   }
+  if (card.index_completed) {
+    lines.push(`Index Completed: ${card.index_completed}`);
+  }
+
+  const embeddingProvider = String(card.embedding_provider || "none");
+  const embeddingModel = String(card.embedding_model || "none");
+  const vectorStatus = embeddingProvider !== "none" ? "not wired" : "disabled";
+  lines.push(`Embedding:  ${embeddingProvider} (${embeddingModel})`);
+  lines.push(`Vector:     ${vectorStatus}`);
 
   return lines.join("\n");
 }
