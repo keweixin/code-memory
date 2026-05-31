@@ -138,6 +138,21 @@ describe('MCP location output', () => {
     expect(text).toContain('Method: graph (TESTS edge)');
   });
 
+  it('resolves qualified class method targets when finding related tests', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerGetRelatedTestsTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('get_related_tests')!({
+      target: 'AuthService.login',
+    });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('No related tests found');
+    expect(text).toContain('tests/auth.test.js');
+    expect(text).toContain('Method: graph (TESTS edge)');
+  });
+
   it('includes file-level TESTS graph edges in impact analysis for a source file', async () => {
     await indexFixture(tempRoot);
     const server = new FakeMcpServer();

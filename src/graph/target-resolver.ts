@@ -1,5 +1,10 @@
 import type { Database as SqlJsDatabase } from 'sql.js';
 
+export interface ResolvedTargetNode {
+  id: string;
+  kind: 'file' | 'symbol';
+}
+
 /**
  * Resolve a user-facing target string to an indexed file or symbol node id.
  *
@@ -7,9 +12,17 @@ import type { Database as SqlJsDatabase } from 'sql.js';
  * class/object member names such as AuthService.login.
  */
 export function resolveTargetId(db: SqlJsDatabase, target: string): string | null {
-  return findFileId(db, target)
-    || findSymbolId(db, target)
-    || findQualifiedSymbolId(db, target);
+  return resolveTargetNode(db, target)?.id ?? null;
+}
+
+export function resolveTargetNode(db: SqlJsDatabase, target: string): ResolvedTargetNode | null {
+  const fileId = findFileId(db, target);
+  if (fileId) return { id: fileId, kind: 'file' };
+
+  const symbolId = findSymbolId(db, target) || findQualifiedSymbolId(db, target);
+  if (symbolId) return { id: symbolId, kind: 'symbol' };
+
+  return null;
 }
 
 function findFileId(db: SqlJsDatabase, path: string): string | null {

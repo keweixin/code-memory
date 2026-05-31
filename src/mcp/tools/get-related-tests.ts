@@ -10,6 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
 import { GraphEngine } from "../../graph/graph-engine.js";
+import { resolveTargetNode } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 
 const log = createLogger("mcp:get-related-tests");
@@ -71,9 +72,13 @@ function findRelatedTests(
   const tests: TestInfo[] = [];
   const seen = new Set<string>();
 
-  const isFilePath = target.includes("/") || target.includes(".") || target.includes("\\\\");
-  const fileId = isFilePath ? findFileId(db, target) : null;
-  const symbolId = isFilePath ? null : findSymbolIdByName(db, target);
+  const resolvedTarget = resolveTargetNode(db, target);
+  const symbolId = resolvedTarget?.kind === "symbol" ? resolvedTarget.id : null;
+  const fileId = resolvedTarget?.kind === "file"
+    ? resolvedTarget.id
+    : symbolId
+      ? findSymbolFileId(db, symbolId)
+      : null;
 
   // Direct TESTS edges
   if (symbolId) {
@@ -107,7 +112,7 @@ function findRelatedTests(
   }
 
   // Naming conventions
-  const searchPath = isFilePath ? target : (symbolId ? findSymbolFilePath(db, symbolId) : target);
+  const searchPath = fileId ? findFilePathById(db, fileId) : target;
   if (searchPath) {
     const conventionTests = findTestsByNamingConvention(db, searchPath);
     for (const t of conventionTests) {
@@ -147,9 +152,9 @@ function findRelatedTests(
   return tests;
 }
 
-function findFileId(db: SqlJsDatabase, path: string): string | null {
+function findFilePathById(db: SqlJsDatabase, fileId: string): string | null {
   try {
-    const results = db.exec("SELECT id FROM files WHERE path = ?", [path]);
+    const results = db.exec("SELECT path FROM files WHERE id = ?", [fileId]);
     if (results.length > 0 && results[0].values.length > 0) {
       return String(results[0].values[0][0]);
     }
@@ -157,22 +162,9 @@ function findFileId(db: SqlJsDatabase, path: string): string | null {
   return null;
 }
 
-function findSymbolIdByName(db: SqlJsDatabase, name: string): string | null {
+function findSymbolFileId(db: SqlJsDatabase, symbolId: string): string | null {
   try {
-    const results = db.exec("SELECT id FROM symbols WHERE name = ? LIMIT 1", [name]);
-    if (results.length > 0 && results[0].values.length > 0) {
-      return String(results[0].values[0][0]);
-    }
-  } catch { /* not found */ }
-  return null;
-}
-
-function findSymbolFilePath(db: SqlJsDatabase, symbolId: string): string | null {
-  try {
-    const results = db.exec(
-      "SELECT f.path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.id = ?",
-      [symbolId],
-    );
+    const results = db.exec("SELECT file_id FROM symbols WHERE id = ?", [symbolId]);
     if (results.length > 0 && results[0].values.length > 0) {
       return String(results[0].values[0][0]);
     }
