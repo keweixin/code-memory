@@ -17,6 +17,9 @@ export function registerIndexCommand(program: Command): void {
     .command('index [path]')
     .description('Build or update the project index')
     .option('--full', 'Force full re-index (ignore incremental)')
+    .option('--workers <n>', 'Parse worker count: auto, 0, or a positive integer')
+    .option('--embedding-batch-size <n>', 'Chunk embedding batch size')
+    .option('--embedding-concurrency <n>', 'Chunk embedding concurrency')
     .option('-v, --verbose', 'Show detailed progress')
     .action(async (path, options) => {
       try {
@@ -31,6 +34,9 @@ export function registerIndexCommand(program: Command): void {
 interface IndexOptions {
   full?: boolean;
   verbose?: boolean;
+  workers?: string;
+  embeddingBatchSize?: string;
+  embeddingConcurrency?: string;
 }
 
 async function indexProject(projectPath: string, options: IndexOptions): Promise<void> {
@@ -50,7 +56,9 @@ async function indexProject(projectPath: string, options: IndexOptions): Promise
     process.exit(1);
   }
 
-  // Dynamically import IndexManager (heavy deps: tree-sitter, sql.js)
+  config = applyIndexOverrides(config, options);
+
+  // Dynamically import IndexManager (heavy deps: tree-sitter, native SQLite)
   const { IndexManager } = await import('../../indexer/index-manager.js');
   const manager = new IndexManager(projectPath, config);
 
@@ -59,4 +67,28 @@ async function indexProject(projectPath: string, options: IndexOptions): Promise
   } else {
     await manager.incrementalIndex();
   }
+}
+
+function applyIndexOverrides(config: CodeMemoryConfig, options: IndexOptions): CodeMemoryConfig {
+  const next: CodeMemoryConfig = {
+    ...config,
+    embedding: { ...config.embedding },
+    indexing: { ...(config.indexing || {}) },
+  };
+  if (options.workers !== undefined) {
+    next.indexing = {
+      ...(next.indexing || {}),
+      workers: options.workers === 'auto' ? 'auto' : Number(options.workers),
+    };
+    if (typeof next.indexing.workers === 'number' && Number.isNaN(next.indexing.workers)) {
+      throw new Error('--workers must be "auto", 0, or a positive integer');
+    }
+  }
+  if (options.embeddingBatchSize !== undefined) {
+    next.embedding.batchSize = Number(options.embeddingBatchSize);
+  }
+  if (options.embeddingConcurrency !== undefined) {
+    next.embedding.concurrency = Number(options.embeddingConcurrency);
+  }
+  return next;
 }

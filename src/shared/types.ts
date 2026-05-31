@@ -137,6 +137,7 @@ export interface SymbolRecord {
   summary: string | null;
   hash: string;
   accessLevel: AccessLevel | null;
+  searchText?: string;
 }
 
 export interface EdgeRecord {
@@ -382,6 +383,7 @@ export interface CodeMemoryConfig {
   ignore: string[];
   languages: Language[];
   embedding: EmbeddingConfig;
+  indexing?: IndexingConfig;
   llm: LlmConfig | null;
   realtime: RealtimeConfig;
   tokenBudgets: TokenBudgets;
@@ -393,6 +395,14 @@ export interface EmbeddingConfig {
   baseUrl?: string;
   apiKey?: string;
   dimensions?: number;
+  batchSize?: number;
+  concurrency?: number;
+}
+
+export interface IndexingConfig {
+  workers?: 'auto' | number;
+  parseBatchSize?: number;
+  edgeMode?: 'full' | 'dirty';
 }
 
 export interface LlmConfig {
@@ -436,6 +446,8 @@ export interface ParseResult {
   exports: string[];
   edges: EdgeRecord[];
   calls: CallReference[];
+  scopeBindings: ScopeBindingRecord[];
+  typeRelations: TypeRelationRecord[];
   chunks: ChunkRecord[];
   errors: ParseError[];
 }
@@ -450,11 +462,39 @@ export interface ParseError {
 export interface CallReference {
   callerName: string | null;
   callerStartLine: number | null;
+  callerClassName?: string | null;
+  callerSymbolId?: string | null;
   calleeName: string;
+  receiverName?: string | null;
+  receiverKind?: 'this' | 'identifier' | 'namespace' | 'constructor' | 'unknown' | null;
+  memberName?: string | null;
+  isConstructorCall?: boolean;
   /** 1-based line where the call expression starts; never a byte offset. */
   rangeStart: number;
   /** 1-based line where the call expression ends; never a byte offset. */
   rangeEnd: number;
+  /** 0-based UTF-16 column where the call expression starts. */
+  startColumn?: number;
+  evidence: string;
+}
+
+export interface ScopeBindingRecord {
+  fileId: string;
+  symbolId: string | null;
+  localName: string;
+  bindingKind: 'constructor' | 'import' | 'alias' | 'unknown';
+  targetName: string | null;
+  targetSymbolId: string | null;
+  startLine: number;
+  endLine: number;
+}
+
+export interface TypeRelationRecord {
+  fileId: string;
+  fromSymbolId: string | null;
+  relationKind: 'EXTENDS' | 'IMPLEMENTS';
+  targetName: string;
+  targetSymbolId: string | null;
   evidence: string;
 }
 

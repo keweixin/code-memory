@@ -43,7 +43,7 @@ From the project you want to index:
 ```bash
 code-memory init --embedding none
 code-memory doctor
-code-memory index --full
+code-memory index --full --workers auto
 code-memory status
 code-memory query "login flow"
 ```
@@ -65,6 +65,30 @@ code-memory init --embedding openai --embedding-model text-embedding-3-small
 # Set the apiKey field in .code-memory/config.json or use an OpenAI-compatible baseUrl before indexing.
 code-memory index --full
 ```
+
+## Large Repo Indexing
+
+The indexer uses native SQLite with WAL/FTS5 and a worker-thread parse pool. The default worker setting is `auto` (`available CPU cores - 1`). Use `--workers 0` only for debugging or deterministic test runs.
+
+```bash
+code-memory index --full --workers auto
+code-memory index --full --workers 4 --embedding-batch-size 50 --embedding-concurrency 2
+```
+
+After upgrading an older index, run a full rebuild:
+
+```bash
+code-memory index --full
+```
+
+For local scale checks from this repository:
+
+```bash
+npm run build
+npm run benchmark:index -- --files 2000 --workers auto --embedding none
+```
+
+`code-memory doctor` checks the native SQLite driver, WAL, FTS5, worker_threads, grammar availability, and whether the current schema needs a full re-index.
 
 Start the MCP server from the indexed project root:
 

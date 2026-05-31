@@ -6,6 +6,7 @@ import type { Command } from 'commander';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE } from '../../shared/constants.js';
 import { LANGUAGE_CONFIGS } from '../../parser/types.js';
 import { createLogger } from '../../shared/logger.js';
@@ -20,7 +21,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        runDoctor(Boolean(options.json));
+        await runDoctor(Boolean(options.json));
       } catch (err) {
         log.error('Doctor failed', err);
         process.exit(1);
@@ -44,7 +45,7 @@ interface DoctorConfig {
   };
 }
 
-function runDoctor(asJson: boolean): void {
+async function runDoctor(asJson: boolean): Promise<void> {
   const projectPath = process.cwd();
   const checks: CheckResult[] = [];
   const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
@@ -64,6 +65,15 @@ function runDoctor(asJson: boolean): void {
     message: existsSync(dbPath)
       ? 'Found ' + dbPath
       : 'No index found. Run "code-memory index --full".',
+  });
+
+  checks.push(await checkNativeSqlite());
+  checks.push({
+    name: 'worker_threads',
+    status: typeof Worker !== 'undefined' ? 'ok' : 'error',
+    message: typeof Worker !== 'undefined'
+      ? 'worker_threads is available for parallel parsing.'
+      : 'worker_threads is unavailable in this Node.js runtime.',
   });
 
   let parsedConfig: DoctorConfig | null = null;
@@ -125,6 +135,37 @@ function runDoctor(asJson: boolean): void {
     });
   }
 
+  if (existsSync(dbPath)) {
+    try {
+      const { getDatabase, getDatabaseHealth } = await import('../../storage/database.js');
+      await getDatabase(projectPath);
+      const health = getDatabaseHealth();
+      checks.push({
+        name: 'sqlite-wal',
+        status: health.walEnabled ? 'ok' : 'warn',
+        message: health.walEnabled ? 'SQLite WAL mode is enabled.' : 'SQLite WAL mode is not enabled.',
+      });
+      checks.push({
+        name: 'sqlite-fts5',
+        status: health.fts5Available ? 'ok' : 'error',
+        message: health.fts5Available ? 'SQLite FTS5 is available.' : 'SQLite FTS5 is unavailable.',
+      });
+      checks.push({
+        name: 'schema',
+        status: health.needsReindex ? 'warn' : 'ok',
+        message: health.needsReindex
+          ? `Index schema v${health.schemaVersion || 'unknown'} needs "code-memory index --full".`
+          : `Index schema v${health.schemaVersion} is current.`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'sqlite-open',
+        status: 'error',
+        message: 'Failed to open native SQLite database: ' + (err instanceof Error ? err.message : String(err)),
+      });
+    }
+  }
+
   if (asJson) {
     console.log(JSON.stringify({ projectPath, checks }, null, 2));
     return;
@@ -135,6 +176,23 @@ function runDoctor(asJson: boolean): void {
   for (const check of checks) {
     const label = check.status.toUpperCase().padEnd(5);
     console.log(label + ' ' + check.name + ' - ' + check.message);
+  }
+}
+
+async function checkNativeSqlite(): Promise<CheckResult> {
+  try {
+    await import('better-sqlite3');
+    return {
+      name: 'native-sqlite',
+      status: 'ok',
+      message: 'better-sqlite3 native driver can be loaded.',
+    };
+  } catch (err) {
+    return {
+      name: 'native-sqlite',
+      status: 'error',
+      message: 'better-sqlite3 failed to load: ' + (err instanceof Error ? err.message : String(err)),
+    };
   }
 }
 

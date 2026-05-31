@@ -1,4 +1,4 @@
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 
 export interface ResolvedTargetNode {
   id: string;

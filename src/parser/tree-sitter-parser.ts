@@ -15,6 +15,8 @@ import { getParser, getTreeSitterLanguage, loadLanguage } from './parser-registr
 import { extractSymbols } from './symbol-extractor.js';
 import { extractImports, extractExports } from './import-export-extractor.js';
 import { extractCallReferences } from './call-extractor.js';
+import { extractScopeBindings } from './scope-extractor.js';
+import { extractTypeRelations } from './type-relation-extractor.js';
 import { generateId, contentHash } from '../shared/utils.js';
 import { estimateTokens } from '../shared/token-counter.js';
 import { createLogger } from '../shared/logger.js';
@@ -73,6 +75,14 @@ export async function parseFile(
   try { calls = extractCallReferences(rootNode, sourceCode, parserLang, tsLang); }
   catch (err) { log.error('Call extraction failed', err); }
 
+  let scopeBindings: ParseResult['scopeBindings'] = [];
+  try { scopeBindings = extractScopeBindings(rootNode, fileId, symbols); }
+  catch (err) { log.error('Scope binding extraction failed', err); }
+
+  let typeRelations: ParseResult['typeRelations'] = [];
+  try { typeRelations = extractTypeRelations(rootNode, fileId, symbols, parserLang); }
+  catch (err) { log.error('Type relation extraction failed', err); }
+
   const chunks = createSymbolChunks(fileId, sourceCode, symbols);
 
   try { tree.delete(); } catch {}
@@ -87,7 +97,7 @@ export async function parseFile(
 
   return {
     fileId, filePath, language, symbols, imports, exports, edges: [],
-    calls, chunks, errors,
+    calls, scopeBindings, typeRelations, chunks, errors,
   };
 }
 
@@ -108,7 +118,8 @@ function createEmptyResult(
   }
   return {
     fileId, filePath, language: 'unknown',
-    symbols: [], imports: [], exports: [], edges: [], calls: [], chunks: [], errors,
+    symbols: [], imports: [], exports: [], edges: [], calls: [],
+    scopeBindings: [], typeRelations: [], chunks: [], errors,
   };
 }
 

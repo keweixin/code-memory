@@ -38,7 +38,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
     return;
   }
 
-  const { getDatabase } = await import('../../storage/database.js');
+  const { getDatabase, getDatabaseHealth } = await import('../../storage/database.js');
 
   try {
     await getDatabase(projectPath);
@@ -71,6 +71,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
     if (options.json) {
       const embeddingProvider = meta.get('embedding_provider') || null;
       const vectorSearch = getVectorSearchStatus(meta);
+      const health = getDatabaseHealth();
       console.log(JSON.stringify({
         project: meta.get('project_name') || 'Unknown',
         rootPath: meta.get('root_path') || null,
@@ -85,9 +86,16 @@ async function showStatus(options: StatusOptions): Promise<void> {
         edges: edgeCount,
         chunks: chunkCount,
         memories: memCount,
+        schemaVersion: health.schemaVersion,
+        needsReindex: health.needsReindex,
+        lastIndexDurationMs: Number(meta.get('last_index_duration_ms') || 0),
+        parseWorkers: Number(meta.get('parse_workers') || 0),
+        dirtyFiles: Number(meta.get('dirty_files') || 0),
+        unresolvedCalls: Number(meta.get('unresolved_calls') || 0),
         lastIndex: meta.get('last_full_index') || meta.get('last_incremental_index') || null,
       }, null, 2));
     } else {
+      const health = getDatabaseHealth();
       console.log('Code Memory Graph v0.1.0');
       console.log('');
       console.log(`Project:     ${meta.get('project_name') || 'Unknown'}`);
@@ -97,6 +105,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log(`Commit:      ${(meta.get('current_commit') || '').slice(0, 8) || '(not set)'}`);
       console.log(`Embedding:   ${meta.get('embedding_provider') || '(not set)'} (${meta.get('embedding_model') || '(not set)'})`);
       console.log(`Vector:      ${getVectorSearchStatus(meta).replace('_', ' ')}`);
+      console.log(`Schema:      v${health.schemaVersion}${health.needsReindex ? ' (needs index --full)' : ''}`);
       console.log(`Last Index:  ${meta.get('last_full_index') || '(never)'}`);
       console.log('');
       console.log(`Files:       ${fileCount}`);
@@ -104,6 +113,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log(`Edges:       ${edgeCount}`);
       console.log(`Chunks:      ${chunkCount}`);
       console.log(`Memories:    ${memCount}`);
+      console.log(`Unresolved:  ${Number(meta.get('unresolved_calls') || 0)} calls`);
     }
   } catch (err) {
     log.error('Failed to read index', err);

@@ -8,17 +8,18 @@
  * indexing strategies.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import * as posixPath from 'node:path/posix';
-import type { Database as SqlJsDatabase } from 'sql.js';
+import { availableParallelism } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import type { CodeMemoryConfig, IndexStatus, FileRecord, SymbolRecord, EdgeRecord, ChunkRecord, ParseResult, ImportInfo, EdgeType } from '../shared/types.js';
 import type { DiscoveredFile } from '../scanner/file-discovery.js';
 import { initTreeSitter } from '../parser/parser-registry.js';
 import { parseFile, resolveParserLanguage } from '../parser/tree-sitter-parser.js';
 import { scanProject } from '../scanner/project-scanner.js';
 import { getFileContentHash, getFileLastCommit } from '../scanner/git-integration.js';
-import { getDatabase, getDatabaseSync, saveDatabase } from '../storage/database.js';
+import { getDatabase, getDatabaseSync, saveDatabase, type SqlJsDatabase } from '../storage/database.js';
 import { upsertFile, getAllFiles, deleteFile } from '../storage/file-repository.js';
 import { upsertSymbol, deleteSymbolsByFileId } from '../storage/symbol-repository.js';
 import { upsertEdge, deleteEdgesByNodeId } from '../storage/edge-repository.js';
@@ -28,13 +29,27 @@ import { CONFIG_DIR, VECTORS_DIR } from '../shared/constants.js';
 import { EmbeddingGenerator } from './embedding-generator.js';
 import {
   addVectors,
+  closeVectorStore,
   deleteVectors,
   getEmbeddingDimensions,
   initVectorStore,
+  releaseVectorStoreConnection,
   resetVectorStore,
   type VectorRecord,
 } from '../search/vector-search.js';
 import { createLogger } from '../shared/logger.js';
+import {
+  countUnresolvedCalls,
+  deleteParseMetadataByFileId,
+  getCallRefsByFileIds,
+  getScopeBindingsByFileIds,
+  getTypeRelationsByFileIds,
+  replaceParseMetadata,
+  updateCallRefResolution,
+  type StoredCallRefRow,
+  type StoredScopeBindingRow,
+} from '../storage/parse-metadata-repository.js';
+import { parseFilesWithWorkers } from './parse-worker-pool.js';
 
 const log = createLogger('index-manager');
 
@@ -42,6 +57,14 @@ interface ResolvedImportSymbol {
   symbol: SymbolRecord;
   resolutionNames: string[];
 }
+
+interface ImportResolution {
+  edgeCount: number;
+  symbolsByName: Map<string, SymbolRecord[]>;
+  namespaceSymbolsByName: Map<string, Map<string, SymbolRecord[]>>;
+}
+
+type EdgeRebuildMode = 'full' | 'dirty';
 
 interface ReexportAlias {
   source: string;
@@ -61,6 +84,7 @@ export class IndexManager {
   private embeddingGenerator: EmbeddingGenerator | null = null;
   private vectorStoreReady = false;
   private embeddedVectorCount = 0;
+  private gitHistoryAvailable = false;
 
   constructor(rootPath: string, config: CodeMemoryConfig) {
     this.rootPath = resolve(rootPath);
@@ -79,44 +103,48 @@ export class IndexManager {
 
     log.info('Scanning project files...');
     const scanResult = scanProject(this.rootPath, this.config);
+    this.gitHistoryAvailable = Boolean(scanResult.gitInfo.currentCommit);
     const files = scanResult.files;
     log.info('Discovered ' + files.length + ' files to index');
 
     await this.pruneFilesNotInFullScan(files);
 
-    let indexedCount = 0, totalSymbols = 0, totalChunks = 0, skipped = 0;
+    let indexedCount = 0, totalSymbols = 0, totalChunks = 0;
+    const workers = this.resolveWorkerCount();
+    const results = await this.parseDiscoveredFiles(files, workers);
 
-    for (let i = 0; i < files.length; i++) {
-      const discovered = files[i];
-      try {
-        const result = await this.indexFile(discovered);
-        if (!result) { skipped++; continue; }
-        await this.removeFileFromIndex(result.fileId);
-        this.storeParseResult(result, discovered);
-        await this.indexChunkVectors(result, discovered);
-        indexedCount++; totalSymbols += result.symbols.length;
-        totalChunks += result.chunks.length;
+    for (const { discovered, result, error } of results) {
+      if (error) {
+        log.error('Failed to index: ' + discovered.relativePath, error);
+        continue;
+      }
+      if (!result) continue;
+      await this.removeFileFromIndex(result.fileId);
+      this.storeParseResult(result, discovered);
+      await this.indexChunkVectors(result, discovered);
+      indexedCount++; totalSymbols += result.symbols.length;
+      totalChunks += result.chunks.length;
 
-        if (indexedCount % 50 === 0) {
-          log.info('Progress: ' + indexedCount + '/' + files.length +
-            ' (' + totalSymbols + ' symbols)');
-        }
-      } catch (err) {
-        log.error('Failed to index: ' + discovered.relativePath, err);
-        skipped++;
+      if (indexedCount % 50 === 0) {
+        log.info('Progress: ' + indexedCount + '/' + files.length +
+          ' (' + totalSymbols + ' symbols)');
       }
     }
 
-    const totalEdges = await this.rebuildGraphEdges(scanResult.files);
+    const totalEdges = await this.rebuildGraphEdges('full');
+    const elapsed = Date.now() - startTime;
     this.updateFinalMetadata(scanResult, {
       indexedFiles: indexedCount,
       symbols: totalSymbols,
       edges: totalEdges,
       chunks: totalChunks,
+      durationMs: elapsed,
+      parseWorkers: workers,
+      dirtyFiles: indexedCount,
     }, 'full');
     await saveDatabase();
+    releaseVectorStoreConnection();
 
-    const elapsed = Date.now() - startTime;
     log.info('Full index done in ' + (elapsed / 1000).toFixed(1) + 's: ' +
       indexedCount + ' files, ' + totalSymbols + ' symbols, ' + totalEdges + ' edges');
 
@@ -125,12 +153,14 @@ export class IndexManager {
 
   async incrementalIndex(forceAll: boolean = false): Promise<IndexStatus> {
     log.info('Starting incremental index of: ' + this.rootPath);
+    const startTime = Date.now();
     await this.ensureDb();
     await initTreeSitter();
     await this.prepareVectorStore(forceAll);
 
     this.setMetadata('is_indexing', 'true');
     const scanResult = scanProject(this.rootPath, this.config);
+    this.gitHistoryAvailable = Boolean(scanResult.gitInfo.currentCommit);
 
     const currentFileMap = new Map<string, DiscoveredFile>();
     for (const f of scanResult.files) {
@@ -144,12 +174,15 @@ export class IndexManager {
     }
 
     let indexedCount = 0, totalSymbols = 0, totalChunks = 0;
+    const dirtyFiles: DiscoveredFile[] = [];
+    const deletedFileIds: string[] = [];
 
     // Check existing files for changes
     for (const [relPath, prevFile] of prevFileMap) {
       const currentFile = currentFileMap.get(relPath);
       if (!currentFile) {
         await this.removeFileFromIndex(prevFile.id);
+        deletedFileIds.push(prevFile.id);
         continue;
       }
       let needsReindex = forceAll;
@@ -160,39 +193,50 @@ export class IndexManager {
         } catch (e) { needsReindex = true; }
       }
       if (needsReindex) {
-        const result = await this.indexFile(currentFile);
-        if (result) {
-          await this.removeFileFromIndex(prevFile.id);
-          this.storeParseResult(result, currentFile);
-          await this.indexChunkVectors(result, currentFile);
-          indexedCount++; totalSymbols += result.symbols.length;
-          totalChunks += result.chunks.length;
-        }
+        dirtyFiles.push(currentFile);
       }
     }
 
     // Index new files
     for (const [relPath, currentFile] of currentFileMap) {
       if (!prevFileMap.has(relPath)) {
-        const result = await this.indexFile(currentFile);
-        if (result) {
-          this.storeParseResult(result, currentFile);
-          await this.indexChunkVectors(result, currentFile);
-          indexedCount++; totalSymbols += result.symbols.length;
-          totalChunks += result.chunks.length;
-        }
+        dirtyFiles.push(currentFile);
       }
     }
 
-    const totalEdges = await this.rebuildGraphEdges(scanResult.files);
+    const workers = forceAll ? this.resolveWorkerCount() : this.resolveWorkerCount('dirty');
+    const parseResults = await this.parseDiscoveredFiles(dirtyFiles, workers);
+    const dirtyFileIds = new Set<string>(deletedFileIds);
+
+    for (const { discovered, result, error } of parseResults) {
+      if (error) {
+        log.error('Failed to index: ' + discovered.relativePath, error);
+        continue;
+      }
+      if (!result) continue;
+      dirtyFileIds.add(result.fileId);
+      await this.removeFileFromIndex(result.fileId);
+      this.storeParseResult(result, discovered);
+      await this.indexChunkVectors(result, discovered);
+      indexedCount++; totalSymbols += result.symbols.length;
+      totalChunks += result.chunks.length;
+    }
+
+    const expandedDirtyFileIds = this.expandDirtyFileSet([...dirtyFileIds]);
+    const totalEdges = await this.rebuildGraphEdges(forceAll ? 'full' : 'dirty', expandedDirtyFileIds);
+    const elapsed = Date.now() - startTime;
     this.updateFinalMetadata(scanResult, {
       indexedFiles: indexedCount,
       symbols: totalSymbols,
       edges: totalEdges,
       chunks: totalChunks,
+      durationMs: elapsed,
+      parseWorkers: workers,
+      dirtyFiles: expandedDirtyFileIds.length,
     }, forceAll ? 'full' : 'incremental');
     this.setMetadata('is_indexing', 'false');
     await saveDatabase();
+    releaseVectorStoreConnection();
 
     log.info('Incremental index done: ' + indexedCount + ' files updated');
     return this.buildStatus(indexedCount, totalSymbols, totalEdges, totalChunks);
@@ -244,9 +288,41 @@ export class IndexManager {
       exports: [],
       edges: [],
       calls: [],
+      scopeBindings: [],
+      typeRelations: [],
       chunks: [],
       errors: [],
     };
+  }
+
+  private resolveWorkerCount(_mode: 'full' | 'dirty' = 'full'): number {
+    const configured = this.config.indexing?.workers ?? 'auto';
+    if (configured === 0) return 0;
+    if (typeof configured === 'number') return Math.max(0, Math.floor(configured));
+    return Math.max(1, availableParallelism() - 1);
+  }
+
+  private async parseDiscoveredFiles(
+    files: DiscoveredFile[],
+    workers: number,
+  ): Promise<Array<{ discovered: DiscoveredFile; result: ParseResult | null; error: unknown | null }>> {
+    const workerEntry = fileURLToPath(new URL('./parse-worker.js', import.meta.url));
+    if (workers > 0 && existsSync(workerEntry)) {
+      return parseFilesWithWorkers(files, {
+        workers,
+        rootPath: this.rootPath,
+      });
+    }
+
+    const results: Array<{ discovered: DiscoveredFile; result: ParseResult | null; error: unknown | null }> = [];
+    for (const discovered of files) {
+      try {
+        results.push({ discovered, result: await this.indexFile(discovered), error: null });
+      } catch (error) {
+        results.push({ discovered, result: null, error });
+      }
+    }
+    return results;
   }
 
   private storeParseResult(result: ParseResult, discovered: DiscoveredFile): void {
@@ -255,7 +331,9 @@ export class IndexManager {
     let hash = '';
     try { hash = getFileContentHash(discovered.path); } catch {}
 
-    const lastCommit = getFileLastCommit(this.rootPath, discovered.path);
+    const lastCommit = this.gitHistoryAvailable
+      ? getFileLastCommit(this.rootPath, discovered.path)
+      : null;
 
     const fileRecord: FileRecord = {
       id: result.fileId,
@@ -273,10 +351,21 @@ export class IndexManager {
       summary: null,
       riskLevel: 'low',
     };
-    upsertFile(fileRecord);
-
-    for (const sym of result.symbols) { upsertSymbol(sym); }
-    for (const chunk of result.chunks) { upsertChunk(chunk); }
+    const db = getDatabaseSync();
+    const write = db.transaction(() => {
+      upsertFile(fileRecord);
+      for (const sym of result.symbols) { upsertSymbol(sym); }
+      for (const chunk of result.chunks) { upsertChunk(chunk); }
+      replaceParseMetadata({
+        fileId: result.fileId,
+        imports: result.imports,
+        exports: result.exports,
+        calls: result.calls,
+        scopeBindings: result.scopeBindings,
+        typeRelations: result.typeRelations,
+      });
+    });
+    write();
   }
 
   private async removeFileFromIndex(fileId: string): Promise<void> {
@@ -291,6 +380,7 @@ export class IndexManager {
       deleteEdgesByNodeId(fileId);
       deleteChunksByFileId(fileId);
       deleteSymbolsByFileId(fileId);
+      deleteParseMetadataByFileId(fileId);
       deleteFile(fileId);
     } catch (err) {
       log.error('Failed to remove file from index: ' + fileId, err);
@@ -313,7 +403,10 @@ export class IndexManager {
     this.vectorStoreReady = false;
     this.embeddedVectorCount = 0;
     this.embeddingGenerator = null;
-    if (this.config.embedding.provider === 'none') return;
+    if (this.config.embedding.provider === 'none') {
+      closeVectorStore();
+      return;
+    }
 
     try {
       const dimensions = getEmbeddingDimensions(this.config.embedding);
@@ -334,14 +427,17 @@ export class IndexManager {
     if (!this.vectorStoreReady || !this.embeddingGenerator) return;
 
     const symbolsById = new Map(result.symbols.map((symbol) => [symbol.id, symbol]));
+    const chunkCandidates = result.chunks
+      .map((chunk) => ({ chunk, symbol: chunk.symbolId ? symbolsById.get(chunk.symbolId) : undefined }))
+      .filter((item): item is { chunk: ChunkRecord; symbol: SymbolRecord } => Boolean(item.symbol));
     const records: VectorRecord[] = [];
-    for (const chunk of result.chunks) {
-      if (!chunk.symbolId) continue;
-      const symbol = symbolsById.get(chunk.symbolId);
-      if (!symbol) continue;
-
-      try {
-        const vector = await this.embeddingGenerator.generate(chunk.content);
+    const batchSize = Math.max(1, Math.floor(this.config.embedding.batchSize ?? 50));
+    for (let offset = 0; offset < chunkCandidates.length; offset += batchSize) {
+      const batch = chunkCandidates.slice(offset, offset + batchSize);
+      const vectors = await this.embeddingGenerator.generateBatch(batch.map(({ chunk }) => chunk.content));
+      for (let i = 0; i < batch.length; i++) {
+        const { chunk, symbol } = batch[i];
+        const vector = vectors[i] || [];
         if (vector.length === 0) continue;
         records.push({
           id: symbol.id,
@@ -354,15 +450,17 @@ export class IndexManager {
           contentHash: chunk.contentHash,
         });
         this.setChunkEmbeddingId(chunk.id, symbol.id);
-      } catch (err) {
-        log.warn('Chunk embedding failed for ' + normalizePath(discovered.relativePath) +
-          ':' + chunk.startLine + ' - ' + (err instanceof Error ? err.message : String(err)));
       }
     }
 
     if (records.length > 0) {
-      await addVectors(records);
-      this.embeddedVectorCount += records.length;
+      try {
+        await addVectors(records);
+        this.embeddedVectorCount += records.length;
+      } catch (err) {
+        log.warn('Vector write failed for ' + normalizePath(discovered.relativePath) +
+          ' - ' + (err instanceof Error ? err.message : String(err)));
+      }
     }
   }
 
@@ -392,6 +490,9 @@ export class IndexManager {
       symbols: number;
       edges: number;
       chunks: number;
+      durationMs: number;
+      parseWorkers: number;
+      dirtyFiles: number;
     },
     mode: 'full' | 'incremental',
   ): void {
@@ -415,6 +516,10 @@ export class IndexManager {
     this.setMetadata('last_run_symbols', String(runStats.symbols));
     this.setMetadata('last_run_edges', String(runStats.edges));
     this.setMetadata('last_run_chunks', String(runStats.chunks));
+    this.setMetadata('last_index_duration_ms', String(runStats.durationMs));
+    this.setMetadata('parse_workers', String(runStats.parseWorkers));
+    this.setMetadata('dirty_files', String(runStats.dirtyFiles));
+    this.setMetadata('unresolved_calls', String(countUnresolvedCalls()));
     this.setMetadata('current_commit', scanResult.gitInfo.currentCommit ?? '');
     this.setMetadata('current_branch', scanResult.gitInfo.currentBranch ?? '');
     this.setMetadata('embedding_provider', this.config.embedding.provider);
@@ -422,6 +527,7 @@ export class IndexManager {
     const embeddedChunkCount = this.getEmbeddedChunkCount();
     this.setMetadata('vector_search', embeddedChunkCount > 0 ? 'enabled' : 'disabled');
     this.setMetadata('embedding_dimensions', String(getEmbeddingDimensions(this.config.embedding)));
+    this.setMetadata('needs_reindex', 'false');
     this.setMetadata('is_indexing', 'false');
     this.setMetadata('index_completed', now);
   }
@@ -474,14 +580,21 @@ export class IndexManager {
     }
   }
 
-  private async rebuildGraphEdges(files: DiscoveredFile[]): Promise<number> {
+  private async rebuildGraphEdges(mode: EdgeRebuildMode, dirtyFileIds: string[] = []): Promise<number> {
     const db = getDatabaseSync();
-    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES')");
+    const graphTypes = "'IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES', 'EXTENDS', 'IMPLEMENTS'";
+    if (mode === 'full' || dirtyFileIds.length === 0) {
+      db.run(`DELETE FROM edges WHERE type IN (${graphTypes})`);
+    } else {
+      this.deleteGraphEdgesForDirtyFiles(dirtyFileIds);
+    }
 
     const indexedFiles = this.safeGetAllFiles();
     const filesByPath = new Map<string, FileRecord>();
+    const filesById = new Map<string, FileRecord>();
     for (const file of indexedFiles) {
       filesByPath.set(normalizePath(file.path), file);
+      filesById.set(file.id, file);
     }
 
     const symbols = this.getAllIndexedSymbols();
@@ -493,23 +606,71 @@ export class IndexManager {
     }
 
     let edgeCount = 0;
-    for (const discovered of files) {
-      const fileRecord = filesByPath.get(normalizePath(discovered.relativePath));
-      if (!fileRecord) continue;
+    const rebuildFileIds = mode === 'dirty' && dirtyFileIds.length > 0
+      ? new Set(dirtyFileIds)
+      : new Set(indexedFiles.map((file) => file.id));
 
-      const parsed = await this.indexFile(discovered);
-      if (!parsed) continue;
-
-      const importedSymbols = this.createImportEdges(fileRecord, parsed.imports, filesByPath, symbolsByFile);
+    for (const fileRecord of indexedFiles) {
+      if (!rebuildFileIds.has(fileRecord.id)) continue;
+      const importedSymbols = this.createImportEdges(fileRecord, fileRecord.imports, filesByPath, symbolsByFile);
       edgeCount += importedSymbols.edgeCount;
-      edgeCount += this.createCallEdges(fileRecord, parsed, symbolsByFile, importedSymbols.symbolsByName);
+      edgeCount += this.createCallEdgesFromMetadata(fileRecord, symbolsByFile, symbols, importedSymbols);
     }
 
-    edgeCount += this.createConfigEdges(indexedFiles);
+    if (mode === 'full') {
+      edgeCount += this.createConfigEdges(indexedFiles);
+    } else {
+      edgeCount += this.createConfigEdges(indexedFiles.filter((file) => rebuildFileIds.has(file.id)));
+    }
+    edgeCount += this.createTypeRelationEdges(mode === 'dirty' ? [...rebuildFileIds] : undefined, symbols);
 
     const totalEdges = this.getTableCount('edges');
     log.info('Rebuilt graph edges: ' + totalEdges);
     return totalEdges;
+  }
+
+  private deleteGraphEdgesForDirtyFiles(fileIds: string[]): void {
+    const db = getDatabaseSync();
+    const nodeIds = new Set<string>(fileIds);
+    for (const fileId of fileIds) {
+      for (const symbolId of this.getSymbolIdsByFileId(fileId)) nodeIds.add(symbolId);
+    }
+    const ids = [...nodeIds];
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    db.run(
+      `DELETE FROM edges
+       WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES', 'EXTENDS', 'IMPLEMENTS')
+         AND (from_id IN (${placeholders}) OR to_id IN (${placeholders}))`,
+      [...ids, ...ids],
+    );
+  }
+
+  private expandDirtyFileSet(fileIds: string[]): string[] {
+    if (fileIds.length === 0) return [];
+    const dirty = new Set(fileIds);
+    const changedPaths = new Set(
+      fileIds
+        .map((id) => this.safeGetAllFiles().find((file) => file.id === id)?.path)
+        .filter((path): path is string => Boolean(path)),
+    );
+    if (changedPaths.size === 0) return [...dirty];
+
+    for (const file of this.safeGetAllFiles()) {
+      for (const imp of file.imports) {
+        const target = this.resolveImportTarget(file, imp.source, new Map(this.safeGetAllFiles().map((f) => [normalizePath(f.path), f])));
+        if (target && changedPaths.has(target.path)) dirty.add(file.id);
+      }
+      if (file.exports.some((exportName) => exportName.startsWith('reexport:') || exportName.startsWith('reexportAlias:') || exportName.startsWith('reexportNamespace:'))) {
+        for (const exportName of file.exports) {
+          const source = this.extractReexportSource(exportName);
+          if (!source) continue;
+          const target = this.resolveImportTarget(file, source, new Map(this.safeGetAllFiles().map((f) => [normalizePath(f.path), f])));
+          if (target && changedPaths.has(target.path)) dirty.add(file.id);
+        }
+      }
+    }
+    return [...dirty];
   }
 
   private createConfigEdges(indexedFiles: FileRecord[]): number {
@@ -532,14 +693,41 @@ export class IndexManager {
     return edgeCount;
   }
 
+  private createTypeRelationEdges(fileIds: string[] | undefined, symbols: SymbolRecord[]): number {
+    let edgeCount = 0;
+    const relations = getTypeRelationsByFileIds(fileIds);
+    for (const relation of relations) {
+      const from = relation.from_symbol_id
+        ? symbols.find((symbol) => symbol.id === relation.from_symbol_id)
+        : null;
+      if (!from) continue;
+      const target = relation.target_symbol_id
+        ? symbols.find((symbol) => symbol.id === relation.target_symbol_id)
+        : symbols.find((symbol) => (
+          symbol.name === relation.target_name &&
+          (symbol.kind === 'class' || symbol.kind === 'interface')
+        ));
+      if (!target) continue;
+      edgeCount += this.upsertGraphEdge(
+        from.id,
+        target.id,
+        relation.relation_kind as EdgeType,
+        0.9,
+        relation.evidence || relation.target_name,
+      );
+    }
+    return edgeCount;
+  }
+
   private createImportEdges(
     importer: FileRecord,
     imports: ImportInfo[],
     filesByPath: Map<string, FileRecord>,
     symbolsByFile: Map<string, SymbolRecord[]>,
-  ): { edgeCount: number; symbolsByName: Map<string, SymbolRecord[]> } {
+  ): ImportResolution {
     let edgeCount = 0;
     const symbolsByName = new Map<string, SymbolRecord[]>();
+    const namespaceSymbolsByName = new Map<string, Map<string, SymbolRecord[]>>();
     const localTestSymbols = importer.role === 'test'
       ? symbolsByFile.get(importer.id) || []
       : [];
@@ -556,6 +744,18 @@ export class IndexManager {
       if (this.isSideEffectImport(imp)) continue;
 
       const importedSymbols = this.resolveImportedSymbolBindings(imp, importedFile, filesByPath, symbolsByFile);
+      const namespaceLocalNames = this.getNamespaceBindingLocalNames(imp, importedFile);
+      for (const namespaceName of namespaceLocalNames) {
+        if (namespaceName) {
+          const byName = namespaceSymbolsByName.get(namespaceName) || new Map<string, SymbolRecord[]>();
+          for (const importedSymbol of importedSymbols) {
+            const current = byName.get(importedSymbol.symbol.name) || [];
+            current.push(importedSymbol.symbol);
+            byName.set(importedSymbol.symbol.name, current);
+          }
+          namespaceSymbolsByName.set(namespaceName, byName);
+        }
+      }
 
       for (const importedSymbol of importedSymbols) {
         const symbol = importedSymbol.symbol;
@@ -581,7 +781,25 @@ export class IndexManager {
       }
     }
 
-    return { edgeCount, symbolsByName };
+    return { edgeCount, symbolsByName, namespaceSymbolsByName };
+  }
+
+  private getNamespaceBindingLocalNames(imp: ImportInfo, importedFile: FileRecord): string[] {
+    const names = new Set<string>();
+    if (imp.isNamespace) {
+      const namespaceName = Object.keys(imp.aliases || {})[0] || imp.names[0] || imp.defaultName;
+      if (namespaceName) names.add(namespaceName);
+    }
+
+    for (const namespace of this.getReexportNamespaces(importedFile.exports)) {
+      for (const [localName, exportedName] of Object.entries(imp.aliases || {})) {
+        if (exportedName === namespace.exportedName) names.add(localName);
+      }
+      if (imp.names.includes(namespace.exportedName)) names.add(namespace.exportedName);
+      if (imp.defaultName === namespace.exportedName) names.add(imp.defaultName);
+    }
+
+    return [...names];
   }
 
   private isSideEffectImport(imp: ImportInfo): boolean {
@@ -765,6 +983,27 @@ export class IndexManager {
     return namespaces;
   }
 
+  private extractReexportSource(exportName: string): string | null {
+    if (exportName.startsWith('reexport:')) return exportName.slice('reexport:'.length);
+    if (exportName.startsWith('reexportAlias:')) {
+      try {
+        const parsed = JSON.parse(exportName.slice('reexportAlias:'.length)) as Partial<ReexportAlias>;
+        return parsed.source || null;
+      } catch {
+        return null;
+      }
+    }
+    if (exportName.startsWith('reexportNamespace:')) {
+      try {
+        const parsed = JSON.parse(exportName.slice('reexportNamespace:'.length)) as Partial<ReexportNamespace>;
+        return parsed.source || null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
   private matchSymbolsByName(symbols: SymbolRecord[], names: string[]): SymbolRecord[] {
     const nameSet = new Set(names);
     return symbols.filter((symbol) => nameSet.has(symbol.name));
@@ -838,6 +1077,135 @@ export class IndexManager {
     }
 
     return edgeCount;
+  }
+
+  private createCallEdgesFromMetadata(
+    file: FileRecord,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    allSymbols: SymbolRecord[],
+    importedSymbols: ImportResolution,
+  ): number {
+    let edgeCount = 0;
+    const localSymbols = symbolsByFile.get(file.id) || [];
+    const callRefs = getCallRefsByFileIds([file.id]);
+    const scopeBindings = getScopeBindingsByFileIds([file.id]);
+    const classMethodIndex = this.buildClassMethodIndex(allSymbols);
+
+    for (const call of callRefs) {
+      const caller = call.caller_symbol_id
+        ? allSymbols.find((symbol) => symbol.id === call.caller_symbol_id) ?? null
+        : call.caller_name
+          ? this.findSymbolByNameAndLine(localSymbols, call.caller_name, call.caller_start_line)
+          : null;
+
+      const resolution = this.resolveCallTarget(
+        call,
+        localSymbols,
+        importedSymbols,
+        scopeBindings,
+        classMethodIndex,
+      );
+      if (!resolution.symbol) {
+        updateCallRefResolution(call.id, 'unresolved');
+        continue;
+      }
+
+      const fromId = caller?.id || file.id;
+      edgeCount += this.upsertGraphEdge(
+        fromId,
+        resolution.symbol.id,
+        'CALLS',
+        resolution.confidence,
+        call.evidence || '',
+      );
+      updateCallRefResolution(call.id, 'resolved');
+    }
+
+    return edgeCount;
+  }
+
+  private resolveCallTarget(
+    call: StoredCallRefRow,
+    localSymbols: SymbolRecord[],
+    importedSymbols: ImportResolution,
+    scopeBindings: StoredScopeBindingRow[],
+    classMethodIndex: Map<string, Map<string, SymbolRecord[]>>,
+  ): { symbol: SymbolRecord | null; confidence: number } {
+    const receiverName = call.receiver_name;
+    const memberName = call.member_name || call.callee_name;
+
+    if (call.is_constructor_call) {
+      const imported = importedSymbols.symbolsByName.get(call.callee_name)?.find((symbol) => symbol.kind === 'class');
+      const local = localSymbols.find((symbol) => symbol.name === call.callee_name && symbol.kind === 'class');
+      return { symbol: imported || local || null, confidence: imported || local ? 0.88 : 0 };
+    }
+
+    if (receiverName === 'this' && call.caller_class_name) {
+      const method = this.findClassMethod(classMethodIndex, call.caller_class_name, memberName, localSymbols[0]?.fileId);
+      return { symbol: method, confidence: method ? 0.96 : 0 };
+    }
+
+    if (receiverName) {
+      const namespaceMethod = importedSymbols.namespaceSymbolsByName.get(receiverName)?.get(memberName)?.[0] ?? null;
+      if (namespaceMethod) return { symbol: namespaceMethod, confidence: 0.93 };
+
+      const binding = scopeBindings
+        .filter((candidate) => candidate.local_name === receiverName)
+        .sort((a, b) => b.start_line - a.start_line)[0];
+      if (binding?.target_name) {
+        const method = this.findClassMethod(classMethodIndex, binding.target_name, memberName);
+        return { symbol: method, confidence: method ? 0.94 : 0 };
+      }
+
+      return { symbol: null, confidence: 0 };
+    }
+
+    const local = localSymbols.find((symbol) => (
+      symbol.name === call.callee_name &&
+      (symbol.kind === 'function' || symbol.kind === 'variable' || symbol.kind === 'constant' || symbol.kind === 'method')
+    ));
+    if (local) return { symbol: local, confidence: 0.9 };
+
+    const imported = importedSymbols.symbolsByName.get(call.callee_name)?.[0] ?? null;
+    return { symbol: imported, confidence: imported ? 0.92 : 0 };
+  }
+
+  private buildClassMethodIndex(symbols: SymbolRecord[]): Map<string, Map<string, SymbolRecord[]>> {
+    const index = new Map<string, Map<string, SymbolRecord[]>>();
+    const classes = symbols.filter((symbol) => symbol.kind === 'class' || symbol.kind === 'interface');
+    const methods = symbols.filter((symbol) => symbol.kind === 'method' || symbol.kind === 'constructor');
+
+    for (const cls of classes) {
+      const classMethods = methods.filter((method) => (
+        method.fileId === cls.fileId &&
+        method.startLine >= cls.startLine &&
+        method.endLine <= cls.endLine
+      ));
+      const byName = index.get(cls.name) || new Map<string, SymbolRecord[]>();
+      for (const method of classMethods) {
+        const list = byName.get(method.name) || [];
+        list.push(method);
+        byName.set(method.name, list);
+      }
+      index.set(cls.name, byName);
+    }
+
+    return index;
+  }
+
+  private findClassMethod(
+    index: Map<string, Map<string, SymbolRecord[]>>,
+    className: string,
+    methodName: string,
+    preferredFileId?: string,
+  ): SymbolRecord | null {
+    const candidates = index.get(className)?.get(methodName) || [];
+    if (candidates.length === 0) return null;
+    if (preferredFileId) {
+      const sameFile = candidates.find((candidate) => candidate.fileId === preferredFileId);
+      if (sameFile) return sameFile;
+    }
+    return candidates[0];
   }
 
   private upsertGraphEdge(

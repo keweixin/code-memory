@@ -9,7 +9,7 @@
  * 4. Symbol name matching (describe/test blocks → function names)
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type { SymbolRecord, SymbolKind } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 

@@ -9,6 +9,7 @@
 import type { FileRecord, ImportInfo } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 import { getDatabaseSync, type SqlJsDatabase } from './database.js';
+import { buildSearchText } from '../shared/search-text.js';
 
 const log = createLogger('file-repo');
 
@@ -30,6 +31,14 @@ function serializeFile(record: Partial<FileRecord>): Record<string, unknown> {
     $imports: JSON.stringify(record.imports ?? []),
     $summary: record.summary ?? null,
     $riskLevel: record.riskLevel,
+    $searchText: buildSearchText([
+      record.path,
+      record.language,
+      record.role,
+      record.summary,
+      ...(record.exports ?? []),
+      ...(record.imports ?? []).map((imp) => imp.source),
+    ]),
   };
 }
 
@@ -61,13 +70,13 @@ export function upsertFile(file: FileRecord): void {
   db.run(
     `INSERT OR REPLACE INTO files
        (id, path, language, role, size, hash, indexed_at, last_commit,
-        is_generated, is_ignored, exports, imports, summary, risk_level)
+        is_generated, is_ignored, exports, imports, summary, risk_level, search_text)
      VALUES ($id, $path, $language, $role, $size, $hash, $indexedAt, $lastCommit,
-             $isGenerated, $isIgnored, $exports, $imports, $summary, $riskLevel)`,
+             $isGenerated, $isIgnored, $exports, $imports, $summary, $riskLevel, $searchText)`,
     [
       p.$id, p.$path, p.$language, p.$role, p.$size, p.$hash,
       p.$indexedAt, p.$lastCommit, p.$isGenerated, p.$isIgnored,
-      p.$exports, p.$imports, p.$summary, p.$riskLevel,
+      p.$exports, p.$imports, p.$summary, p.$riskLevel, p.$searchText,
     ],
   );
 }

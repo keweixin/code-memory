@@ -1,7 +1,7 @@
 /**
  * MCP Tool: search_code
  *
- * Hybrid search across files and symbols using keyword (FTS3),
+ * Hybrid search across files and symbols using keyword (FTS5),
  * optional vector search, and graph expansion.
  * Returns ranked results with snippets and metadata.
  */

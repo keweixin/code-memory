@@ -9,7 +9,7 @@
  * and "how is feature X implemented" (business semantics).
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type { SymbolRecord, EdgeType, SymbolKind } from '../shared/types.js';
 import { GraphEngine } from './graph-engine.js';
 import { createLogger } from '../shared/logger.js';

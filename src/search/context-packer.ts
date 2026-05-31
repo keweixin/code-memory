@@ -12,7 +12,7 @@
  * L5: Full file (on demand only)
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type {
   ContextPack,
   ContextLevel,

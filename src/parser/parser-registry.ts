@@ -5,9 +5,10 @@
  * and Parser instance pooling per language.
  *
  * Grammar .wasm files are resolved from:
- *   1. A `grammars/` directory at the project root
- *   2. A `grammars/` directory in the code-memory package
- *   3. An explicit path passed by the user
+ *   1. CODE_MEMORY_GRAMMARS
+ *   2. CODE_MEMORY_PROJECT_ROOT/grammars
+ *   3. process.cwd()/grammars
+ *   4. The code-memory package grammars directory
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -130,10 +131,15 @@ function resolveWasmPath(config: LanguageConfig): string | null {
     searchPaths.push(join(process.env.CODE_MEMORY_GRAMMARS, config.wasmFile));
   }
 
-  // 2. Project root grammars/ directory (relative to CWD)
+  // 2. Project root grammars/ directory (worker-safe explicit root)
+  if (process.env.CODE_MEMORY_PROJECT_ROOT) {
+    searchPaths.push(join(process.env.CODE_MEMORY_PROJECT_ROOT, "grammars", config.wasmFile));
+  }
+
+  // 3. Project root grammars/ directory (relative to CWD)
   searchPaths.push(join(process.cwd(), "grammars", config.wasmFile));
 
-  // 3. Package-relative grammars/ directory
+  // 4. Package-relative grammars/ directory
   try {
     const pkgDir = dirname(fileURLToPath(import.meta.url));
     searchPaths.push(join(pkgDir, "..", "..", "grammars", config.wasmFile));
@@ -141,7 +147,7 @@ function resolveWasmPath(config: LanguageConfig): string | null {
     // Available in Node.js ESM, skip if not
   }
 
-  // 4. Absolute path from CWD
+  // 5. Absolute path from CWD
   searchPaths.push(pathResolve(config.wasmFile));
 
   for (const path of searchPaths) {
