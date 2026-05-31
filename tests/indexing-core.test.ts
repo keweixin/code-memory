@@ -847,4 +847,47 @@ describe('core indexing pipeline', () => {
     );
     expect(staleDeletedFile).toHaveLength(0);
   });
+
+  it('keeps incremental run stats separate from current index totals', async () => {
+    await indexFixture(tempRoot);
+
+    writeFileSync(
+      join(tempRoot, 'src/services/incremental-service.ts'),
+      [
+        'export function incrementalProbe() {',
+        "  return 'indexed';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const manager = new IndexManager(tempRoot, createConfig(tempRoot));
+    const status = await manager.incrementalIndex();
+
+    const fileCount = Number(queryRows('SELECT COUNT(*) FROM files')[0][0]);
+    const symbolCount = Number(queryRows('SELECT COUNT(*) FROM symbols')[0][0]);
+    const edgeCount = Number(queryRows('SELECT COUNT(*) FROM edges')[0][0]);
+    const chunkCount = Number(queryRows('SELECT COUNT(*) FROM chunks')[0][0]);
+    const metadata = new Map(
+      queryRows('SELECT key, value FROM index_metadata').map(([key, value]) => [
+        String(key),
+        String(value),
+      ]),
+    );
+
+    expect(status.indexedFiles).toBe(fileCount);
+    expect(status.totalSymbols).toBe(symbolCount);
+    expect(status.totalEdges).toBe(edgeCount);
+    expect(status.totalChunks).toBe(chunkCount);
+    expect(Number(metadata.get('indexed_files'))).toBe(fileCount);
+    expect(Number(metadata.get('total_symbols'))).toBe(symbolCount);
+    expect(Number(metadata.get('total_edges'))).toBe(edgeCount);
+    expect(Number(metadata.get('total_chunks'))).toBe(chunkCount);
+    expect(metadata.get('last_index_mode')).toBe('incremental');
+    expect(Number(metadata.get('last_run_indexed_files'))).toBe(1);
+    expect(Number(metadata.get('last_run_symbols'))).toBe(1);
+    expect(Number(metadata.get('last_run_chunks'))).toBe(1);
+    expect(Number(metadata.get('last_run_edges'))).toBe(edgeCount);
+  });
 });

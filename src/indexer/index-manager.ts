@@ -93,7 +93,12 @@ export class IndexManager {
     }
 
     const totalEdges = await this.rebuildGraphEdges(scanResult.files);
-    this.updateFinalMetadata(scanResult, indexedCount, 'full');
+    this.updateFinalMetadata(scanResult, {
+      indexedFiles: indexedCount,
+      symbols: totalSymbols,
+      edges: totalEdges,
+      chunks: totalChunks,
+    }, 'full');
     await saveDatabase();
 
     const elapsed = Date.now() - startTime;
@@ -162,7 +167,12 @@ export class IndexManager {
     }
 
     const totalEdges = await this.rebuildGraphEdges(scanResult.files);
-    this.updateFinalMetadata(scanResult, indexedCount, forceAll ? 'full' : 'incremental');
+    this.updateFinalMetadata(scanResult, {
+      indexedFiles: indexedCount,
+      symbols: totalSymbols,
+      edges: totalEdges,
+      chunks: totalChunks,
+    }, forceAll ? 'full' : 'incremental');
     this.setMetadata('is_indexing', 'false');
     await saveDatabase();
 
@@ -289,11 +299,17 @@ export class IndexManager {
 
   private updateFinalMetadata(
     scanResult: ReturnType<typeof scanProject>,
-    indexedFiles: number,
+    runStats: {
+      indexedFiles: number;
+      symbols: number;
+      edges: number;
+      chunks: number;
+    },
     mode: 'full' | 'incremental',
   ): void {
     const now = new Date().toISOString();
     const totalFiles = scanResult.files.length;
+    const indexedFiles = this.getTableCount('files');
     const totalSymbols = this.getTableCount('symbols');
     const totalEdges = this.getTableCount('edges');
     const totalChunks = this.getTableCount('chunks');
@@ -306,6 +322,11 @@ export class IndexManager {
     this.setMetadata('total_symbols', String(totalSymbols));
     this.setMetadata('total_edges', String(totalEdges));
     this.setMetadata('total_chunks', String(totalChunks));
+    this.setMetadata('last_index_mode', mode);
+    this.setMetadata('last_run_indexed_files', String(runStats.indexedFiles));
+    this.setMetadata('last_run_symbols', String(runStats.symbols));
+    this.setMetadata('last_run_edges', String(runStats.edges));
+    this.setMetadata('last_run_chunks', String(runStats.chunks));
     this.setMetadata('current_commit', scanResult.gitInfo.currentCommit ?? '');
     this.setMetadata('current_branch', scanResult.gitInfo.currentBranch ?? '');
     this.setMetadata('embedding_provider', this.config.embedding.provider);
@@ -864,6 +885,7 @@ export class IndexManager {
     const totalSymbols = parseInt(this.getMetadata('total_symbols') ?? '0', 10);
     const totalEdges = parseInt(this.getMetadata('total_edges') ?? '0', 10);
     const totalChunks = parseInt(this.getMetadata('total_chunks') ?? '0', 10);
+    const totalMemories = this.getTableCount('memories');
 
     return {
       projectPath: this.rootPath,
@@ -872,7 +894,7 @@ export class IndexManager {
       totalSymbols: totalSymbols > 0 ? totalSymbols : recentSymbols,
       totalEdges: totalEdges > 0 ? totalEdges : recentEdges,
       totalChunks: totalChunks > 0 ? totalChunks : recentChunks,
-      totalMemories: 0,
+      totalMemories,
       lastFullIndex: this.getMetadata('last_full_index'),
       lastIncrementalIndex: this.getMetadata('last_incremental_index'),
       currentCommit: this.getMetadata('current_commit'),
