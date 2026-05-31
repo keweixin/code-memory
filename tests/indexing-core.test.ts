@@ -258,6 +258,14 @@ describe('core indexing pipeline', () => {
     await indexFixture(tempRoot);
 
     const db = getDatabaseSync();
+    db.run(
+      `INSERT OR REPLACE INTO index_metadata (key, value) VALUES
+        ('current_commit', 'abc123def456'),
+        ('current_branch', 'feature/context-evidence'),
+        ('index_completed', '2026-05-31T09:00:00.000Z'),
+        ('embedding_provider', 'none')`,
+    );
+
     const search = new HybridSearchEngine(db);
     const packer = new ContextPacker(db);
 
@@ -274,8 +282,18 @@ describe('core indexing pipeline', () => {
     expect(pack.projectCard?.name).toBe('sample-ts-project');
     expect(pack.projectCard?.rootPath).toBe(tempRoot);
     expect(pack.projectCard?.languages).toEqual(['typescript', 'javascript']);
+    expect(pack.projectCard).toMatchObject({
+      currentCommit: 'abc123def456',
+      currentBranch: 'feature/context-evidence',
+      indexCompleted: '2026-05-31T09:00:00.000Z',
+      vectorSearch: 'disabled',
+    });
     expect(pack.codeSnippets.length).toBeGreaterThan(0);
     const formatted = packer.formatAsText(pack);
+    expect(formatted).toContain('Commit: abc123def456');
+    expect(formatted).toContain('Branch: feature/context-evidence');
+    expect(formatted).toContain('Index Completed: 2026-05-31T09:00:00.000Z');
+    expect(formatted).toContain('Vector Search: disabled');
     expect(formatted).toContain('async login(request: LoginRequest)');
     expect(formatted).toMatch(/AuthService\.ts:24:\d+-45:\d+/);
   });

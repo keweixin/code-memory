@@ -181,7 +181,7 @@ export class ContextPacker {
   private getProjectCard(): ProjectCard | null {
     try {
       const metaResults = this.db.exec(
-        "SELECT key, value FROM index_metadata WHERE key IN ('project_name', 'total_files', 'total_symbols', 'languages', 'architecture_style', 'framework', 'root_path')"
+        "SELECT key, value FROM index_metadata WHERE key IN ('project_name', 'total_files', 'total_symbols', 'languages', 'architecture_style', 'framework', 'root_path', 'current_commit', 'current_branch', 'index_completed', 'embedding_provider')"
       );
 
       if (!metaResults.length || !metaResults[0].values.length) return null;
@@ -199,10 +199,18 @@ export class ContextPacker {
         architectureStyle: meta.get('architecture_style') || null,
         framework: meta.get('framework') || null,
         rootPath: meta.get('root_path') || '',
+        currentCommit: meta.get('current_commit') || null,
+        currentBranch: meta.get('current_branch') || null,
+        indexCompleted: meta.get('index_completed') || null,
+        vectorSearch: this.getVectorSearchStatus(meta.get('embedding_provider')),
       };
     } catch {
       return null;
     }
+  }
+
+  private getVectorSearchStatus(embeddingProvider: string | undefined): ProjectCard['vectorSearch'] {
+    return embeddingProvider && embeddingProvider !== 'none' ? 'not_wired' : 'disabled';
   }
 
   /**
@@ -471,6 +479,10 @@ export class ContextPacker {
       `Project: ${card.name}`,
       `Languages: ${card.languages.join(', ')}`,
       `Files: ${card.totalFiles} | Symbols: ${card.totalSymbols}`,
+      card.currentBranch ? `Branch: ${card.currentBranch}` : '',
+      card.currentCommit ? `Commit: ${card.currentCommit}` : '',
+      card.indexCompleted ? `Index Completed: ${card.indexCompleted}` : '',
+      `Vector Search: ${card.vectorSearch}`,
       card.architectureStyle ? `Architecture: ${card.architectureStyle}` : '',
       card.framework ? `Framework: ${card.framework}` : '',
     ].filter(Boolean).join('\n');

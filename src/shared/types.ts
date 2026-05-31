@@ -281,6 +281,10 @@ export interface ProjectCard {
   architectureStyle: string | null;
   framework: string | null;
   rootPath: string;
+  currentCommit: string | null;
+  currentBranch: string | null;
+  indexCompleted: string | null;
+  vectorSearch: 'disabled' | 'not_wired';
 }
 
 export interface ContextFile {
