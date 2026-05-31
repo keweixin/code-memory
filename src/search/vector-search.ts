@@ -133,15 +133,22 @@ export function releaseVectorStoreConnection(): void {
 /**
  * Add vector records to the store.
  */
-export async function addVectors(records: VectorRecord[]): Promise<void> {
-  if (records.length === 0) return;
+export async function addVectors(records: VectorRecord[]): Promise<number> {
+  if (records.length === 0) return 0;
 
   const connection = await ensureVectorConnection();
   await deleteVectors(records.map((record) => record.id));
+  const validRecords = records.filter((record) => assertVectorDimensions(record.vector, dbInstanceDimensions));
+  if (validRecords.length !== records.length) {
+    log.warn(`Skipped ${records.length - validRecords.length} vectors with mismatched dimensions`);
+  }
+  if (validRecords.length === 0) return 0;
+
   const table = await connection.openTable(TABLE_NAME);
   try {
-    await table.add(records);
-    log.info(`Added ${records.length} vectors`);
+    await table.add(validRecords);
+    log.info(`Added ${validRecords.length} vectors`);
+    return validRecords.length;
   } finally {
     table.close();
   }
@@ -157,9 +164,8 @@ export async function deleteVectors(ids: string[]): Promise<void> {
 
   const table = await connection.openTable(TABLE_NAME);
   try {
-    for (const id of ids) {
-      await table.delete(`id = '${escapeSqlString(id)}'`);
-    }
+    const escaped = ids.map((id) => `'${escapeSqlString(id)}'`).join(',');
+    await table.delete(`id IN (${escaped})`);
     log.info(`Deleted ${ids.length} vectors`);
   } finally {
     table.close();
@@ -314,6 +320,10 @@ function escapeSqlString(value: string): string {
 
 function escapeSqlLike(value: string): string {
   return escapeSqlString(value).replace(/[%_]/g, (match) => '\\' + match);
+}
+
+function assertVectorDimensions(vector: number[], expected: number): boolean {
+  return vector.length === expected;
 }
 
 /**

@@ -55,6 +55,10 @@ describe('CLI doctor command', () => {
       status: 'warn',
       message: 'Vector search is disabled because embedding provider is none; hybrid search is keyword + graph only.',
     });
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: 'local-storage-privacy',
+      status: 'ok',
+    }));
   });
 
   it('accepts config files with a UTF-8 BOM', async () => {

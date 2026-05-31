@@ -41,6 +41,16 @@ export interface StoredCallRefRow {
   resolution_status: string;
 }
 
+export interface StoredExportRow {
+  file_id: string;
+  exported_name: string;
+  local_name: string | null;
+  source: string | null;
+  kind: string;
+  start_line: number;
+  start_column: number;
+}
+
 export interface StoredScopeBindingRow {
   id: string;
   file_id: string;
@@ -190,6 +200,10 @@ export function getCallRefsByFileIds(fileIds?: string[]): StoredCallRefRow[] {
   return getRowsByFileIds<StoredCallRefRow>('call_refs', fileIds);
 }
 
+export function getFileExportsByFileIds(fileIds?: string[]): StoredExportRow[] {
+  return getRowsByFileIds<StoredExportRow>('file_exports', fileIds);
+}
+
 export function getScopeBindingsByFileIds(fileIds?: string[]): StoredScopeBindingRow[] {
   return getRowsByFileIds<StoredScopeBindingRow>('scope_bindings', fileIds);
 }
@@ -200,6 +214,19 @@ export function getTypeRelationsByFileIds(fileIds?: string[]): StoredTypeRelatio
 
 export function updateCallRefResolution(id: string, status: 'resolved' | 'unresolved' | 'ambiguous'): void {
   getDatabaseSync().run('UPDATE call_refs SET resolution_status = ? WHERE id = ?', [status, id]);
+}
+
+export function updateCallRefResolutions(updates: Array<{
+  id: string;
+  status: 'resolved' | 'unresolved' | 'ambiguous';
+}>): void {
+  if (updates.length === 0) return;
+  const db = getDatabaseSync();
+  const stmt = db.native.prepare('UPDATE call_refs SET resolution_status = ? WHERE id = ?');
+  const write = db.native.transaction((items: Array<{ id: string; status: 'resolved' | 'unresolved' | 'ambiguous' }>) => {
+    for (const item of items) stmt.run(item.status, item.id);
+  });
+  write(updates);
 }
 
 export function countUnresolvedCalls(): number {

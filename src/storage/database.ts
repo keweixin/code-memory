@@ -173,6 +173,7 @@ export function needsReindex(): boolean {
   if (getSchemaVersion() !== SCHEMA_VERSION) return true;
   return !tableExists(db.native, 'file_imports')
     || !tableExists(db.native, 'call_refs')
+    || !tableExists(db.native, 'graph_edge_evidence')
     || !isFts5Table(db.native, 'symbols_fts')
     || !isFts5Table(db.native, 'files_fts');
 }

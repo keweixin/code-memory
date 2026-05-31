@@ -121,6 +121,10 @@ Use the ledger tools when an agent wants to avoid repeating context in one task/
 - `avoid_repeated_context`: get a keep/drop recommendation.
 - `explain_why_this_context`: explain whether a file, symbol, or chunk is new or repeated.
 
+## Local Storage And Privacy
+
+Code Memory writes `.code-memory/` inside the indexed project. It can contain SQLite metadata, symbol chunks, call evidence, memories, ledger history, and optional vector embeddings. Keep `.code-memory/` out of git. The tool does not upload code unless you configure an embedding provider that sends text to an external API.
+
 ## Grammar Resolution
 
 Parser grammars are resolved in this order:

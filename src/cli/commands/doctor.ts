@@ -11,6 +11,7 @@ import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE } from '../../shared/constants.j
 import { LANGUAGE_CONFIGS } from '../../parser/types.js';
 import { createLogger } from '../../shared/logger.js';
 import { safeJsonParse } from '../../shared/utils.js';
+import { collectInvariants } from '../../storage/invariants.js';
 
 const log = createLogger('doctor');
 
@@ -33,6 +34,7 @@ interface CheckResult {
   name: string;
   status: 'ok' | 'warn' | 'error';
   message: string;
+  count?: number;
 }
 
 interface DoctorConfig {
@@ -74,6 +76,11 @@ async function runDoctor(asJson: boolean): Promise<void> {
     message: typeof Worker !== 'undefined'
       ? 'worker_threads is available for parallel parsing.'
       : 'worker_threads is unavailable in this Node.js runtime.',
+  });
+  checks.push({
+    name: 'local-storage-privacy',
+    status: 'ok',
+    message: '.code-memory stores local snippets, metadata, call evidence, memories, ledger history, and optional vectors. Keep it out of git and backups that should not contain code snippets.',
   });
 
   let parsedConfig: DoctorConfig | null = null;
@@ -157,6 +164,16 @@ async function runDoctor(asJson: boolean): Promise<void> {
           ? `Index schema v${health.schemaVersion || 'unknown'} needs "code-memory index --full".`
           : `Index schema v${health.schemaVersion} is current.`,
       });
+      try {
+        const { getDatabaseSync } = await import('../../storage/database.js');
+        checks.push(...collectInvariants(getDatabaseSync()));
+      } catch (err) {
+        checks.push({
+          name: 'index-invariants',
+          status: 'warn',
+          message: 'Could not inspect index invariants: ' + (err instanceof Error ? err.message : String(err)),
+        });
+      }
     } catch (err) {
       checks.push({
         name: 'sqlite-open',

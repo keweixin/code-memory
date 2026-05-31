@@ -1,12 +1,12 @@
 /**
  * Code Memory Graph — Database Schema
  *
- * Schema v3 uses native SQLite + WAL + FTS5. v0.1 does not migrate
+ * Schema v4 uses native SQLite + WAL + FTS5. v0.1 does not migrate
  * legacy index contents; users should run `code-memory index --full`
  * after upgrading from schema v1/v2.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const CORE_TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS files (
@@ -55,6 +55,19 @@ export const CORE_TABLES: string[] = [
     type            TEXT NOT NULL,
     confidence      REAL NOT NULL DEFAULT 1.0,
     evidence        TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS graph_edge_evidence (
+    id              TEXT PRIMARY KEY,
+    edge_id         TEXT NOT NULL,
+    source_table    TEXT,
+    source_id       TEXT,
+    file_id         TEXT,
+    start_line      INTEGER NOT NULL DEFAULT 0,
+    start_column    INTEGER NOT NULL DEFAULT 0,
+    evidence        TEXT,
+    created_at      TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (edge_id) REFERENCES edges(id) ON DELETE CASCADE
   )`,
 
   `CREATE TABLE IF NOT EXISTS chunks (
@@ -263,6 +276,11 @@ export const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_edges_to_type ON edges(to_id, type)`,
   `CREATE INDEX IF NOT EXISTS idx_edges_from_to ON edges(from_id, to_id)`,
   `CREATE INDEX IF NOT EXISTS idx_edges_confidence ON edges(type, confidence)`,
+
+  `CREATE INDEX IF NOT EXISTS idx_graph_edge_evidence_edge ON graph_edge_evidence(edge_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_edge_evidence_source ON graph_edge_evidence(source_table, source_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_edge_evidence_file ON graph_edge_evidence(file_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_edge_evidence_location ON graph_edge_evidence(file_id, start_line, start_column)`,
 
   `CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id)`,
   `CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash)`,

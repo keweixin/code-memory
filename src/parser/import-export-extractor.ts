@@ -216,10 +216,9 @@ export function extractExports(
       ex.add('default');
     }
 
-    // Check if it's a re-export (export { x } from '...' or export * from '...')
-    const strings = extractStringChildren(node);
-    if (strings.length > 0) {
-      const source = stripQuotes(strings[0]);
+    // Check only top-level export sources, not strings inside exported declarations.
+    const source = extractReexportSource(node);
+    if (source) {
       ex.add('reexport:' + source);
       for (const namespace of extractNamespaceReexports(node.text)) {
         ex.add('reexportNamespace:' + JSON.stringify({ source, ...namespace }));
@@ -240,6 +239,20 @@ export function extractExports(
 function extractNamespaceReexports(exportText: string): Array<{ exportedName: string }> {
   const match = exportText.match(/export\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+/);
   return match ? [{ exportedName: match[1] }] : [];
+}
+
+function extractReexportSource(node: Node): string | null {
+  let foundFromKeyword = false;
+  for (const child of node.children) {
+    if (child.type === 'from') {
+      foundFromKeyword = true;
+      continue;
+    }
+    if (foundFromKeyword && child.type === 'string') {
+      return stripQuotes(child.text);
+    }
+  }
+  return null;
 }
 
 function extractExportAliases(exportText: string): Array<{ importedName: string; exportedName: string }> {

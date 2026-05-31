@@ -224,6 +224,30 @@ describe('core indexing pipeline', () => {
     expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
   });
 
+  it('does not treat string literals inside exported declarations as re-export sources', async () => {
+    mkdirSync(join(tempRoot, 'src', 'risk'), { recursive: true });
+    writeFileSync(
+      join(tempRoot, 'src', 'risk', 'literal-export.ts'),
+      [
+        'export function issueTokens(): string {',
+        "  return 'token';",
+        '}',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const reexportNoise = queryRows(
+      `SELECT fe.exported_name, fe.source, fe.kind
+       FROM file_exports fe
+       JOIN files f ON f.id = fe.file_id
+       WHERE f.path = 'src/risk/literal-export.ts'
+         AND fe.kind LIKE 'reexport%'`,
+    );
+    expect(reexportNoise).toHaveLength(0);
+  });
+
   it('links project configs into symbol-level impact analysis', async () => {
     await indexFixture(tempRoot);
 
