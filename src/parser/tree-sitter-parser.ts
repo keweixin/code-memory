@@ -9,13 +9,14 @@
 
 import { Parser } from 'web-tree-sitter';
 import type { Node, Language as TSLang } from 'web-tree-sitter';
-import type { ParseResult, ParseError, SymbolRecord, EdgeRecord, ImportInfo } from '../shared/types.js';
+import type { ParseResult, ParseError, SymbolRecord, ImportInfo, ChunkRecord } from '../shared/types.js';
 import { ParserLanguage, EXTENSION_TO_PARSER_LANGUAGE } from './types.js';
 import { getParser, getTreeSitterLanguage, loadLanguage } from './parser-registry.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { extractImports, extractExports } from './import-export-extractor.js';
-import { extractCalls } from './call-extractor.js';
+import { extractCallReferences } from './call-extractor.js';
 import { generateId, contentHash } from '../shared/utils.js';
+import { estimateTokens } from '../shared/token-counter.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('tree-sitter-parser');
@@ -68,14 +69,11 @@ export async function parseFile(
   try { exports = extractExports(rootNode, sourceCode, parserLang, tsLang); }
   catch (err) { log.error('Export extraction failed', err); }
 
-  const knownSymbols = new Map<string, string>();
-  for (const sym of symbols) {
-    if (!knownSymbols.has(sym.name)) knownSymbols.set(sym.name, sym.id);
-  }
-
-  let edges: EdgeRecord[] = [];
-  try { edges = extractCalls(rootNode, sourceCode, fileId, parserLang, tsLang, knownSymbols); }
+  let calls: ParseResult['calls'] = [];
+  try { calls = extractCallReferences(rootNode, sourceCode, parserLang, tsLang); }
   catch (err) { log.error('Call extraction failed', err); }
+
+  const chunks = createSymbolChunks(fileId, symbols);
 
   try { tree.delete(); } catch {}
 
@@ -84,12 +82,12 @@ export async function parseFile(
   log.debug(
     'Parsed ' + filePath + ': ' + symbols.length + ' symbols, ' +
     imports.length + ' imports, ' + exports.length + ' exports, ' +
-    edges.length + ' call edges'
+    calls.length + ' call refs'
   );
 
   return {
-    fileId, filePath, language, symbols, imports, exports, edges,
-    chunks: [], errors,
+    fileId, filePath, language, symbols, imports, exports, edges: [],
+    calls, chunks, errors,
   };
 }
 
@@ -110,8 +108,27 @@ function createEmptyResult(
   }
   return {
     fileId, filePath, language: 'unknown',
-    symbols: [], imports: [], exports: [], edges: [], chunks: [], errors,
+    symbols: [], imports: [], exports: [], edges: [], calls: [], chunks: [], errors,
   };
+}
+
+function createSymbolChunks(fileId: string, symbols: SymbolRecord[]): ChunkRecord[] {
+  return symbols
+    .filter((symbol) => symbol.signature && symbol.signature.trim().length > 0)
+    .map((symbol) => {
+      const content = symbol.signature || '';
+      const hash = contentHash(content);
+      return {
+        id: generateId('chunk', symbol.id, hash),
+        fileId,
+        symbolId: symbol.id,
+        contentHash: hash,
+        content,
+        tokenCount: estimateTokens(content),
+        summary: null,
+        embeddingId: null,
+      };
+    });
 }
 
 function parserLangToLanguage(lang: ParserLanguage): ParseResult['language'] {

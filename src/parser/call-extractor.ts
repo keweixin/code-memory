@@ -7,9 +7,8 @@
 
 import { Query } from 'web-tree-sitter';
 import type { Node, QueryMatch, Language as TSLang } from 'web-tree-sitter';
-import type { EdgeRecord } from '../shared/types.js';
+import type { CallReference } from '../shared/types.js';
 import { ParserLanguage } from './types.js';
-import { generateId } from '../shared/utils.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('call-extractor');
@@ -52,7 +51,7 @@ function getCallQuery(lang: ParserLanguage): string | null {
  * Finds the enclosing function/method name for a given node by walking up
  * the AST. Returns null if the call is at the top level.
  */
-function findEnclosingFunction(node: Node, rootNode: Node): string | null {
+function findEnclosingSymbol(node: Node, rootNode: Node): { name: string; startLine: number } | null {
   try {
     let current: Node | null = node;
     while (current) {
@@ -69,13 +68,16 @@ function findEnclosingFunction(node: Node, rootNode: Node): string | null {
           const nameNode = current.childForFieldName('name');
           if (nameNode) {
             const name = nameNode.text.trim();
-            if (name) return name;
+            if (name) return { name, startLine: current.startPosition.row + 1 };
           }
         } catch {
           // No name field
         }
-        // For anonymous functions, use a synthetic name based on position
-        return 'anonymous_' + current.startIndex;
+
+        const variableOwner = findVariableOwner(current);
+        if (variableOwner) return variableOwner;
+
+        return { name: 'anonymous_' + current.startIndex, startLine: current.startPosition.row + 1 };
       }
       current = current.parent;
       // Prevent walking beyond the tree root
@@ -86,6 +88,28 @@ function findEnclosingFunction(node: Node, rootNode: Node): string | null {
     }
   } catch {
     // Ignore traversal errors
+  }
+  return null;
+}
+
+function findVariableOwner(node: Node): { name: string; startLine: number } | null {
+  let current: Node | null = node.parent;
+  while (current) {
+    if (current.type === 'variable_declarator') {
+      const nameNode = current.childForFieldName('name');
+      if (nameNode) {
+        let declaration = current.parent;
+        while (declaration && !declaration.type.endsWith('declaration')) {
+          declaration = declaration.parent;
+        }
+        return {
+          name: nameNode.text.trim(),
+          startLine: (declaration || current).startPosition.row + 1,
+        };
+      }
+    }
+    if (current.type.endsWith('declaration') || current.type === 'statement_block') break;
+    current = current.parent;
   }
   return null;
 }
@@ -136,34 +160,20 @@ function extractCalleeName(callNode: Node, lang: ParserLanguage): string | null 
 }
 
 /**
- * Resolve a callee name within the same file, matching against known symbols.
- * Returns the symbol ID if found, null otherwise.
- */
-function resolveCallee(
-  calleeName: string,
-  symbolNames: Map<string, string>,
-): string | null {
-  return symbolNames.get(calleeName) ?? null;
-}
-
-/**
- * Extract call edges from a parsed AST.
+ * Extract unresolved call references from a parsed AST.
  *
  * @param rootNode  The root syntax node
  * @param sourceCode  The original source code
  * @param fileId  The database ID of this file
  * @param lang  The parser language
  * @param tsLang  The tree-sitter Language object
- * @param knownSymbols  Map of symbol name -> symbol ID in this file (for resolution)
  */
-export function extractCalls(
+export function extractCallReferences(
   rootNode: Node,
   sourceCode: string,
-  fileId: string,
   lang: ParserLanguage,
   tsLang: TSLang,
-  knownSymbols: Map<string, string>,
-): EdgeRecord[] {
+): CallReference[] {
   const qs = getCallQuery(lang);
   if (!qs) return [];
 
@@ -175,7 +185,7 @@ export function extractCalls(
   try { ms = q.matches(rootNode); }
   catch (e) { log.error('Call query match failed', e); return []; }
 
-  const edges: EdgeRecord[] = [];
+  const calls: CallReference[] = [];
   const seen = new Set<string>();
 
   for (const m of ms) {
@@ -188,37 +198,25 @@ export function extractCalls(
     const calleeName = extractCalleeName(callNode, lang);
     if (!calleeName || calleeName === 'undefined') continue;
 
-    // Find enclosing function (the caller)
-    const callerName = findEnclosingFunction(callNode, rootNode);
-
-    let callerId: string;
-    if (callerName) {
-      callerId = generateId(fileId, callerName);
-    } else {
-      callerId = fileId;
-    }
-
-    // Try to resolve the callee to a known symbol in this file
-    const calleeId = resolveCallee(calleeName, knownSymbols);
-    if (!calleeId) continue;
+    const caller = findEnclosingSymbol(callNode, rootNode);
 
     // Deduplicate
-    const edgeKey = callerId + '::' + calleeId + '::CALLS';
+    const edgeKey = (caller?.name || '<file>') + '::' + callNode.startIndex + '::' + calleeName;
     if (seen.has(edgeKey)) continue;
     seen.add(edgeKey);
 
     const callText = sourceCode.slice(callNode.startIndex, callNode.endIndex);
 
-    edges.push({
-      id: generateId('edge', callerId, calleeId, 'CALLS'),
-      fromId: callerId,
-      toId: calleeId,
-      type: 'CALLS',
-      confidence: 0.9,
+    calls.push({
+      callerName: caller?.name || null,
+      callerStartLine: caller?.startLine || null,
+      calleeName,
+      rangeStart: callNode.startPosition.row + 1,
+      rangeEnd: callNode.endPosition.row + 1,
       evidence: callText.slice(0, 200),
     });
   }
 
-  log.debug('Extracted ' + edges.length + ' call edges from ' + fileId);
-  return edges;
+  log.debug('Extracted ' + calls.length + ' call references');
+  return calls;
 }

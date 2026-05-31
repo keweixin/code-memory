@@ -10,8 +10,9 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import * as posixPath from 'node:path/posix';
 import type { Database as SqlJsDatabase } from 'sql.js';
-import type { CodeMemoryConfig, IndexStatus, FileRecord, SymbolRecord, EdgeRecord, ChunkRecord, ParseResult } from '../shared/types.js';
+import type { CodeMemoryConfig, IndexStatus, FileRecord, SymbolRecord, EdgeRecord, ChunkRecord, ParseResult, ImportInfo, EdgeType } from '../shared/types.js';
 import type { DiscoveredFile } from '../scanner/file-discovery.js';
 import { initTreeSitter } from '../parser/parser-registry.js';
 import { parseFile, resolveParserLanguage } from '../parser/tree-sitter-parser.js';
@@ -51,7 +52,7 @@ export class IndexManager {
     const files = scanResult.files;
     log.info('Discovered ' + files.length + ' files to index');
 
-    let indexedCount = 0, totalSymbols = 0, totalEdges = 0, totalChunks = 0, skipped = 0;
+    let indexedCount = 0, totalSymbols = 0, totalChunks = 0, skipped = 0;
 
     for (let i = 0; i < files.length; i++) {
       const discovered = files[i];
@@ -60,7 +61,7 @@ export class IndexManager {
         if (!result) { skipped++; continue; }
         this.storeParseResult(result, discovered);
         indexedCount++; totalSymbols += result.symbols.length;
-        totalEdges += result.edges.length; totalChunks += result.chunks.length;
+        totalChunks += result.chunks.length;
 
         if (indexedCount % 50 === 0) {
           log.info('Progress: ' + indexedCount + '/' + files.length +
@@ -72,7 +73,8 @@ export class IndexManager {
       }
     }
 
-    this.updateFinalMetadata(scanResult, files.length, indexedCount, totalSymbols, totalEdges);
+    const totalEdges = await this.rebuildGraphEdges(scanResult.files);
+    this.updateFinalMetadata(scanResult, indexedCount, 'full');
     await saveDatabase();
 
     const elapsed = Date.now() - startTime;
@@ -101,7 +103,7 @@ export class IndexManager {
       prevFileMap.set(normalizePath(pf.path), pf);
     }
 
-    let indexedCount = 0, totalSymbols = 0, totalEdges = 0, totalChunks = 0;
+    let indexedCount = 0, totalSymbols = 0, totalChunks = 0;
 
     // Check existing files for changes
     for (const [relPath, prevFile] of prevFileMap) {
@@ -123,7 +125,7 @@ export class IndexManager {
           this.removeFileFromIndex(prevFile.id);
           this.storeParseResult(result, currentFile);
           indexedCount++; totalSymbols += result.symbols.length;
-          totalEdges += result.edges.length; totalChunks += result.chunks.length;
+          totalChunks += result.chunks.length;
         }
       }
     }
@@ -135,16 +137,14 @@ export class IndexManager {
         if (result) {
           this.storeParseResult(result, currentFile);
           indexedCount++; totalSymbols += result.symbols.length;
-          totalEdges += result.edges.length; totalChunks += result.chunks.length;
+          totalChunks += result.chunks.length;
         }
       }
     }
 
-    this.updateFinalMetadata(scanResult, scanResult.files.length, 0, 0, 0);
+    const totalEdges = await this.rebuildGraphEdges(scanResult.files);
+    this.updateFinalMetadata(scanResult, indexedCount, forceAll ? 'full' : 'incremental');
     this.setMetadata('is_indexing', 'false');
-    if (forceAll) {
-      this.setMetadata('last_full_index', new Date().toISOString());
-    }
     await saveDatabase();
 
     log.info('Incremental index done: ' + indexedCount + ' files updated');
@@ -209,7 +209,6 @@ export class IndexManager {
     upsertFile(fileRecord);
 
     for (const sym of result.symbols) { upsertSymbol(sym); }
-    for (const edge of result.edges) { try { upsertEdge(edge); } catch {} }
     for (const chunk of result.chunks) { upsertChunk(chunk); }
   }
 
@@ -226,18 +225,23 @@ export class IndexManager {
 
   private updateFinalMetadata(
     scanResult: ReturnType<typeof scanProject>,
-    totalFiles: number,
     indexedFiles: number,
-    totalSymbols: number,
-    totalEdges: number,
+    mode: 'full' | 'incremental',
   ): void {
     const now = new Date().toISOString();
-    this.setMetadata('last_full_index', now);
-    this.setMetadata('last_incremental_index', now);
+    const totalFiles = scanResult.files.length;
+    const totalSymbols = this.getTableCount('symbols');
+    const totalEdges = this.getTableCount('edges');
+    const totalChunks = this.getTableCount('chunks');
+    this.setMetadata('project_name', this.config.projectName);
+    this.setMetadata('root_path', this.rootPath);
+    this.setMetadata('languages', this.config.languages.join(','));
+    this.setMetadata(mode === 'full' ? 'last_full_index' : 'last_incremental_index', now);
     this.setMetadata('total_files', String(totalFiles));
     this.setMetadata('indexed_files', String(indexedFiles));
     this.setMetadata('total_symbols', String(totalSymbols));
     this.setMetadata('total_edges', String(totalEdges));
+    this.setMetadata('total_chunks', String(totalChunks));
     this.setMetadata('current_commit', scanResult.gitInfo.currentCommit ?? '');
     this.setMetadata('current_branch', scanResult.gitInfo.currentBranch ?? '');
     this.setMetadata('embedding_provider', this.config.embedding.provider);
@@ -270,6 +274,228 @@ export class IndexManager {
       return value;
     } catch {
       return null;
+    }
+  }
+
+  private getTableCount(table: 'files' | 'symbols' | 'edges' | 'chunks' | 'memories'): number {
+    try {
+      const db = getDatabaseSync();
+      const result = db.exec(`SELECT COUNT(*) FROM ${table}`);
+      return result.length > 0 ? Number(result[0].values[0][0]) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async rebuildGraphEdges(files: DiscoveredFile[]): Promise<number> {
+    const db = getDatabaseSync();
+    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES')");
+
+    const indexedFiles = this.safeGetAllFiles();
+    const filesByPath = new Map<string, FileRecord>();
+    for (const file of indexedFiles) {
+      filesByPath.set(normalizePath(file.path), file);
+    }
+
+    const symbols = this.getAllIndexedSymbols();
+    const symbolsByFile = new Map<string, SymbolRecord[]>();
+    for (const symbol of symbols) {
+      const list = symbolsByFile.get(symbol.fileId) || [];
+      list.push(symbol);
+      symbolsByFile.set(symbol.fileId, list);
+    }
+
+    let edgeCount = 0;
+    for (const discovered of files) {
+      const fileRecord = filesByPath.get(normalizePath(discovered.relativePath));
+      if (!fileRecord) continue;
+
+      const parsed = await this.indexFile(discovered);
+      if (!parsed) continue;
+
+      const importedSymbols = this.createImportEdges(fileRecord, parsed.imports, filesByPath, symbolsByFile);
+      edgeCount += importedSymbols.edgeCount;
+      edgeCount += this.createCallEdges(fileRecord, parsed, symbolsByFile, importedSymbols.symbolsByName);
+    }
+
+    const totalEdges = this.getTableCount('edges');
+    log.info('Rebuilt graph edges: ' + totalEdges);
+    return totalEdges;
+  }
+
+  private createImportEdges(
+    importer: FileRecord,
+    imports: ImportInfo[],
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+  ): { edgeCount: number; symbolsByName: Map<string, SymbolRecord[]> } {
+    let edgeCount = 0;
+    const symbolsByName = new Map<string, SymbolRecord[]>();
+
+    for (const imp of imports) {
+      const importedFile = this.resolveImportTarget(importer, imp.source, filesByPath);
+      if (!importedFile) continue;
+
+      edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'IMPORTS', 0.95, imp.source);
+
+      const targetSymbols = symbolsByFile.get(importedFile.id) || [];
+      const importedNames = imp.names.length > 0
+        ? imp.names
+        : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+
+      for (const importedName of importedNames) {
+        const matches = targetSymbols.filter((symbol) => symbol.name === importedName);
+        for (const symbol of matches) {
+          const current = symbolsByName.get(importedName) || [];
+          current.push(symbol);
+          symbolsByName.set(importedName, current);
+          edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
+        }
+      }
+    }
+
+    return { edgeCount, symbolsByName };
+  }
+
+  private createCallEdges(
+    file: FileRecord,
+    parsed: ParseResult,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    importedSymbolsByName: Map<string, SymbolRecord[]>,
+  ): number {
+    let edgeCount = 0;
+    const localSymbols = symbolsByFile.get(file.id) || [];
+
+    for (const call of parsed.calls) {
+      const caller = call.callerName
+        ? this.findSymbolByNameAndLine(localSymbols, call.callerName, call.callerStartLine)
+        : null;
+      const callee = this.findCallableSymbol(localSymbols, importedSymbolsByName, call.calleeName);
+      if (!callee) continue;
+
+      const fromId = caller?.id || file.id;
+      edgeCount += this.upsertGraphEdge(fromId, callee.id, 'CALLS', caller ? 0.92 : 0.72, call.evidence);
+    }
+
+    return edgeCount;
+  }
+
+  private upsertGraphEdge(
+    fromId: string,
+    toId: string,
+    type: EdgeType,
+    confidence: number,
+    evidence: string,
+  ): number {
+    try {
+      upsertEdge({
+        id: generateId('edge', fromId, toId, type),
+        fromId,
+        toId,
+        type,
+        confidence,
+        evidence,
+      });
+      return 1;
+    } catch {
+      return 0;
+    }
+  }
+
+  private findSymbolByNameAndLine(
+    symbols: SymbolRecord[],
+    name: string,
+    line: number | null,
+  ): SymbolRecord | null {
+    const candidates = symbols.filter((symbol) => symbol.name === name);
+    if (candidates.length === 0) return null;
+    if (line !== null) {
+      const exact = candidates.find((symbol) => symbol.rangeStart === line);
+      if (exact) return exact;
+      const containing = candidates.find((symbol) => symbol.rangeStart <= line && symbol.rangeEnd >= line);
+      if (containing) return containing;
+    }
+    return candidates[0];
+  }
+
+  private findCallableSymbol(
+    localSymbols: SymbolRecord[],
+    importedSymbolsByName: Map<string, SymbolRecord[]>,
+    calleeName: string,
+  ): SymbolRecord | null {
+    const local = localSymbols.find((symbol) => symbol.name === calleeName);
+    if (local) return local;
+
+    const imported = importedSymbolsByName.get(calleeName);
+    if (imported && imported.length > 0) return imported[0];
+
+    return null;
+  }
+
+  private resolveImportTarget(
+    importer: FileRecord,
+    source: string,
+    filesByPath: Map<string, FileRecord>,
+  ): FileRecord | null {
+    if (!source.startsWith('.')) return null;
+
+    const importerDir = posixPath.dirname(normalizePath(importer.path));
+    const rawPath = normalizePath(posixPath.normalize(posixPath.join(importerDir, source)));
+    const candidates = this.getImportCandidates(rawPath, importer.language === 'typescript');
+
+    for (const candidate of candidates) {
+      const file = filesByPath.get(candidate);
+      if (file) return file;
+    }
+
+    return null;
+  }
+
+  private getImportCandidates(rawPath: string, preferTypeScript: boolean): string[] {
+    const candidates: string[] = [];
+    const add = (candidate: string) => {
+      const normalized = normalizePath(candidate);
+      if (!candidates.includes(normalized)) candidates.push(normalized);
+    };
+
+    const ext = posixPath.extname(rawPath);
+    if (ext) {
+      const withoutExt = rawPath.slice(0, -ext.length);
+      if (preferTypeScript && ['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
+        add(withoutExt + '.ts');
+        add(withoutExt + '.tsx');
+      }
+      add(rawPath);
+      return candidates;
+    }
+
+    const extensions = preferTypeScript
+      ? ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
+      : ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'];
+    for (const candidateExt of extensions) add(rawPath + candidateExt);
+    for (const candidateExt of extensions) add(posixPath.join(rawPath, 'index' + candidateExt));
+    return candidates;
+  }
+
+  private getAllIndexedSymbols(): SymbolRecord[] {
+    try {
+      const db = getDatabaseSync();
+      const rows = db.exec('SELECT id, file_id, name, kind, range_start, range_end, signature, summary, hash, access_level FROM symbols');
+      if (rows.length === 0) return [];
+      return rows[0].values.map((row) => ({
+        id: String(row[0]),
+        fileId: String(row[1]),
+        name: String(row[2]),
+        kind: String(row[3]) as SymbolRecord['kind'],
+        rangeStart: Number(row[4]),
+        rangeEnd: Number(row[5]),
+        signature: row[6] ? String(row[6]) : null,
+        summary: row[7] ? String(row[7]) : null,
+        hash: String(row[8]),
+        accessLevel: row[9] ? String(row[9]) as SymbolRecord['accessLevel'] : null,
+      }));
+    } catch {
+      return [];
     }
   }
 

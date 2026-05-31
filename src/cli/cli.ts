@@ -11,6 +11,7 @@ import { registerIndexCommand } from './commands/index.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerQueryCommand } from './commands/query.js';
 import { registerStatusCommand } from './commands/status.js';
+import { registerDoctorCommand } from './commands/doctor.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -25,6 +26,7 @@ export function createCli(): Command {
   registerServeCommand(program);
   registerQueryCommand(program);
   registerStatusCommand(program);
+  registerDoctorCommand(program);
 
   return program;
 }

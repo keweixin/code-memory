@@ -34,11 +34,15 @@ export function registerSearchCodeTool(server: McpServer, db: SqlJsDatabase): vo
         const results = await searchEngine.searchCode(query, {
           limit: Math.min(limit, 50),
           fileFilter: fileFilter || undefined,
+          searchMode,
         });
 
         if (results.length === 0) {
+          const modeHint = searchMode === 'graph'
+            ? "\n\nGraph mode only expands from indexed symbols that match the query. Try 'hybrid' or 'keyword' mode first if there is no obvious seed symbol."
+            : "";
           return {
-            content: [{ type: "text" as const, text: `No results found for "${query}".\n\nTry broadening your query, or ensure the codebase has been indexed with 'code-memory index'.` }],
+            content: [{ type: "text" as const, text: `No results found for "${query}".\n\nTry broadening your query, or ensure the codebase has been indexed with 'code-memory index'.${modeHint}` }],
           };
         }
 

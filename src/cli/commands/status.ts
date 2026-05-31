@@ -59,11 +59,13 @@ async function showStatus(options: StatusOptions): Promise<void> {
     const files = db.exec('SELECT COUNT(*) FROM files');
     const symbols = db.exec('SELECT COUNT(*) FROM symbols');
     const edges = db.exec('SELECT COUNT(*) FROM edges');
+    const chunks = db.exec('SELECT COUNT(*) FROM chunks');
     const memories = db.exec('SELECT COUNT(*) FROM memories');
 
     const fileCount = files.length > 0 ? Number(files[0].values[0][0]) : 0;
     const symCount = symbols.length > 0 ? Number(symbols[0].values[0][0]) : 0;
     const edgeCount = edges.length > 0 ? Number(edges[0].values[0][0]) : 0;
+    const chunkCount = chunks.length > 0 ? Number(chunks[0].values[0][0]) : 0;
     const memCount = memories.length > 0 ? Number(memories[0].values[0][0]) : 0;
 
     if (options.json) {
@@ -74,6 +76,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
         files: fileCount,
         symbols: symCount,
         edges: edgeCount,
+        chunks: chunkCount,
         memories: memCount,
         lastIndex: meta.get('last_full_index') || meta.get('last_incremental_index') || null,
       }, null, 2));
@@ -88,6 +91,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log(`Files:       ${fileCount}`);
       console.log(`Symbols:     ${symCount}`);
       console.log(`Edges:       ${edgeCount}`);
+      console.log(`Chunks:      ${chunkCount}`);
       console.log(`Memories:    ${memCount}`);
     }
   } catch (err) {
