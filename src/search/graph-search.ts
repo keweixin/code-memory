@@ -5,7 +5,7 @@
  * Used for: neighbor expansion, path finding, reachability.
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type { EdgeType, EdgeRecord } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 
@@ -35,59 +35,70 @@ export function bfsExpand(
   options: GraphSearchOptions,
 ): GraphSearchResult[] {
   const { startNodeIds, direction, edgeTypes, maxHops, maxNodes = 1000 } = options;
+  if (startNodeIds.length === 0 || maxHops <= 0 || maxNodes <= 0) return [];
 
-  const visited = new Map<string, GraphSearchResult>();
-  const queue: Array<{ id: string; distance: number; path: string[]; edgeTypes: EdgeType[] }> = [];
+  try {
+    const seedSelect = startNodeIds.map(() => 'SELECT ? AS node_id').join(' UNION ALL ');
+    const params: Array<string | number> = [...startNodeIds];
+    const edgeFilter = edgeTypes && edgeTypes.length > 0
+      ? `AND e.type IN (${edgeTypes.map(() => '?').join(',')})`
+      : '';
 
-  // Initialize queue with start nodes
-  const initialQueue: typeof queue = [];
-  for (const id of startNodeIds) {
-    initialQueue.push({ id, distance: 0, path: [id], edgeTypes: [] });
-    visited.set(id, { nodeId: id, distance: 0, path: [id], edgeTypes: [] });
-  }
+    const outgoing = direction === 'outgoing' || direction === 'both'
+      ? `SELECT e.to_id,
+                w.distance + 1,
+                w.path || e.to_id || '>',
+                CASE WHEN w.edge_types = '' THEN e.type ELSE w.edge_types || ',' || e.type END
+         FROM walk w JOIN edges e ON e.from_id = w.node_id
+         WHERE w.distance < ? ${edgeFilter}
+           AND instr(w.path, '>' || e.to_id || '>') = 0`
+      : '';
+    const incoming = direction === 'incoming' || direction === 'both'
+      ? `SELECT e.from_id,
+                w.distance + 1,
+                w.path || e.from_id || '>',
+                CASE WHEN w.edge_types = '' THEN e.type ELSE w.edge_types || ',' || e.type END
+         FROM walk w JOIN edges e ON e.to_id = w.node_id
+         WHERE w.distance < ? ${edgeFilter}
+           AND instr(w.path, '>' || e.from_id || '>') = 0`
+      : '';
+    const recursiveBranches = [outgoing, incoming].filter(Boolean).join(' UNION ALL ');
+    if (!recursiveBranches) return [];
 
-  let currentQueue = initialQueue;
-
-  for (let hop = 0; hop < maxHops; hop++) {
-    const nextQueue: typeof queue = [];
-
-    for (const current of currentQueue) {
-      if (visited.size >= maxNodes) break;
-
-      const neighbors = getNeighbors(db, current.id, direction, edgeTypes);
-
-      for (const neighbor of neighbors) {
-        if (visited.has(neighbor.id)) continue;
-        if (visited.size >= maxNodes) break;
-
-        const newPath = [...current.path, neighbor.id];
-        const newEdgeTypes = [...current.edgeTypes, neighbor.edgeType];
-
-        const result: GraphSearchResult = {
-          nodeId: neighbor.id,
-          distance: hop + 1,
-          path: newPath,
-          edgeTypes: newEdgeTypes,
-        };
-
-        visited.set(neighbor.id, result);
-        nextQueue.push({
-          id: neighbor.id,
-          distance: hop + 1,
-          path: newPath,
-          edgeTypes: newEdgeTypes,
-        });
-      }
+    const branchParams: Array<string | number> = [];
+    for (let i = 0; i < (direction === 'both' ? 2 : 1); i++) {
+      branchParams.push(maxHops);
+      if (edgeTypes) branchParams.push(...edgeTypes);
     }
+    params.push(...branchParams);
+    params.push(...startNodeIds, maxNodes);
 
-    currentQueue = nextQueue;
-    if (currentQueue.length === 0) break;
+    const sql = `WITH RECURSIVE
+      seeds(node_id) AS (${seedSelect}),
+      walk(node_id, distance, path, edge_types) AS (
+        SELECT node_id, 0, '>' || node_id || '>', ''
+        FROM seeds
+        UNION ALL
+        ${recursiveBranches}
+      )
+      SELECT node_id, MIN(distance) AS distance, MIN(path) AS path, MIN(edge_types) AS edge_types
+      FROM walk
+      WHERE distance > 0 AND node_id NOT IN (${startNodeIds.map(() => '?').join(',')})
+      GROUP BY node_id
+      ORDER BY distance ASC, node_id ASC
+      LIMIT ?`;
+
+    const rows = db.exec(sql, params)[0]?.values ?? [];
+    return rows.map((row) => ({
+      nodeId: String(row[0]),
+      distance: Number(row[1]),
+      path: String(row[2]).split('>').filter(Boolean),
+      edgeTypes: String(row[3] || '').split(',').filter(Boolean) as EdgeType[],
+    }));
+  } catch (err) {
+    log.warn(`SQL graph expansion failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
   }
-
-  // Return results sorted by distance
-  return Array.from(visited.values())
-    .filter((r) => r.distance > 0) // Exclude start nodes
-    .sort((a, b) => a.distance - b.distance);
 }
 
 interface NeighborInfo {

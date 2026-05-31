@@ -2,17 +2,13 @@
  * Code Memory Graph — Symbol Repository
  *
  * CRUD operations for the `symbols` table, including
- * FTS3 full-text search via the symbols_fts virtual table.
- *
- * NOTE: sql.js provides FTS3 (not FTS5). FTS3 does not have a
- * built-in `rank` column. Relevance is approximated by
- * matchinfo() or simply by returning matches in docid order
- * (which preserves insertion order for recently-added symbols).
+ * FTS5 full-text search via the symbols_fts virtual table.
  */
 
 import type { SymbolRecord, SymbolKind } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 import { getDatabaseSync } from './database.js';
+import { buildSearchText } from '../shared/search-text.js';
 
 const log = createLogger('symbol-repo');
 
@@ -36,6 +32,12 @@ function serializeSymbol(record: Partial<SymbolRecord>): Record<string, unknown>
     $summary: record.summary ?? null,
     $hash: record.hash,
     $accessLevel: record.accessLevel ?? null,
+    $searchText: record.searchText ?? buildSearchText([
+      record.name,
+      record.kind,
+      record.signature,
+      record.summary,
+    ]),
   };
 }
 
@@ -70,15 +72,15 @@ export function upsertSymbol(symbol: SymbolRecord): void {
     `INSERT OR REPLACE INTO symbols
        (id, file_id, name, kind, start_byte, end_byte, start_line, end_line,
         start_column, end_column, range_start, range_end,
-        signature, summary, hash, access_level)
+        signature, summary, hash, access_level, search_text)
      VALUES ($id, $fileId, $name, $kind, $startByte, $endByte, $startLine, $endLine,
              $startColumn, $endColumn, $rangeStart, $rangeEnd,
-             $signature, $summary, $hash, $accessLevel)`,
+             $signature, $summary, $hash, $accessLevel, $searchText)`,
     [
       p.$id, p.$fileId, p.$name, p.$kind,
       p.$startByte, p.$endByte, p.$startLine, p.$endLine,
       p.$startColumn, p.$endColumn, p.$rangeStart, p.$rangeEnd,
-      p.$signature, p.$summary, p.$hash, p.$accessLevel,
+      p.$signature, p.$summary, p.$hash, p.$accessLevel, p.$searchText,
     ],
   );
 }
@@ -137,21 +139,12 @@ export function getSymbolsByKind(kind: SymbolKind): SymbolRecord[] {
 
 /**
  * Full-text search across symbol names, kinds, signatures, and summaries.
- * Uses the symbols_fts FTS3 virtual table.
- *
- * The query string is sanitized for FTS3: quotes and special
- * characters are removed, and the query is wrapped in quotes
- * for exact phrase matching when the query contains spaces.
- *
- * FTS3 does not have a built-in rank column. Results are ordered
- * by the FTS match offsets (approximate relevance) or by docid
- * as a fallback.
+ * Uses the symbols_fts FTS5 virtual table and SQLite bm25 ranking.
  */
 export function searchSymbols(query: string, limit: number = 20): SymbolRecord[] {
   const db = getDatabaseSync();
   const results: SymbolRecord[] = [];
 
-  // Sanitize query for FTS3 — remove characters that could break the syntax
   const FTS_SPECIAL = /["'*:^(){}[\]]/g;
   const sanitized = query.replace(FTS_SPECIAL, '').trim();
 
@@ -159,16 +152,16 @@ export function searchSymbols(query: string, limit: number = 20): SymbolRecord[]
     return results;
   }
 
-  // Use FTS3 MATCH with the symbols table joined to get full rows.
-  // FTS3 does not support the `rank` column — we order by docid
-  // which preserves insertion order (recent symbols last, but this
-  // is acceptable for symbol search where exact name matches are
-  // typically what users want).
-  const ftsQuery = `"${sanitized}"`;
+  const ftsQuery = sanitized
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => `"${term}"`)
+    .join(' ');
   const stmt = db.prepare(
     `SELECT s.* FROM symbols s
      JOIN symbols_fts fts ON s.rowid = fts.rowid
      WHERE symbols_fts MATCH ?
+     ORDER BY bm25(symbols_fts) ASC
      LIMIT ?`,
   );
   stmt.bind([ftsQuery, limit]);

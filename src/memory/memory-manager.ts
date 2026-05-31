@@ -11,7 +11,7 @@
  * - invalidation rules: conditions that make the memory stale
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type { MemoryRecord, MemoryType, InvalidationRule } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 import { generateId } from '../shared/utils.js';

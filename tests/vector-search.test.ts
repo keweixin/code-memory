@@ -162,6 +162,8 @@ describe('vector-backed hybrid search', () => {
       expect(existsSync(join(tempRoot, '.code-memory', 'vectors'))).toBe(true);
       expect(existsSync(join(secondRoot, '.code-memory', 'vectors'))).toBe(true);
     } finally {
+      closeVectorStore();
+      await closeDatabase();
       rmSync(secondRoot, { recursive: true, force: true });
     }
   });

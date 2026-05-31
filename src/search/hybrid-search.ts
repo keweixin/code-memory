@@ -8,7 +8,7 @@
  * where k=60 (standard), w_i is the weight for each retrieval system.
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type {
   SearchResult,
   SearchOptions,
@@ -18,7 +18,7 @@ import type {
 } from '../shared/types.js';
 import { DEFAULT_SEARCH_WEIGHTS } from '../shared/types.js';
 import { RRF_K, DEFAULT_SEARCH_LIMIT } from '../shared/constants.js';
-import { searchSymbolsFts, searchFilesFts, normalizeFts3Scores } from './fts-search.js';
+import { searchSymbolsFts, searchFilesFts, normalizeFts5Scores } from './fts-search.js';
 import { bfsExpand } from './graph-search.js';
 import type { VectorSearchProvider } from './vector-search.js';
 import { createLogger } from '../shared/logger.js';
@@ -72,9 +72,9 @@ export class HybridSearchEngine {
     let graphResults: Array<{ id: string; rank: number }> = [];
     let graphSeedResults: Array<{ id: string; rank: number }> = [];
 
-    // Keyword search (FTS3)
+    // Keyword search (FTS5)
     if (searchMode === 'hybrid' || searchMode === 'keyword' || searchMode === 'graph') {
-      const ftsResults = normalizeFts3Scores(
+      const ftsResults = normalizeFts5Scores(
         searchSymbolsFts(this.db, {
           query,
           limit: limit * 2,
@@ -126,6 +126,8 @@ export class HybridSearchEngine {
           .map((r, i) => ({ id: r.nodeId, rank: i + 1 }));
 
         log.info(`Graph expansion returned ${graphResults.length} results`);
+      } else if (searchMode === 'graph') {
+        log.info('Graph search has no FTS seed results; returning no graph candidates.');
       }
     }
 

@@ -57,6 +57,7 @@ export interface VectorSearchProvider {
 
 let dbInstance: lancedb.Connection | null = null;
 let dbInstancePath: string | null = null;
+let dbInstanceDimensions = DEFAULT_EMBEDDING_DIMENSIONS;
 const TABLE_NAME = 'symbol_vectors';
 
 /**
@@ -79,6 +80,7 @@ export async function initVectorStore(
 
   dbInstance = await lancedb.connect(resolvedPath);
   dbInstancePath = resolvedPath;
+  dbInstanceDimensions = dimensions;
 
   // Check if table exists
   const tableNames = await dbInstance.tableNames();
@@ -121,33 +123,47 @@ export function closeVectorStore(): void {
   dbInstancePath = null;
 }
 
+export function releaseVectorStoreConnection(): void {
+  if (dbInstance) {
+    dbInstance.close();
+    dbInstance = null;
+  }
+}
+
 /**
  * Add vector records to the store.
  */
 export async function addVectors(records: VectorRecord[]): Promise<void> {
-  if (!dbInstance) {
-    throw new Error('Vector store not initialized. Call initVectorStore() first.');
-  }
-
   if (records.length === 0) return;
 
-  const table = await dbInstance.openTable(TABLE_NAME);
+  const connection = await ensureVectorConnection();
   await deleteVectors(records.map((record) => record.id));
-  await table.add(records);
-  log.info(`Added ${records.length} vectors`);
+  const table = await connection.openTable(TABLE_NAME);
+  try {
+    await table.add(records);
+    log.info(`Added ${records.length} vectors`);
+  } finally {
+    table.close();
+  }
 }
 
 /**
  * Delete vectors by ID.
  */
 export async function deleteVectors(ids: string[]): Promise<void> {
-  if (!dbInstance || ids.length === 0) return;
+  if (ids.length === 0) return;
 
-  const table = await dbInstance.openTable(TABLE_NAME);
-  for (const id of ids) {
-    await table.delete(`id = '${escapeSqlString(id)}'`);
+  const connection = await ensureVectorConnection();
+
+  const table = await connection.openTable(TABLE_NAME);
+  try {
+    for (const id of ids) {
+      await table.delete(`id = '${escapeSqlString(id)}'`);
+    }
+    log.info(`Deleted ${ids.length} vectors`);
+  } finally {
+    table.close();
   }
-  log.info(`Deleted ${ids.length} vectors`);
 }
 
 /**
@@ -158,26 +174,33 @@ export async function searchVectors(
   options: VectorSearchOptions,
 ): Promise<VectorSearchResult[]> {
   if (!dbInstance) {
-    log.warn('Vector store not initialized, skipping vector search');
-    return [];
+    try {
+      await ensureVectorConnection();
+    } catch {
+      log.warn('Vector store not initialized, skipping vector search');
+      return [];
+    }
   }
 
   const { limit = DEFAULT_SEARCH_LIMIT, kindFilter, fileFilter } = options;
 
   try {
-    const table = await dbInstance.openTable(TABLE_NAME);
+    const table = await dbInstance!.openTable(TABLE_NAME);
+    let results: any[];
+    try {
+      let query = table.vectorSearch(queryVector).limit(limit * 2); // Over-fetch for filtering
 
-    let query = table.vectorSearch(queryVector).limit(limit * 2); // Over-fetch for filtering
+      if (kindFilter) {
+        query = query.where(`kind = '${escapeSqlString(kindFilter)}'`);
+      }
+      if (fileFilter) {
+        query = query.where(`filePath LIKE '%${escapeSqlLike(fileFilter)}%'`);
+      }
 
-    // Apply metadata filters
-    if (kindFilter) {
-      query = query.where(`kind = '${escapeSqlString(kindFilter)}'`);
+      results = await query.toArray();
+    } finally {
+      table.close();
     }
-    if (fileFilter) {
-      query = query.where(`filePath LIKE '%${escapeSqlLike(fileFilter)}%'`);
-    }
-
-    const results = await query.toArray();
 
     if (!results.length) return [];
 
@@ -198,6 +221,14 @@ export async function searchVectors(
     log.warn(`Vector search failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
+}
+
+async function ensureVectorConnection(): Promise<lancedb.Connection> {
+  if (dbInstance) return dbInstance;
+  if (!dbInstancePath) {
+    throw new Error('Vector store not initialized. Call initVectorStore() first.');
+  }
+  return initVectorStore(dbInstancePath, dbInstanceDimensions);
 }
 
 export function getEmbeddingDimensions(config: EmbeddingConfig): number {
@@ -270,7 +301,11 @@ async function createVectorTable(dimensions: number): Promise<void> {
     throw new Error('Vector store not initialized. Call initVectorStore() first.');
   }
   const table = await dbInstance.createTable(TABLE_NAME, [createVectorPlaceholder(dimensions)]);
-  await table.delete("id = '__schema_placeholder__'");
+  try {
+    await table.delete("id = '__schema_placeholder__'");
+  } finally {
+    table.close();
+  }
 }
 
 function escapeSqlString(value: string): string {
@@ -289,14 +324,17 @@ export async function createVectorIndex(
   numPartitions: number = 256,
   numSubVectors: number = 16,
 ): Promise<void> {
-  if (!dbInstance) return;
-
   try {
-    const table = await dbInstance.openTable(TABLE_NAME);
-    await table.createIndex('vector', {
-      numPartitions,
-      numSubVectors,
-    } as any);
+    const connection = await ensureVectorConnection();
+    const table = await connection.openTable(TABLE_NAME);
+    try {
+      await table.createIndex('vector', {
+        numPartitions,
+        numSubVectors,
+      } as any);
+    } finally {
+      table.close();
+    }
     log.info('Created IVF-PQ vector index');
   } catch (err) {
     log.warn(`Failed to create vector index: ${err instanceof Error ? err.message : String(err)}`);

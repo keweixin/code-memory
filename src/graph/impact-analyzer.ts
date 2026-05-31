@@ -9,7 +9,7 @@
  * - Risk assessment
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
+import type { SqlJsDatabase } from '../storage/database.js';
 import type { ImpactResult, ImpactFile, ImpactSymbol, RiskPoint, RiskLevel } from '../shared/types.js';
 import { GraphEngine } from './graph-engine.js';
 import { resolveTargetId } from './target-resolver.js';

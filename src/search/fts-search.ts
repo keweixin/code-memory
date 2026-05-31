@@ -1,19 +1,10 @@
 /**
- * Code Memory Graph — FTS3 Full-Text Search
- *
- * Uses SQLite FTS3 for keyword-based code search.
- * sql.js (WASM SQLite) ships with FTS3, not FTS5.
- *
- * FTS3 differences from FTS5:
- * - No built-in bm25() — we order by docid (insertion order) or manual scoring
- * - No snippet() / highlight() — we implement simple highlighting
- * - docid instead of rowid for explicit row-id references
- * - Supports MATCH with same query syntax
- * - Column-specific search with column_name:term
+ * Code Memory Graph — FTS5 Full-Text Search
  */
 
-import type { Database as SqlJsDatabase } from 'sql.js';
-import type { SearchResult, SymbolKind } from '../shared/types.js';
+import type { SqlJsDatabase } from '../storage/database.js';
+import type { SymbolKind } from '../shared/types.js';
+import { normalizeIdentifierWords } from '../shared/search-text.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('fts-search');
@@ -35,200 +26,127 @@ export interface FtsSearchResult {
   snippet: string | null;
 }
 
-/**
- * Search symbols using FTS3 with MATCH.
- *
- * Returns results ordered by insertion order (docid).
- * For ranked results, use normalizeFts3Scores() which
- * estimates relevance by match count in the output.
- */
 export function searchSymbolsFts(
   db: SqlJsDatabase,
   options: FtsSearchOptions,
 ): FtsSearchResult[] {
   const { query, limit = 20, kindFilter, fileFilter } = options;
-
-  const escapedQuery = escapeFts3Query(query, ['name', 'kind', 'signature']);
-  if (!escapedQuery) return [];
+  const ftsQuery = escapeFts5Query(query);
+  if (!ftsQuery) return [];
 
   try {
-    // For FTS3, we join symbols_fts with symbols on docid = rowid
-    // Must use full table name in MATCH clause, not an alias
-    let sql: string;
-    const params: string[] = [escapedQuery];
-
-    sql = `SELECT
-      s.id, s.name, s.kind, f.path AS file_path, s.signature, s.summary
+    let sql = `SELECT
+      s.id,
+      s.name,
+      s.kind,
+      f.path AS file_path,
+      bm25(symbols_fts) AS rank,
+      snippet(symbols_fts, -1, '<<', '>>', '...', 12) AS snippet
     FROM symbols_fts
-    JOIN symbols s ON s.rowid = symbols_fts.docid
+    JOIN symbols s ON s.rowid = symbols_fts.rowid
     JOIN files f ON f.id = s.file_id
     WHERE symbols_fts MATCH ?`;
+    const params: Array<string | number> = [ftsQuery];
 
     if (kindFilter) {
       sql += ' AND s.kind = ?';
       params.push(kindFilter);
     }
-
     if (fileFilter) {
       sql += ' AND f.path LIKE ? ESCAPE \'\\\'';
       params.push(globToSqlLike(fileFilter));
     }
+    sql += ' ORDER BY rank ASC LIMIT ?';
+    params.push(limit);
 
-    sql += ` LIMIT ${limit * 2}`;
-
-    const results = db.exec(sql, params);
-    if (!results.length || !results[0].values.length) return [];
-
-    return results[0].values.map((row, i) => {
-      const name = String(row[1]);
-      const kind = String(row[2]);
-      const filePath = String(row[3]);
-      const signature = row[4] ? String(row[4]) : '';
-      const summary = row[5] ? String(row[5]) : '';
-
-      // Generate snippet with highlighting
-      const snippet = generateSnippet(
-        [name, kind, signature, summary].join(' '),
-        query.split(/\s+/).filter(Boolean),
-      );
-
-      // Score: later docid = more recently indexed (higher score for matches)
-      return {
-        id: String(row[0]),
-        name,
-        kind,
-        filePath,
-        score: 1 - i / (limit * 2), // Simple position-based score
-        snippet,
-      };
-    });
+    const rows = db.exec(sql, params)[0]?.values ?? [];
+    return rows.map((row) => ({
+      id: String(row[0]),
+      name: String(row[1]),
+      kind: String(row[2]),
+      filePath: String(row[3]),
+      score: bm25ToScore(Number(row[4])),
+      snippet: row[5] ? String(row[5]) : null,
+    }));
   } catch (err) {
-    log.warn(`FTS3 search failed for "${query}": ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`FTS5 symbol search failed for "${query}": ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
 
-/**
- * Search file metadata using FTS3.
- */
 export function searchFilesFts(
   db: SqlJsDatabase,
   query: string,
   limit: number = 20,
   fileFilter?: string,
 ): FtsSearchResult[] {
-  const escapedQuery = escapeFts3Query(query, ['path', 'summary', 'language', 'role']);
-  if (!escapedQuery) return [];
+  const ftsQuery = escapeFts5Query(query);
+  if (!ftsQuery) return [];
 
   try {
     let sql = `SELECT
-      f.id, f.path, f.summary, f.language, f.role
+      f.id,
+      f.path,
+      f.language,
+      f.role,
+      bm25(files_fts) AS rank,
+      snippet(files_fts, -1, '<<', '>>', '...', 12) AS snippet
     FROM files_fts
-    JOIN files f ON f.rowid = files_fts.docid
+    JOIN files f ON f.rowid = files_fts.rowid
     WHERE files_fts MATCH ?`;
-    const params = [escapedQuery];
+    const params: Array<string | number> = [ftsQuery];
 
     if (fileFilter) {
       sql += ' AND f.path LIKE ? ESCAPE \'\\\'';
       params.push(globToSqlLike(fileFilter));
     }
+    sql += ' ORDER BY rank ASC LIMIT ?';
+    params.push(limit);
 
-    sql += ` LIMIT ${limit}`;
-
-    const results = db.exec(sql, params);
-    if (!results.length || !results[0].values.length) return [];
-
-    return results[0].values.map((row, i) => ({
+    const rows = db.exec(sql, params)[0]?.values ?? [];
+    return rows.map((row) => ({
       id: String(row[0]),
       name: String(row[1]).split('/').pop() || String(row[1]),
       kind: 'file',
       filePath: String(row[1]),
-      score: 1 - i / limit,
-      snippet: generateSnippet(
-        [String(row[1]), String(row[2] || '')].join(' '),
-        query.split(/\s+/).filter(Boolean),
-      ),
+      score: bm25ToScore(Number(row[4])),
+      snippet: row[5] ? String(row[5]) : null,
     }));
   } catch (err) {
-    log.warn(`FTS3 file search failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`FTS5 file search failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
 
-// ── Private Helpers ────────────────────────────────────────
+export function normalizeFts5Scores(results: FtsSearchResult[]): FtsSearchResult[] {
+  if (results.length === 0) return results;
+  return results.map((result, index) => ({
+    ...result,
+    score: result.score || 1 - index / Math.max(results.length, 1),
+  }));
+}
 
-/**
- * Escape a query string for FTS3 MATCH.
- * FTS3 special characters: " * ( ) : . - < > [ ] { } ~ ^
- *
- * For simple word queries, wraps each word with * suffix and joins with AND.
- * Adds column-qualified search targeting name, kind, and signature columns.
- */
-function escapeFts3Query(query: string, columns: string[]): string {
-  const cleaned = query
-    .replace(/["*()[]:.{}<>~^-]/g, ' ')
-    .trim()
-    .split(/\s+/)
+function escapeFts5Query(query: string): string {
+  const terms = [
+    ...query.split(/\s+/),
+    ...normalizeIdentifierWords(query).split(/\s+/),
+  ]
+    .map((term) => term.replace(/[^A-Za-z0-9_]/g, '').trim())
     .filter(Boolean);
 
-  if (cleaned.length === 0) return '';
-
-  // Column-qualified search: search name and signature with higher priority
-  // Note: FTS3 with porter stemmer automatically handles word variants
-  return cleaned
-    .map((w) => '(' + columns.map((column) => `${column}:${w}*`).join(' OR ') + ')')
-    .join(' AND ');
+  const unique = [...new Set(terms)];
+  if (unique.length === 0) return '';
+  return unique.map((term) => `"${term}"`).join(' ');
 }
 
-/**
- * Generate a snippet with highlighted search terms.
- * Simple approach since FTS3 lacks snippet()/highlight().
- */
-function generateSnippet(text: string, terms: string[], maxLength: number = 80): string | null {
-  if (!text || terms.length === 0) return null;
-
-  const lowerText = text.toLowerCase();
-
-  // Find the first occurrence of any term
-  let bestPos = -1;
-  let bestTerm = '';
-  for (const term of terms) {
-    const pos = lowerText.indexOf(term.toLowerCase());
-    if (pos !== -1 && (bestPos === -1 || pos < bestPos)) {
-      bestPos = pos;
-      bestTerm = term;
-    }
-  }
-
-  if (bestPos === -1) {
-    // No match found — return the beginning of text
-    return text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
-  }
-
-  // Extract a window around the match, highlighting all terms
-  const windowStart = Math.max(0, bestPos - maxLength / 2);
-  const windowEnd = Math.min(text.length, bestPos + maxLength / 2);
-  let snippet = text.slice(windowStart, windowEnd);
-
-  // Apply highlighting
-  for (const term of terms) {
-    const regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
-    snippet = snippet.replace(regex, '<<$1>>');
-  }
-
-  const prefix = windowStart > 0 ? '...' : '';
-  const suffix = windowEnd < text.length ? '...' : '';
-  return prefix + snippet + suffix;
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function bm25ToScore(rank: number): number {
+  if (!Number.isFinite(rank)) return 0;
+  return 1 / (1 + Math.max(rank, 0));
 }
 
 function globToSqlLike(pattern: string): string {
   let result = '';
   const normalized = pattern.replace(/\\/g, '/');
-
   for (let i = 0; i < normalized.length; i++) {
     const char = normalized[i];
     if (char === '*') {
@@ -242,18 +160,5 @@ function globToSqlLike(pattern: string): string {
       result += char;
     }
   }
-
   return result;
-}
-
-/**
- * Normalize position-based scores to 0-1 range for RRF compatibility.
- */
-export function normalizeFts3Scores(results: FtsSearchResult[]): FtsSearchResult[] {
-  if (results.length === 0) return results;
-
-  return results.map((r, i) => ({
-    ...r,
-    score: 1 - i / Math.max(results.length, 1),
-  }));
 }

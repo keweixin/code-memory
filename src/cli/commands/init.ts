@@ -73,6 +73,13 @@ export async function initProject(options: InitOptions): Promise<void> {
     embedding: {
       provider: embeddingProvider,
       model: embeddingModel,
+      batchSize: 50,
+      concurrency: 2,
+    },
+    indexing: {
+      workers: 'auto',
+      parseBatchSize: 100,
+      edgeMode: 'full',
     },
     llm: null,
     realtime: {
