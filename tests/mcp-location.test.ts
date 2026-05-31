@@ -95,6 +95,21 @@ describe('MCP location output', () => {
     expect(text).not.toContain('Lines: 24-45');
   });
 
+  it('resolves qualified class method names in find_definition', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerFindDefinitionTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('find_definition')!({
+      symbolName: 'AuthService.login',
+    });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('No definition found');
+    expect(text).toContain('1. login (method)');
+    expect(text).toMatch(/Location: src\/services\/AuthService\.ts:24:\d+-45:\d+/);
+  });
+
   it('reports reference locations with line and column coordinates', async () => {
     await indexFixture(tempRoot);
     const server = new FakeMcpServer();
