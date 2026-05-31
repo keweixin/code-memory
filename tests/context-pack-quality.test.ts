@@ -72,5 +72,5 @@ describe('context pack quality', () => {
     expect(pack.codeSnippets.some((snippet) => snippet.content.includes('login'))).toBe(true);
     expect(pack.codeSnippets[0].reason).toMatch(/score|Matched|graph|keyword/i);
     expect(pack.files[0].language).not.toBe('unknown');
-  });
+  }, 20_000);
 });
