@@ -106,10 +106,18 @@ export function debounce<T extends (...args: unknown[]) => void>(
  */
 export function safeJsonParse<T>(text: string): T | null {
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(stripUtf8Bom(text)) as T;
   } catch {
     return null;
   }
+}
+
+/**
+ * Remove a leading UTF-8 BOM so JSON config files created by Windows tools
+ * parse consistently.
+ */
+export function stripUtf8Bom(text: string): string {
+  return text.replace(/^\uFEFF+/, '');
 }
 
 /**

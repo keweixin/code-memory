@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { CONFIG_DIR, CONFIG_FILE } from '../../shared/constants.js';
 import type { CodeMemoryConfig } from '../../shared/types.js';
 import { createLogger } from '../../shared/logger.js';
+import { safeJsonParse } from '../../shared/utils.js';
 
 const log = createLogger('index');
 
@@ -41,7 +42,9 @@ async function indexProject(projectPath: string, options: IndexOptions): Promise
   let config: CodeMemoryConfig;
   try {
     const raw = readFileSync(configPath, 'utf-8');
-    config = JSON.parse(raw);
+    const parsed = safeJsonParse<CodeMemoryConfig>(raw);
+    if (!parsed) throw new Error('Invalid config JSON');
+    config = parsed;
   } catch {
     log.error('No config found. Run "code-memory init" first.');
     process.exit(1);

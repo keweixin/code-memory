@@ -9,6 +9,7 @@ import { IndexManager } from '../src/indexer/index-manager.js';
 import { getDatabaseSync, closeDatabase } from '../src/storage/database.js';
 import { HybridSearchEngine } from '../src/search/hybrid-search.js';
 import { ContextPacker } from '../src/search/context-packer.js';
+import { ImpactAnalyzer } from '../src/graph/impact-analyzer.js';
 
 const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
@@ -189,6 +190,40 @@ describe('core indexing pipeline', () => {
     expect(testSymbolEdges.length).toBeGreaterThan(0);
   });
 
+  it('indexes project docs/config files and links configs into impact analysis', async () => {
+    await indexFixture(tempRoot);
+
+    const projectFiles = queryRows(
+      `SELECT path, role
+       FROM files
+       WHERE path IN ('README.md', 'package.json', 'tsconfig.json')
+       ORDER BY path`,
+    );
+    expect(projectFiles).toEqual([
+      ['README.md', 'doc'],
+      ['package.json', 'config'],
+      ['tsconfig.json', 'config'],
+    ]);
+
+    const configEdges = queryRows(
+      `SELECT config.path, target.path
+       FROM edges e
+       JOIN files config ON config.id = e.from_id
+       JOIN files target ON target.id = e.to_id
+       WHERE e.type = 'CONFIGURES'
+         AND target.path = 'src/services/AuthService.ts'
+       ORDER BY config.path`,
+    );
+    expect(configEdges).toEqual([
+      ['package.json', 'src/services/AuthService.ts'],
+      ['tsconfig.json', 'src/services/AuthService.ts'],
+    ]);
+
+    const analyzer = new ImpactAnalyzer(getDatabaseSync());
+    const impact = analyzer.analyze('src/services/AuthService.ts');
+    expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
+  });
+
   it('packs real code snippets for high-detail context requests', async () => {
     await indexFixture(tempRoot);
 
@@ -228,6 +263,18 @@ describe('core indexing pipeline', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((result) => result.sources.includes('graph'))).toBe(true);
     expect(results.every((result) => !result.sources.includes('keyword'))).toBe(true);
+  });
+
+  it('rejects vector-only search while embeddings are not wired', async () => {
+    await indexFixture(tempRoot);
+
+    const db = getDatabaseSync();
+    const search = new HybridSearchEngine(db);
+
+    await expect(search.search({
+      query: 'login',
+      searchMode: 'vector',
+    })).rejects.toThrow('Vector search is not available');
   });
 
   it('indexes TSX components with real symbols and chunks', async () => {

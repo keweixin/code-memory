@@ -62,6 +62,12 @@ export class HybridSearchEngine {
 
     log.info(`Hybrid search: "${query}" (mode: ${searchMode}, limit: ${limit})`);
 
+    if (searchMode === 'vector') {
+      throw new Error(
+        'Vector search is not available: chunk embeddings and query embeddings are not wired yet. Use keyword, graph, or hybrid mode.',
+      );
+    }
+
     // Phase 1: Collect results from each retrieval system
     let keywordResults: Array<{ id: string; rank: number }> = [];
     let vectorResults: Array<{ id: string; rank: number }> = [];
@@ -89,7 +95,7 @@ export class HybridSearchEngine {
     }
 
     // Vector search (LanceDB) — disabled until embeddings are generated end to end.
-    if ((searchMode === 'hybrid' || searchMode === 'vector') && this.vectorSearchAvailable) {
+    if (searchMode === 'hybrid' && this.vectorSearchAvailable) {
       log.warn('Vector search requested but not wired: index chunk embeddings and query embeddings are not available yet');
     }
 

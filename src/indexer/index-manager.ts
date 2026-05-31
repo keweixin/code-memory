@@ -168,7 +168,12 @@ export class IndexManager {
 
   private async indexFile(discovered: DiscoveredFile): Promise<ParseResult | null> {
     const parserLang = resolveParserLanguage(discovered.path);
-    if (!parserLang) return null;
+    if (!parserLang) {
+      if (discovered.role === 'config' || discovered.role === 'doc') {
+        return this.createFileOnlyParseResult(discovered);
+      }
+      return null;
+    }
 
     let sourceCode: string;
     try {
@@ -180,6 +185,21 @@ export class IndexManager {
 
     const fileId = generateId('file', normalizePath(discovered.relativePath));
     return await parseFile(discovered.path, sourceCode, parserLang, fileId);
+  }
+
+  private createFileOnlyParseResult(discovered: DiscoveredFile): ParseResult {
+    return {
+      fileId: generateId('file', normalizePath(discovered.relativePath)),
+      filePath: discovered.path,
+      language: discovered.language,
+      symbols: [],
+      imports: [],
+      exports: [],
+      edges: [],
+      calls: [],
+      chunks: [],
+      errors: [],
+    };
   }
 
   private storeParseResult(result: ParseResult, discovered: DiscoveredFile): void {
@@ -245,6 +265,7 @@ export class IndexManager {
     this.setMetadata('current_commit', scanResult.gitInfo.currentCommit ?? '');
     this.setMetadata('current_branch', scanResult.gitInfo.currentBranch ?? '');
     this.setMetadata('embedding_provider', this.config.embedding.provider);
+    this.setMetadata('embedding_model', this.config.embedding.model);
     this.setMetadata('is_indexing', 'false');
     this.setMetadata('index_completed', now);
   }
@@ -289,7 +310,7 @@ export class IndexManager {
 
   private async rebuildGraphEdges(files: DiscoveredFile[]): Promise<number> {
     const db = getDatabaseSync();
-    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS')");
+    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES')");
 
     const indexedFiles = this.safeGetAllFiles();
     const filesByPath = new Map<string, FileRecord>();
@@ -318,9 +339,31 @@ export class IndexManager {
       edgeCount += this.createCallEdges(fileRecord, parsed, symbolsByFile, importedSymbols.symbolsByName);
     }
 
+    edgeCount += this.createConfigEdges(indexedFiles);
+
     const totalEdges = this.getTableCount('edges');
     log.info('Rebuilt graph edges: ' + totalEdges);
     return totalEdges;
+  }
+
+  private createConfigEdges(indexedFiles: FileRecord[]): number {
+    const configs = indexedFiles.filter((file) => file.role === 'config');
+    const configuredFiles = indexedFiles.filter((file) => file.role === 'source' || file.role === 'test');
+    let edgeCount = 0;
+
+    for (const config of configs) {
+      for (const configuredFile of configuredFiles) {
+        edgeCount += this.upsertGraphEdge(
+          config.id,
+          configuredFile.id,
+          'CONFIGURES',
+          0.55,
+          'project configuration',
+        );
+      }
+    }
+
+    return edgeCount;
   }
 
   private createImportEdges(

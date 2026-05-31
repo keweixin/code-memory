@@ -3,9 +3,9 @@
  */
 
 import type { Command } from 'commander';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE } from '../../shared/constants.js';
+import { CONFIG_DIR, DATABASE_FILE } from '../../shared/constants.js';
 import { createLogger } from '../../shared/logger.js';
 
 const log = createLogger('status');
@@ -69,10 +69,16 @@ async function showStatus(options: StatusOptions): Promise<void> {
     const memCount = memories.length > 0 ? Number(memories[0].values[0][0]) : 0;
 
     if (options.json) {
+      const embeddingProvider = meta.get('embedding_provider') || null;
       console.log(JSON.stringify({
         project: meta.get('project_name') || 'Unknown',
+        rootPath: meta.get('root_path') || null,
+        languages: parseLanguages(meta.get('languages')),
         branch: meta.get('current_branch') || null,
         commit: meta.get('current_commit') || null,
+        embeddingProvider,
+        embeddingModel: meta.get('embedding_model') || null,
+        vectorSearch: embeddingProvider && embeddingProvider !== 'none' ? 'not_wired' : 'disabled',
         files: fileCount,
         symbols: symCount,
         edges: edgeCount,
@@ -84,8 +90,12 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log('Code Memory Graph v0.1.0');
       console.log('');
       console.log(`Project:     ${meta.get('project_name') || 'Unknown'}`);
+      console.log(`Root Path:   ${meta.get('root_path') || '(not set)'}`);
+      console.log(`Languages:   ${parseLanguages(meta.get('languages')).join(', ') || '(not set)'}`);
       console.log(`Branch:      ${meta.get('current_branch') || '(not set)'}`);
       console.log(`Commit:      ${(meta.get('current_commit') || '').slice(0, 8) || '(not set)'}`);
+      console.log(`Embedding:   ${meta.get('embedding_provider') || '(not set)'} (${meta.get('embedding_model') || '(not set)'})`);
+      console.log(`Vector:      ${meta.get('embedding_provider') && meta.get('embedding_provider') !== 'none' ? 'not wired' : 'disabled'}`);
       console.log(`Last Index:  ${meta.get('last_full_index') || '(never)'}`);
       console.log('');
       console.log(`Files:       ${fileCount}`);
@@ -98,4 +108,8 @@ async function showStatus(options: StatusOptions): Promise<void> {
     log.error('Failed to read index', err);
     console.log('Error reading index. Try running "code-memory index" first.');
   }
+}
+
+function parseLanguages(value: string | undefined): string[] {
+  return (value || '').split(',').map((item) => item.trim()).filter(Boolean);
 }
