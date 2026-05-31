@@ -57,23 +57,21 @@ export function searchSymbolsFts(
     let sql: string;
     const params: string[] = [escapedQuery];
 
-    if (kindFilter || fileFilter) {
-      sql = `SELECT
-        s.id, s.name, s.kind, s.file_id AS file_path, s.signature, s.summary
-      FROM symbols_fts
-      JOIN symbols s ON s.rowid = symbols_fts.docid
-      WHERE symbols_fts MATCH ?`;
-    } else {
-      sql = `SELECT
-        s.id, s.name, s.kind, s.file_id AS file_path, s.signature, s.summary
-      FROM symbols_fts
-      JOIN symbols s ON s.rowid = symbols_fts.docid
-      WHERE symbols_fts MATCH ?`;
-    }
+    sql = `SELECT
+      s.id, s.name, s.kind, f.path AS file_path, s.signature, s.summary
+    FROM symbols_fts
+    JOIN symbols s ON s.rowid = symbols_fts.docid
+    JOIN files f ON f.id = s.file_id
+    WHERE symbols_fts MATCH ?`;
 
     if (kindFilter) {
       sql += ' AND s.kind = ?';
       params.push(kindFilter);
+    }
+
+    if (fileFilter) {
+      sql += ' AND f.path LIKE ? ESCAPE \'\\\'';
+      params.push(globToSqlLike(fileFilter));
     }
 
     sql += ` LIMIT ${limit * 2}`;
@@ -84,7 +82,7 @@ export function searchSymbolsFts(
     return results[0].values.map((row, i) => {
       const name = String(row[1]);
       const kind = String(row[2]);
-      const filePath = getFilePath(db, String(row[3]));
+      const filePath = String(row[3]);
       const signature = row[4] ? String(row[4]) : '';
       const summary = row[5] ? String(row[5]) : '';
 
@@ -117,19 +115,27 @@ export function searchFilesFts(
   db: SqlJsDatabase,
   query: string,
   limit: number = 20,
+  fileFilter?: string,
 ): FtsSearchResult[] {
   const escapedQuery = escapeFts3Query(query, ['path', 'summary', 'language', 'role']);
   if (!escapedQuery) return [];
 
   try {
-    const sql = `SELECT
+    let sql = `SELECT
       f.id, f.path, f.summary, f.language, f.role
     FROM files_fts
     JOIN files f ON f.rowid = files_fts.docid
-    WHERE files_fts MATCH ?
-    LIMIT ${limit}`;
+    WHERE files_fts MATCH ?`;
+    const params = [escapedQuery];
 
-    const results = db.exec(sql, [escapedQuery]);
+    if (fileFilter) {
+      sql += ' AND f.path LIKE ? ESCAPE \'\\\'';
+      params.push(globToSqlLike(fileFilter));
+    }
+
+    sql += ` LIMIT ${limit}`;
+
+    const results = db.exec(sql, params);
     if (!results.length || !results[0].values.length) return [];
 
     return results[0].values.map((row, i) => ({
@@ -175,19 +181,6 @@ function escapeFts3Query(query: string, columns: string[]): string {
 }
 
 /**
- * Get file path from file_id.
- */
-function getFilePath(db: SqlJsDatabase, fileId: string): string {
-  try {
-    const result = db.exec('SELECT path FROM files WHERE id = ?', [fileId]);
-    if (result.length > 0 && result[0].values.length > 0) {
-      return String(result[0].values[0][0]);
-    }
-  } catch { /* fallback to file_id */ }
-  return fileId;
-}
-
-/**
  * Generate a snippet with highlighted search terms.
  * Simple approach since FTS3 lacks snippet()/highlight().
  */
@@ -230,6 +223,27 @@ function generateSnippet(text: string, terms: string[], maxLength: number = 80):
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function globToSqlLike(pattern: string): string {
+  let result = '';
+  const normalized = pattern.replace(/\\/g, '/');
+
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i];
+    if (char === '*') {
+      result += '%';
+      while (normalized[i + 1] === '*') i++;
+    } else if (char === '?') {
+      result += '_';
+    } else if (char === '%' || char === '_' || char === '\\') {
+      result += '\\' + char;
+    } else {
+      result += char;
+    }
+  }
+
+  return result;
 }
 
 /**

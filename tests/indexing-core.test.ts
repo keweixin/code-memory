@@ -265,6 +265,29 @@ describe('core indexing pipeline', () => {
     expect(results.every((result) => !result.sources.includes('keyword'))).toBe(true);
   });
 
+  it('applies file filters to keyword symbol and file search results', async () => {
+    await indexFixture(tempRoot);
+
+    const db = getDatabaseSync();
+    const search = new HybridSearchEngine(db);
+    const symbolResults = await search.searchCode('login', {
+      limit: 20,
+      searchMode: 'keyword',
+      fileFilter: 'src/services/AuthService.ts',
+    });
+
+    expect(symbolResults.length).toBeGreaterThan(0);
+    expect(symbolResults.every((result) => result.filePath === 'src/services/AuthService.ts')).toBe(true);
+
+    const fileResults = await search.searchCode('README', {
+      limit: 20,
+      searchMode: 'keyword',
+      fileFilter: 'src/**',
+    });
+
+    expect(fileResults).toHaveLength(0);
+  });
+
   it('resolves aliased named imports when building CALLS edges', async () => {
     writeFileSync(
       join(tempRoot, 'src/services/alias-login.ts'),

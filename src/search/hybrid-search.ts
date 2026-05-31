@@ -170,7 +170,7 @@ export class HybridSearchEngine {
     // Also search file contents via FTS5
     const fileResults = options.searchMode === 'graph'
       ? []
-      : searchFilesFts(this.db, query, options.limit || DEFAULT_SEARCH_LIMIT);
+      : searchFilesFts(this.db, query, options.limit || DEFAULT_SEARCH_LIMIT, options.fileFilter);
 
     // Merge and deduplicate
     const seen = new Set(symbolResults.map((r) => r.id));
