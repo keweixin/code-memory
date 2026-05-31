@@ -200,9 +200,12 @@ export class ImpactAnalyzer {
    */
   private findRelatedConfigs(symbolId: string): string[] {
     const configs: string[] = [];
+    const configuredFileId = this.getConfiguredFileId(symbolId);
+    if (!configuredFileId) return configs;
 
-    // Get the symbol's file path and check for CONFIGURES edges
-    const configEdges = this.graphEngine.getIncomingNeighbors(symbolId, 'CONFIGURES');
+    // CONFIGURES edges are file-level: config file -> configured source/test file.
+    // Symbol impact needs to inherit the configuration of its containing file.
+    const configEdges = this.graphEngine.getIncomingNeighbors(configuredFileId, 'CONFIGURES');
     for (const edge of configEdges) {
       const fileResult = this.db.exec('SELECT path FROM files WHERE id = ?', [edge.from]);
       if (fileResult.length > 0 && fileResult[0].values.length > 0) {
@@ -214,6 +217,23 @@ export class ImpactAnalyzer {
     }
 
     return configs;
+  }
+
+  private getConfiguredFileId(nodeId: string): string | null {
+    try {
+      const fileResult = this.db.exec('SELECT id FROM files WHERE id = ?', [nodeId]);
+      if (fileResult.length > 0 && fileResult[0].values.length > 0) {
+        return String(fileResult[0].values[0][0]);
+      }
+
+      const symbolResult = this.db.exec('SELECT file_id FROM symbols WHERE id = ?', [nodeId]);
+      if (symbolResult.length > 0 && symbolResult[0].values.length > 0) {
+        return String(symbolResult[0].values[0][0]);
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   /**

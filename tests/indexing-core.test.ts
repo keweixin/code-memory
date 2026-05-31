@@ -224,6 +224,15 @@ describe('core indexing pipeline', () => {
     expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
   });
 
+  it('links project configs into symbol-level impact analysis', async () => {
+    await indexFixture(tempRoot);
+
+    const analyzer = new ImpactAnalyzer(getDatabaseSync());
+    const impact = analyzer.analyze('AuthService');
+
+    expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
+  });
+
   it('packs real code snippets for high-detail context requests', async () => {
     await indexFixture(tempRoot);
 
