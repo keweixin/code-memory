@@ -107,8 +107,15 @@ export interface FileRecord {
 export interface ImportInfo {
   source: string;           // Module path or package name
   names: string[];          // Imported symbol names
+  aliases?: Record<string, string>; // Local imported name -> exported symbol name
   isTypeOnly: boolean;      // TypeScript type-only imports
   isDefault: boolean;       // Default import
+  defaultName?: string;     // Local name for the default import binding
+  isNamespace?: boolean;    // import * as ns from '...'
+  startLine?: number;
+  endLine?: number;
+  startColumn?: number;
+  endColumn?: number;
 }
 
 export interface SymbolRecord {
@@ -116,6 +123,12 @@ export interface SymbolRecord {
   fileId: string;
   name: string;
   kind: SymbolKind;
+  startByte: number;
+  endByte: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
   rangeStart: number;
   rangeEnd: number;
   signature: string | null;
@@ -137,6 +150,12 @@ export interface ChunkRecord {
   id: string;
   fileId: string;
   symbolId: string | null;
+  startByte: number;
+  endByte: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
   contentHash: string;
   content: string;
   tokenCount: number;
@@ -207,6 +226,7 @@ export interface SearchResult {
   sources: SearchSource[];
   snippet: string | null;
   lineRange: [number, number] | null;
+  columnRange: [number, number] | null;
 }
 
 export type SearchSource = 'vector' | 'keyword' | 'graph';
@@ -276,6 +296,7 @@ export interface ContextSymbol {
   signature: string | null;
   summary: string | null;
   lineRange: [number, number];
+  columnRange: [number, number];
   reason: string;
 }
 
@@ -284,6 +305,7 @@ export interface ContextSnippet {
   symbolName: string | null;
   content: string;
   lineRange: [number, number];
+  columnRange: [number, number];
   tokenCount: number;
   reason: string;
 }
@@ -438,6 +460,8 @@ export interface GraphNode {
   label: string;
   kind: SymbolKind | FileRole;
   filePath: string | null;
+  lineRange: [number, number] | null;
+  columnRange: [number, number] | null;
 }
 
 export interface GraphEdge {

@@ -181,6 +181,12 @@ export function extractSymbols(
       symbols.push(sym);
     }
   }
+  for (const sym of extractAnonymousDefaultExportSymbols(rootNode, sourceCode, fileId, lang)) {
+    if (!seen.has(sym.id)) {
+      seen.add(sym.id);
+      symbols.push(sym);
+    }
+  }
   log.debug("Extracted " + symbols.length + " symbols from " + fileId);
   return symbols;
 }
@@ -205,13 +211,100 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
   if (!nameCapture) return null;
   const name = nameCapture.node.text.trim();
   if (!name) return null;
-  const signature = sourceCode.slice(declNode.startIndex, declNode.endIndex);
-  const hash = contentHash(signature);
   const accessLevel = determineAccessLevel(match.captures);
+  return createSymbolRecord(declNode, sourceCode, fileId, name, kind, accessLevel);
+}
+
+function createSymbolRecord(
+  declNode: TSNode,
+  sourceCode: string,
+  fileId: string,
+  name: string,
+  kind: SymbolKind,
+  accessLevel: AccessLevel | null,
+): SymbolRecord {
+  const symbolSource = sourceCode.slice(declNode.startIndex, declNode.endIndex);
+  const signature = buildSignature(symbolSource);
+  const hash = contentHash(symbolSource);
   const startLine = declNode.startPosition.row + 1;
   const endLine = declNode.endPosition.row + 1;
+  const startColumn = declNode.startPosition.column;
+  const endColumn = declNode.endPosition.column;
   const symbolId = generateId(fileId, kind, name, String(startLine));
-  return { id: symbolId, fileId, name, kind, rangeStart: startLine, rangeEnd: endLine, signature, summary: null, hash, accessLevel };
+  return {
+    id: symbolId,
+    fileId,
+    name,
+    kind,
+    startByte: declNode.startIndex,
+    endByte: declNode.endIndex,
+    startLine,
+    endLine,
+    startColumn,
+    endColumn,
+    rangeStart: startLine,
+    rangeEnd: endLine,
+    signature,
+    summary: null,
+    hash,
+    accessLevel,
+  };
+}
+
+function extractAnonymousDefaultExportSymbols(
+  rootNode: TSNode,
+  sourceCode: string,
+  fileId: string,
+  lang: ParserLanguage,
+): SymbolRecord[] {
+  if (
+    lang !== ParserLanguage.TypeScript &&
+    lang !== ParserLanguage.TSX &&
+    lang !== ParserLanguage.JavaScript &&
+    lang !== ParserLanguage.JSX
+  ) {
+    return [];
+  }
+
+  const symbols: SymbolRecord[] = [];
+  walkNodes(rootNode, (node) => {
+    if (node.type !== "export_statement") return;
+    const text = node.text.trimStart();
+    if (!text.startsWith("export default")) return;
+
+    const isAnonymousFunction = /^export\s+default\s+(?:async\s+)?function\s*(?:<|\()/.test(text);
+    const isAnonymousClass = /^export\s+default\s+class\s*(?:\{|extends\b)/.test(text);
+    if (!isAnonymousFunction && !isAnonymousClass) return;
+
+    symbols.push(createSymbolRecord(
+      node,
+      sourceCode,
+      fileId,
+      "default",
+      isAnonymousClass ? "class" : "function",
+      null,
+    ));
+  });
+
+  return symbols;
+}
+
+function walkNodes(node: TSNode, visit: (node: TSNode) => void): void {
+  visit(node);
+  for (const child of node.children) {
+    walkNodes(child, visit);
+  }
+}
+
+function buildSignature(symbolSource: string): string {
+  const trimmed = symbolSource.trim();
+  const bodyStart = trimmed.indexOf("{");
+  if (bodyStart >= 0) {
+    return trimmed.slice(0, bodyStart).trim();
+  }
+
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim();
+  return firstLine || trimmed;
 }
 
 function findKindCapture(captures: QueryCapture[]): QueryCapture | null {

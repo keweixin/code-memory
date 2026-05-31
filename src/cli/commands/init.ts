@@ -23,8 +23,8 @@ export function registerInitCommand(program: Command): void {
     .option('-n, --name <name>', 'Project name (auto-detected from package.json if omitted)')
     .option('--ignore <patterns...>', 'Additional ignore patterns')
     .option('--languages <langs...>', 'Languages to index', ['typescript', 'javascript', 'python', 'go'])
-    .option('--embedding <provider>', 'Embedding provider: ollama | openai | none', 'ollama')
-    .option('--embedding-model <model>', 'Embedding model name', 'nomic-embed-text')
+    .option('--embedding <provider>', 'Embedding provider: ollama | openai | none', 'none')
+    .option('--embedding-model <model>', 'Embedding model name')
     .action(async (options) => {
       try {
         await initProject(options);
@@ -43,7 +43,7 @@ interface InitOptions {
   embeddingModel?: string;
 }
 
-async function initProject(options: InitOptions): Promise<void> {
+export async function initProject(options: InitOptions): Promise<void> {
   const projectPath = process.cwd();
   const configDir = join(projectPath, CONFIG_DIR);
 
@@ -61,6 +61,10 @@ async function initProject(options: InitOptions): Promise<void> {
     }
   }
 
+  const embeddingProvider = (options.embedding || 'none') as 'ollama' | 'openai' | 'none';
+  const embeddingModel = options.embeddingModel ||
+    (embeddingProvider === 'none' ? 'none' : 'nomic-embed-text');
+
   // Build config
   const config: CodeMemoryConfig = {
     projectName: projectName || 'unknown-project',
@@ -68,8 +72,8 @@ async function initProject(options: InitOptions): Promise<void> {
     ignore: [...DEFAULT_IGNORE_PATTERNS, ...(options.ignore || [])],
     languages: (options.languages || ['typescript', 'javascript', 'python', 'go']) as Language[],
     embedding: {
-      provider: (options.embedding || 'ollama') as 'ollama' | 'openai' | 'none',
-      model: options.embeddingModel || 'nomic-embed-text',
+      provider: embeddingProvider,
+      model: embeddingModel,
     },
     llm: null,
     realtime: {

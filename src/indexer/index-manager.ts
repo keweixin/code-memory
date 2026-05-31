@@ -28,6 +28,22 @@ import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('index-manager');
 
+interface ResolvedImportSymbol {
+  symbol: SymbolRecord;
+  resolutionNames: string[];
+}
+
+interface ReexportAlias {
+  source: string;
+  importedName: string;
+  exportedName: string;
+}
+
+interface ReexportNamespace {
+  source: string;
+  exportedName: string;
+}
+
 export class IndexManager {
   private rootPath: string;
   private config: CodeMemoryConfig;
@@ -52,6 +68,8 @@ export class IndexManager {
     const files = scanResult.files;
     log.info('Discovered ' + files.length + ' files to index');
 
+    this.pruneFilesNotInFullScan(files);
+
     let indexedCount = 0, totalSymbols = 0, totalChunks = 0, skipped = 0;
 
     for (let i = 0; i < files.length; i++) {
@@ -59,6 +77,7 @@ export class IndexManager {
       try {
         const result = await this.indexFile(discovered);
         if (!result) { skipped++; continue; }
+        this.removeFileFromIndex(result.fileId);
         this.storeParseResult(result, discovered);
         indexedCount++; totalSymbols += result.symbols.length;
         totalChunks += result.chunks.length;
@@ -168,7 +187,12 @@ export class IndexManager {
 
   private async indexFile(discovered: DiscoveredFile): Promise<ParseResult | null> {
     const parserLang = resolveParserLanguage(discovered.path);
-    if (!parserLang) return null;
+    if (!parserLang) {
+      if (discovered.role === 'config' || discovered.role === 'doc') {
+        return this.createFileOnlyParseResult(discovered);
+      }
+      return null;
+    }
 
     let sourceCode: string;
     try {
@@ -180,6 +204,21 @@ export class IndexManager {
 
     const fileId = generateId('file', normalizePath(discovered.relativePath));
     return await parseFile(discovered.path, sourceCode, parserLang, fileId);
+  }
+
+  private createFileOnlyParseResult(discovered: DiscoveredFile): ParseResult {
+    return {
+      fileId: generateId('file', normalizePath(discovered.relativePath)),
+      filePath: discovered.path,
+      language: discovered.language,
+      symbols: [],
+      imports: [],
+      exports: [],
+      edges: [],
+      calls: [],
+      chunks: [],
+      errors: [],
+    };
   }
 
   private storeParseResult(result: ParseResult, discovered: DiscoveredFile): void {
@@ -214,12 +253,37 @@ export class IndexManager {
 
   private removeFileFromIndex(fileId: string): void {
     try {
-      deleteSymbolsByFileId(fileId);
+      for (const symbolId of this.getSymbolIdsByFileId(fileId)) {
+        deleteEdgesByNodeId(symbolId);
+      }
       deleteEdgesByNodeId(fileId);
       deleteChunksByFileId(fileId);
+      deleteSymbolsByFileId(fileId);
       deleteFile(fileId);
     } catch (err) {
       log.error('Failed to remove file from index: ' + fileId, err);
+    }
+  }
+
+  private pruneFilesNotInFullScan(files: DiscoveredFile[]): void {
+    const currentFileIds = new Set(
+      files.map((file) => generateId('file', normalizePath(file.relativePath))),
+    );
+
+    for (const previousFile of this.safeGetAllFiles()) {
+      if (!currentFileIds.has(previousFile.id)) {
+        this.removeFileFromIndex(previousFile.id);
+      }
+    }
+  }
+
+  private getSymbolIdsByFileId(fileId: string): string[] {
+    try {
+      const db = getDatabaseSync();
+      const rows = db.exec('SELECT id FROM symbols WHERE file_id = ?', [fileId]);
+      return rows[0]?.values.map(([id]) => String(id)) ?? [];
+    } catch {
+      return [];
     }
   }
 
@@ -245,6 +309,7 @@ export class IndexManager {
     this.setMetadata('current_commit', scanResult.gitInfo.currentCommit ?? '');
     this.setMetadata('current_branch', scanResult.gitInfo.currentBranch ?? '');
     this.setMetadata('embedding_provider', this.config.embedding.provider);
+    this.setMetadata('embedding_model', this.config.embedding.model);
     this.setMetadata('is_indexing', 'false');
     this.setMetadata('index_completed', now);
   }
@@ -289,7 +354,7 @@ export class IndexManager {
 
   private async rebuildGraphEdges(files: DiscoveredFile[]): Promise<number> {
     const db = getDatabaseSync();
-    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES')");
+    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES')");
 
     const indexedFiles = this.safeGetAllFiles();
     const filesByPath = new Map<string, FileRecord>();
@@ -318,9 +383,31 @@ export class IndexManager {
       edgeCount += this.createCallEdges(fileRecord, parsed, symbolsByFile, importedSymbols.symbolsByName);
     }
 
+    edgeCount += this.createConfigEdges(indexedFiles);
+
     const totalEdges = this.getTableCount('edges');
     log.info('Rebuilt graph edges: ' + totalEdges);
     return totalEdges;
+  }
+
+  private createConfigEdges(indexedFiles: FileRecord[]): number {
+    const configs = indexedFiles.filter((file) => file.role === 'config');
+    const configuredFiles = indexedFiles.filter((file) => file.role === 'source' || file.role === 'test');
+    let edgeCount = 0;
+
+    for (const config of configs) {
+      for (const configuredFile of configuredFiles) {
+        edgeCount += this.upsertGraphEdge(
+          config.id,
+          configuredFile.id,
+          'CONFIGURES',
+          0.55,
+          'project configuration',
+        );
+      }
+    }
+
+    return edgeCount;
   }
 
   private createImportEdges(
@@ -331,30 +418,281 @@ export class IndexManager {
   ): { edgeCount: number; symbolsByName: Map<string, SymbolRecord[]> } {
     let edgeCount = 0;
     const symbolsByName = new Map<string, SymbolRecord[]>();
+    const localTestSymbols = importer.role === 'test'
+      ? symbolsByFile.get(importer.id) || []
+      : [];
 
     for (const imp of imports) {
       const importedFile = this.resolveImportTarget(importer, imp.source, filesByPath);
       if (!importedFile) continue;
 
       edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'IMPORTS', 0.95, imp.source);
+      if (importer.role === 'test' && importedFile.role !== 'test') {
+        edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'TESTS', 0.8, imp.source);
+      }
 
-      const targetSymbols = symbolsByFile.get(importedFile.id) || [];
-      const importedNames = imp.names.length > 0
-        ? imp.names
-        : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+      if (this.isSideEffectImport(imp)) continue;
 
-      for (const importedName of importedNames) {
-        const matches = targetSymbols.filter((symbol) => symbol.name === importedName);
-        for (const symbol of matches) {
-          const current = symbolsByName.get(importedName) || [];
-          current.push(symbol);
-          symbolsByName.set(importedName, current);
-          edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
+      const importedSymbols = this.resolveImportedSymbolBindings(imp, importedFile, filesByPath, symbolsByFile);
+
+      for (const importedSymbol of importedSymbols) {
+        const symbol = importedSymbol.symbol;
+        const resolutionNames = [
+          ...new Set([
+            ...this.getImportResolutionNames(imp, symbol.name),
+            ...importedSymbol.resolutionNames,
+          ]),
+        ];
+        if (!imp.isTypeOnly) {
+          for (const resolutionName of resolutionNames) {
+            const current = symbolsByName.get(resolutionName) || [];
+            current.push(symbol);
+            symbolsByName.set(resolutionName, current);
+          }
+        }
+        edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
+        if (localTestSymbols.length > 0) {
+          for (const testSymbol of localTestSymbols) {
+            edgeCount += this.upsertGraphEdge(testSymbol.id, symbol.id, 'TESTS', 0.82, imp.source);
+          }
         }
       }
     }
 
     return { edgeCount, symbolsByName };
+  }
+
+  private isSideEffectImport(imp: ImportInfo): boolean {
+    return imp.names.length === 0
+      && !imp.defaultName
+      && !imp.isDefault
+      && !imp.isNamespace;
+  }
+
+  private resolveImportedSymbolBindings(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    seenFileIds: Set<string> = new Set(),
+  ): ResolvedImportSymbol[] {
+    if (seenFileIds.has(importedFile.id)) return [];
+    seenFileIds.add(importedFile.id);
+
+    const directSymbols = symbolsByFile.get(importedFile.id) || [];
+    const directNames = this.getImportedSymbolNames(imp, importedFile, directSymbols);
+    const directMatches = this.matchSymbolsByName(directSymbols, directNames);
+    if (directMatches.length > 0) {
+      return directMatches.map((symbol) => ({ symbol, resolutionNames: [] }));
+    }
+
+    const aliasedReexportMatches = this.resolveAliasedReexportSymbols(
+      imp,
+      importedFile,
+      filesByPath,
+      symbolsByFile,
+      seenFileIds,
+    );
+    if (aliasedReexportMatches.length > 0) return aliasedReexportMatches;
+
+    const namespaceReexportMatches = this.resolveNamespaceReexportSymbols(
+      imp,
+      importedFile,
+      filesByPath,
+      symbolsByFile,
+      seenFileIds,
+    );
+    if (namespaceReexportMatches.length > 0) return namespaceReexportMatches;
+
+    const reexportSources = importedFile.exports
+      .filter((exportName) => exportName.startsWith('reexport:'))
+      .map((exportName) => exportName.slice('reexport:'.length));
+
+    const reexportedMatches: ResolvedImportSymbol[] = [];
+    for (const source of reexportSources) {
+      const reexportFile = this.resolveImportTarget(importedFile, source, filesByPath);
+      if (!reexportFile) continue;
+
+      const targetSymbols = symbolsByFile.get(reexportFile.id) || [];
+      const requestedNames = imp.names.length > 0
+        ? imp.names
+        : importedFile.exports.filter((exportName) => !exportName.startsWith('reexport:'));
+      const names = requestedNames.length > 0
+        ? requestedNames
+        : targetSymbols.map((symbol) => symbol.name);
+      const matches = this.matchSymbolsByName(targetSymbols, names);
+      if (matches.length > 0) {
+        reexportedMatches.push(
+          ...matches.map((symbol) => ({ symbol, resolutionNames: [] })),
+        );
+        continue;
+      }
+
+      reexportedMatches.push(
+        ...this.resolveImportedSymbolBindings(imp, reexportFile, filesByPath, symbolsByFile, seenFileIds),
+      );
+    }
+
+    return reexportedMatches;
+  }
+
+  private resolveNamespaceReexportSymbols(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    seenFileIds: Set<string>,
+  ): ResolvedImportSymbol[] {
+    const requestedNames = new Set(imp.names);
+    if (imp.defaultName) requestedNames.add(imp.defaultName);
+    if (requestedNames.size === 0 && !imp.isNamespace) return [];
+
+    const matches: ResolvedImportSymbol[] = [];
+    for (const namespace of this.getReexportNamespaces(importedFile.exports)) {
+      if (!imp.isNamespace && !requestedNames.has(namespace.exportedName)) continue;
+
+      const reexportFile = this.resolveImportTarget(importedFile, namespace.source, filesByPath);
+      if (!reexportFile || seenFileIds.has(reexportFile.id)) continue;
+
+      const targetSymbols = this.getExportedSymbols(reexportFile, symbolsByFile.get(reexportFile.id) || []);
+      matches.push(
+        ...targetSymbols.map((symbol) => ({
+          symbol,
+          resolutionNames: [symbol.name],
+        })),
+      );
+    }
+
+    return matches;
+  }
+
+  private resolveAliasedReexportSymbols(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    seenFileIds: Set<string>,
+  ): ResolvedImportSymbol[] {
+    const requestedNames = new Set(imp.names);
+    if (imp.defaultName) requestedNames.add(imp.defaultName);
+    if (requestedNames.size === 0 && !imp.isNamespace) return [];
+
+    const matches: ResolvedImportSymbol[] = [];
+    for (const alias of this.getReexportAliases(importedFile.exports)) {
+      if (!imp.isNamespace && !requestedNames.has(alias.exportedName)) continue;
+
+      const reexportFile = this.resolveImportTarget(importedFile, alias.source, filesByPath);
+      if (!reexportFile || seenFileIds.has(reexportFile.id)) continue;
+
+      const targetSymbols = symbolsByFile.get(reexportFile.id) || [];
+      for (const symbol of this.matchSymbolsByName(targetSymbols, [alias.importedName])) {
+        matches.push({
+          symbol,
+          resolutionNames: [alias.exportedName],
+        });
+      }
+    }
+
+    return matches;
+  }
+
+  private getExportedSymbols(file: FileRecord, symbols: SymbolRecord[]): SymbolRecord[] {
+    const exportedNames = new Set(
+      file.exports.filter((exportName) => !exportName.startsWith('reexport')),
+    );
+    const exported = symbols.filter((symbol) => exportedNames.has(symbol.name));
+    return exported.length > 0 ? exported : symbols;
+  }
+
+  private getReexportAliases(exports: string[]): ReexportAlias[] {
+    const aliases: ReexportAlias[] = [];
+    for (const exportName of exports) {
+      if (!exportName.startsWith('reexportAlias:')) continue;
+      try {
+        const parsed = JSON.parse(exportName.slice('reexportAlias:'.length)) as Partial<ReexportAlias>;
+        if (parsed.source && parsed.importedName && parsed.exportedName) {
+          aliases.push({
+            source: parsed.source,
+            importedName: parsed.importedName,
+            exportedName: parsed.exportedName,
+          });
+        }
+      } catch {
+        // Ignore malformed legacy export metadata.
+      }
+    }
+    return aliases;
+  }
+
+  private getReexportNamespaces(exports: string[]): ReexportNamespace[] {
+    const namespaces: ReexportNamespace[] = [];
+    for (const exportName of exports) {
+      if (!exportName.startsWith('reexportNamespace:')) continue;
+      try {
+        const parsed = JSON.parse(exportName.slice('reexportNamespace:'.length)) as Partial<ReexportNamespace>;
+        if (parsed.source && parsed.exportedName) {
+          namespaces.push({
+            source: parsed.source,
+            exportedName: parsed.exportedName,
+          });
+        }
+      } catch {
+        // Ignore malformed legacy export metadata.
+      }
+    }
+    return namespaces;
+  }
+
+  private matchSymbolsByName(symbols: SymbolRecord[], names: string[]): SymbolRecord[] {
+    const nameSet = new Set(names);
+    return symbols.filter((symbol) => nameSet.has(symbol.name));
+  }
+
+  private getImportedSymbolNames(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    targetSymbols: SymbolRecord[],
+  ): string[] {
+    if (imp.isNamespace) {
+      const exported = targetSymbols
+        .filter((symbol) => importedFile.exports.includes(symbol.name))
+        .map((symbol) => symbol.name);
+      return exported.length > 0
+        ? exported
+        : targetSymbols.map((symbol) => symbol.name);
+    }
+
+    if (imp.isDefault && imp.names.length > 0) {
+      const names = new Set(imp.names);
+      const defaultSymbol = this.findDefaultImportSymbol(importedFile, targetSymbols);
+      if (defaultSymbol) names.add(defaultSymbol.name);
+      return [...names];
+    }
+
+    return imp.names.length > 0
+      ? imp.names
+      : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+  }
+
+  private getImportResolutionNames(imp: ImportInfo, importedName: string): string[] {
+    const names = new Set([importedName]);
+    const namedExportNames = new Set(Object.values(imp.aliases || {}));
+    if (imp.defaultName && !imp.isNamespace && !namedExportNames.has(importedName)) {
+      names.add(imp.defaultName);
+    }
+    for (const [localName, exportedName] of Object.entries(imp.aliases || {})) {
+      if (exportedName === importedName) names.add(localName);
+    }
+    return [...names];
+  }
+
+  private findDefaultImportSymbol(
+    importedFile: FileRecord,
+    targetSymbols: SymbolRecord[],
+  ): SymbolRecord | null {
+    return targetSymbols.find((symbol) => importedFile.exports.includes(symbol.name))
+      || targetSymbols[0]
+      || null;
   }
 
   private createCallEdges(
@@ -461,7 +799,7 @@ export class IndexManager {
     const ext = posixPath.extname(rawPath);
     if (ext) {
       const withoutExt = rawPath.slice(0, -ext.length);
-      if (preferTypeScript && ['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
+      if (['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
         add(withoutExt + '.ts');
         add(withoutExt + '.tsx');
       }
@@ -480,19 +818,30 @@ export class IndexManager {
   private getAllIndexedSymbols(): SymbolRecord[] {
     try {
       const db = getDatabaseSync();
-      const rows = db.exec('SELECT id, file_id, name, kind, range_start, range_end, signature, summary, hash, access_level FROM symbols');
+      const rows = db.exec(
+        `SELECT id, file_id, name, kind, start_byte, end_byte, start_line, end_line,
+                start_column, end_column, range_start, range_end, signature, summary,
+                hash, access_level
+         FROM symbols`,
+      );
       if (rows.length === 0) return [];
       return rows[0].values.map((row) => ({
         id: String(row[0]),
         fileId: String(row[1]),
         name: String(row[2]),
         kind: String(row[3]) as SymbolRecord['kind'],
-        rangeStart: Number(row[4]),
-        rangeEnd: Number(row[5]),
-        signature: row[6] ? String(row[6]) : null,
-        summary: row[7] ? String(row[7]) : null,
-        hash: String(row[8]),
-        accessLevel: row[9] ? String(row[9]) as SymbolRecord['accessLevel'] : null,
+        startByte: Number(row[4]),
+        endByte: Number(row[5]),
+        startLine: Number(row[6]),
+        endLine: Number(row[7]),
+        startColumn: Number(row[8]),
+        endColumn: Number(row[9]),
+        rangeStart: Number(row[10]),
+        rangeEnd: Number(row[11]),
+        signature: row[12] ? String(row[12]) : null,
+        summary: row[13] ? String(row[13]) : null,
+        hash: String(row[14]),
+        accessLevel: row[15] ? String(row[15]) as SymbolRecord['accessLevel'] : null,
       }));
     } catch {
       return [];

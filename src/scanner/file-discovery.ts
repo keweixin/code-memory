@@ -189,9 +189,10 @@ export function discoverFiles(
       if (entry.isDirectory()) {
         walk(fullPath);
       } else if (entry.isFile()) {
-        // Detect language early — skip if not in the requested set
         const language = detectLanguage(fullPath);
-        if (languageSet && !languageSet.has(language)) {
+        const role = detectFileRole(relPath, language);
+
+        if (languageSet && !languageSet.has(language) && role !== 'config' && role !== 'doc') {
           continue;
         }
 
@@ -214,9 +215,6 @@ export function discoverFiles(
           skippedBinary++;
           continue;
         }
-
-        // Determine role
-        const role = detectFileRole(relPath, language);
 
         results.push({
           path: fullPath,

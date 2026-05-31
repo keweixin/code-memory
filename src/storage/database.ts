@@ -12,7 +12,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { CONFIG_DIR, DATABASE_FILE, SQLITE_PRAGMAS } from '../shared/constants.js';
 import { createLogger } from '../shared/logger.js';
-import { ALL_DDL, SCHEMA_VERSION } from './schema.js';
+import { CORE_TABLES, FTS_TABLES, FTS_TRIGGERS, INDEXES, SCHEMA_VERSION } from './schema.js';
 
 const log = createLogger('database');
 
@@ -107,7 +107,7 @@ export async function getDatabase(basePath?: string): Promise<SqlJsDatabase> {
 
   // Persist schema version
   const currentVersion = getMetadataValue('schema_version');
-  if (currentVersion === null) {
+  if (currentVersion !== String(SCHEMA_VERSION)) {
     setMetadataValue('schema_version', String(SCHEMA_VERSION));
   }
 
@@ -136,15 +136,66 @@ export function initializeSchema(): void {
     throw new Error('Database not initialized — call getDatabase() first');
   }
 
-  for (const ddl of ALL_DDL) {
+  const ddlGroups = [CORE_TABLES];
+  let statementCount = 0;
+
+  for (const ddl of ddlGroups.flat()) {
     try {
       db.run(ddl);
+      statementCount++;
     } catch (err) {
       log.error(`Schema DDL failed: ${ddl.slice(0, 80)}...`, err);
       throw err;
     }
   }
-  log.debug(`Schema initialized (${ALL_DDL.length} statements)`);
+
+  for (const ddl of [...getSchemaMigrations(), ...FTS_TABLES, ...FTS_TRIGGERS, ...INDEXES]) {
+    try {
+      db.run(ddl);
+      statementCount++;
+    } catch (err) {
+      log.error(`Schema DDL failed: ${ddl.slice(0, 80)}...`, err);
+      throw err;
+    }
+  }
+  log.debug(`Schema initialized (${statementCount} statements)`);
+}
+
+function getSchemaMigrations(): string[] {
+  if (!db) return [];
+  return [
+    ...missingColumnMigrations('symbols', [
+      ['start_byte', 'INTEGER NOT NULL DEFAULT 0'],
+      ['end_byte', 'INTEGER NOT NULL DEFAULT 0'],
+      ['start_line', 'INTEGER NOT NULL DEFAULT 0'],
+      ['end_line', 'INTEGER NOT NULL DEFAULT 0'],
+      ['start_column', 'INTEGER NOT NULL DEFAULT 0'],
+      ['end_column', 'INTEGER NOT NULL DEFAULT 0'],
+    ]),
+    ...missingColumnMigrations('chunks', [
+      ['start_byte', 'INTEGER NOT NULL DEFAULT 0'],
+      ['end_byte', 'INTEGER NOT NULL DEFAULT 0'],
+      ['start_line', 'INTEGER NOT NULL DEFAULT 0'],
+      ['end_line', 'INTEGER NOT NULL DEFAULT 0'],
+      ['start_column', 'INTEGER NOT NULL DEFAULT 0'],
+      ['end_column', 'INTEGER NOT NULL DEFAULT 0'],
+    ]),
+  ];
+}
+
+function missingColumnMigrations(
+  table: 'symbols' | 'chunks',
+  columns: Array<[string, string]>,
+): string[] {
+  if (!db) return [];
+  const existing = new Set<string>();
+  const rows = db.exec(`PRAGMA table_info(${table})`);
+  for (const row of rows[0]?.values ?? []) {
+    existing.add(String(row[1]));
+  }
+  return columns
+    .filter(([name]) => !existing.has(name))
+    .map(([name, definition]) => `ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
 }
 
 /**

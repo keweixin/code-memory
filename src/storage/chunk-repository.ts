@@ -19,6 +19,12 @@ function serializeChunk(record: Partial<ChunkRecord>): Record<string, unknown> {
     $id: record.id,
     $fileId: record.fileId,
     $symbolId: record.symbolId ?? null,
+    $startByte: record.startByte,
+    $endByte: record.endByte,
+    $startLine: record.startLine,
+    $endLine: record.endLine,
+    $startColumn: record.startColumn,
+    $endColumn: record.endColumn,
     $contentHash: record.contentHash,
     $content: record.content,
     $tokenCount: record.tokenCount,
@@ -32,6 +38,12 @@ function deserializeChunk(row: Record<string, unknown>): ChunkRecord {
     id: row.id as string,
     fileId: row.file_id as string,
     symbolId: (row.symbol_id as string) ?? null,
+    startByte: row.start_byte as number,
+    endByte: row.end_byte as number,
+    startLine: row.start_line as number,
+    endLine: row.end_line as number,
+    startColumn: row.start_column as number,
+    endColumn: row.end_column as number,
     contentHash: row.content_hash as string,
     content: row.content as string,
     tokenCount: row.token_count as number,
@@ -48,10 +60,14 @@ export function upsertChunk(chunk: ChunkRecord): void {
 
   db.run(
     `INSERT OR REPLACE INTO chunks
-       (id, file_id, symbol_id, content_hash, content, token_count, summary, embedding_id)
-     VALUES ($id, $fileId, $symbolId, $contentHash, $content, $tokenCount, $summary, $embeddingId)`,
+       (id, file_id, symbol_id, start_byte, end_byte, start_line, end_line,
+        start_column, end_column, content_hash, content, token_count, summary, embedding_id)
+     VALUES ($id, $fileId, $symbolId, $startByte, $endByte, $startLine, $endLine,
+             $startColumn, $endColumn, $contentHash, $content, $tokenCount, $summary, $embeddingId)`,
     [
-      p.$id, p.$fileId, p.$symbolId, p.$contentHash, p.$content,
+      p.$id, p.$fileId, p.$symbolId,
+      p.$startByte, p.$endByte, p.$startLine, p.$endLine,
+      p.$startColumn, p.$endColumn, p.$contentHash, p.$content,
       p.$tokenCount, p.$summary, p.$embeddingId,
     ],
   );

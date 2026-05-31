@@ -1,8 +1,8 @@
 /**
  * MCP Tool: search_code
  *
- * Hybrid search across files and symbols using keyword (FTS3),
- * graph expansion, and optionally vector search.
+ * Hybrid search across files and symbols using keyword (FTS3)
+ * and graph expansion. Vector search is experimental and not wired yet.
  * Returns ranked results with snippets and metadata.
  */
 
@@ -19,8 +19,8 @@ export function registerSearchCodeTool(server: McpServer, db: SqlJsDatabase): vo
 
   server.tool(
     "search_code",
-    "Search across all indexed code (files and symbols) using hybrid retrieval. " +
-    "Combines keyword search, graph-based expansion, and optional vector search. " +
+    "Search across all indexed code (files and symbols). Current hybrid mode " +
+    "combines keyword search and graph-based expansion; vector search is not wired yet. " +
     "Returns ranked results with snippets and location information. " +
     "Use this when you need to find relevant code for a task or question.",
     {
@@ -77,6 +77,7 @@ function formatSearchResults(
     sources: string[];
     snippet: string | null;
     lineRange: [number, number] | null;
+    columnRange: [number, number] | null;
   }>,
 ): string {
   const lines: string[] = [];
@@ -92,9 +93,10 @@ function formatSearchResults(
     const sources = r.sources.join("+");
 
     lines.push(`${rank} ${score} ${r.name} (${kind})`);
-    lines.push(`     File: ${r.filePath}`);
     if (r.lineRange) {
-      lines.push(`     Lines: ${r.lineRange[0]}-${r.lineRange[1]}`);
+      lines.push(`     Location: ${formatLocation(r.filePath, r.lineRange, r.columnRange)}`);
+    } else {
+      lines.push(`     Location: ${r.filePath}`);
     }
     if (r.snippet) {
       const cleanSnippet = r.snippet.replace(/<</g, "**").replace(/>>/g, "**");
@@ -105,4 +107,13 @@ function formatSearchResults(
   }
 
   return lines.join("\n");
+}
+
+function formatLocation(
+  filePath: string,
+  lineRange: [number, number],
+  columnRange: [number, number] | null,
+): string {
+  if (!columnRange) return `${filePath}:${lineRange[0]}-${lineRange[1]}`;
+  return `${filePath}:${lineRange[0]}:${columnRange[0]}-${lineRange[1]}:${columnRange[1]}`;
 }

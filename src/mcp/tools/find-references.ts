@@ -76,8 +76,10 @@ interface ReferenceInfo {
   filePath: string;
   edgeType: string;
   confidence: number;
-  rangeStart: number;
-  rangeEnd: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 function findSymbolIds(db: SqlJsDatabase, name: string): string[] {
@@ -110,9 +112,9 @@ function collectReferences(
   for (const id of symbolIds) {
     const refEdges = graphEngine.getIncomingNeighbors(id, "REFERENCES");
     for (const edge of refEdges) {
-      const info = getEdgeSymbolInfo(db, edge.from, edge.type, edge.confidence);
+      const info = getEdgeNodeInfo(db, edge.from, edge.type, edge.confidence, symbolName);
       if (info && refMap.size < maxResults * 2) {
-        const key = info.filePath + ":" + info.rangeStart;
+        const key = info.filePath + ":" + info.startLine + ":" + info.startColumn;
         if (!refMap.has(key)) refMap.set(key, info);
       }
     }
@@ -120,9 +122,9 @@ function collectReferences(
     if (refMap.size < maxResults * 2) {
       const callEdges = graphEngine.getIncomingNeighbors(id, "CALLS");
       for (const edge of callEdges.slice(0, 10)) {
-        const info = getEdgeSymbolInfo(db, edge.from, edge.type, edge.confidence);
+        const info = getEdgeNodeInfo(db, edge.from, edge.type, edge.confidence, symbolName);
         if (info) {
-          const key = info.filePath + ":" + info.rangeStart;
+          const key = info.filePath + ":" + info.startLine + ":" + info.startColumn;
           if (!refMap.has(key)) refMap.set(key, info);
         }
       }
@@ -131,9 +133,9 @@ function collectReferences(
     if (refMap.size < maxResults * 2) {
       const importEdges = graphEngine.getIncomingNeighbors(id, "IMPORTS");
       for (const edge of importEdges.slice(0, 5)) {
-        const info = getEdgeSymbolInfo(db, edge.from, edge.type, edge.confidence);
+        const info = getEdgeNodeInfo(db, edge.from, edge.type, edge.confidence, symbolName);
         if (info) {
-          const key = info.filePath + ":" + info.rangeStart;
+          const key = info.filePath + ":" + info.startLine + ":" + info.startColumn;
           if (!refMap.has(key)) refMap.set(key, info);
         }
       }
@@ -143,7 +145,7 @@ function collectReferences(
   if (refMap.size < maxResults) {
     try {
       const ftsResults = db.exec(
-        "SELECT s.name, s.kind, s.file_id, s.range_start, s.range_end " +
+        "SELECT s.name, s.kind, s.file_id, s.start_line, s.end_line, s.start_column, s.end_column " +
         "FROM symbols_fts fts JOIN symbols s ON s.rowid = fts.docid " +
         "WHERE symbols_fts MATCH ? LIMIT ?",
         ["name:" + symbolName + "*", maxResults * 2],
@@ -155,7 +157,7 @@ function collectReferences(
           const filePath = resolveFilePath(db, fileId);
           if (!filePath) continue;
 
-          const key = filePath + ":" + String(row[3]);
+          const key = filePath + ":" + String(row[3]) + ":" + String(row[5]);
           if (!refMap.has(key) && refMap.size < maxResults * 2) {
             refMap.set(key, {
               symbolName: String(row[0]),
@@ -163,8 +165,10 @@ function collectReferences(
               filePath,
               edgeType: "REFERENCES",
               confidence: 0.7,
-              rangeStart: Number(row[3]),
-              rangeEnd: Number(row[4]),
+              startLine: Number(row[3]),
+              endLine: Number(row[4]),
+              startColumn: Number(row[5]),
+              endColumn: Number(row[6]),
             });
           }
         }
@@ -179,15 +183,16 @@ function collectReferences(
   return refs.slice(0, maxResults);
 }
 
-function getEdgeSymbolInfo(
+function getEdgeNodeInfo(
   db: SqlJsDatabase,
   nodeId: string,
   edgeType: string,
   confidence: number,
+  targetName: string,
 ): ReferenceInfo | null {
   try {
     const results = db.exec(
-      "SELECT name, kind, file_id, range_start, range_end FROM symbols WHERE id = ?",
+      "SELECT name, kind, file_id, start_line, end_line, start_column, end_column FROM symbols WHERE id = ?",
       [nodeId],
     );
     if (results.length > 0 && results[0].values.length > 0) {
@@ -201,14 +206,63 @@ function getEdgeSymbolInfo(
         filePath,
         edgeType,
         confidence,
-        rangeStart: Number(row[3]),
-        rangeEnd: Number(row[4]),
+        startLine: Number(row[3]),
+        endLine: Number(row[4]),
+        startColumn: Number(row[5]),
+        endColumn: Number(row[6]),
       };
     }
   } catch {
     // not a known symbol
   }
+
+  try {
+    const results = db.exec(
+      "SELECT path, imports FROM files WHERE id = ?",
+      [nodeId],
+    );
+    if (results.length > 0 && results[0].values.length > 0) {
+      const row = results[0].values[0];
+      const filePath = String(row[0]);
+      const importInfo = findImportForSymbol(String(row[1] || "[]"), targetName);
+
+      return {
+        symbolName: filePath.split("/").pop() || filePath,
+        kind: "file",
+        filePath,
+        edgeType,
+        confidence,
+        startLine: importInfo?.startLine || 1,
+        endLine: importInfo?.endLine || importInfo?.startLine || 1,
+        startColumn: importInfo?.startColumn || 0,
+        endColumn: importInfo?.endColumn || importInfo?.startColumn || 0,
+      };
+    }
+  } catch {
+    // not a known file
+  }
   return null;
+}
+
+function findImportForSymbol(importsJson: string, targetName: string): {
+  startLine?: number;
+  endLine?: number;
+  startColumn?: number;
+  endColumn?: number;
+} | null {
+  try {
+    const imports = JSON.parse(importsJson) as Array<{
+      names?: string[];
+      startLine?: number;
+      endLine?: number;
+      startColumn?: number;
+      endColumn?: number;
+    }>;
+    if (!Array.isArray(imports)) return null;
+    return imports.find((imp) => Array.isArray(imp.names) && imp.names.includes(targetName)) || null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveFilePath(db: SqlJsDatabase, fileId: string): string | null {
@@ -243,7 +297,7 @@ function formatReferences(symbolName: string, targetCount: number, refs: Referen
                         ref.edgeType === "IMPORTS" ? "imported by" :
                         ref.edgeType === "REFERENCES" ? "referenced by" :
                         ref.edgeType;
-      lines.push("  Line " + ref.rangeStart + ": " + edgeLabel + " " +
+      lines.push("  " + formatLocation(ref) + ": " + edgeLabel + " " +
         ref.symbolName + " (" + ref.kind + ") [conf: " + ref.confidence.toFixed(1) + "]");
     }
     lines.push("");
@@ -255,4 +309,9 @@ function formatReferences(symbolName: string, targetCount: number, refs: Referen
   }
 
   return lines.join("\n");
+}
+
+function formatLocation(ref: ReferenceInfo): string {
+  return ref.filePath + ":" + ref.startLine + ":" + ref.startColumn +
+    "-" + ref.endLine + ":" + ref.endColumn;
 }

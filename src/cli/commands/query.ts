@@ -27,13 +27,13 @@ export function registerQueryCommand(program: Command): void {
     });
 }
 
-interface QueryOptions {
+export interface QueryOptions {
   limit?: string;
   mode?: string;
   json?: boolean;
 }
 
-async function queryIndex(question: string, options: QueryOptions): Promise<void> {
+export async function queryIndex(question: string, options: QueryOptions): Promise<void> {
   const projectPath = process.cwd();
   const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
 
@@ -42,19 +42,23 @@ async function queryIndex(question: string, options: QueryOptions): Promise<void
 
   const { getDatabase } = await import('../../storage/database.js');
   const { HybridSearchEngine } = await import('../../search/hybrid-search.js');
-  const { searchSymbolsFts, normalizeFts3Scores } = await import('../../search/fts-search.js');
 
   await getDatabase(projectPath);
   const { getDatabaseSync } = await import('../../storage/database.js');
   const db = getDatabaseSync();
 
   const limit = parseInt(options.limit || '10', 10);
-  const results = normalizeFts3Scores(searchSymbolsFts(db, { query: question, limit }));
+  const mode = normalizeSearchMode(options.mode);
+  const searchEngine = new HybridSearchEngine(db);
+  const results = await searchEngine.searchCode(question, {
+    limit,
+    searchMode: mode,
+  });
 
   if (options.json) {
     console.log(JSON.stringify(results, null, 2));
   } else {
-    console.log(`Results for "${question}" (${results.length}):\n`);
+    console.log(`Results for "${question}" [${mode}] (${results.length}):\n`);
     for (const r of results) {
       console.log(`  ${r.name} (${r.kind}) — ${r.filePath}`);
       console.log(`    score: ${r.score.toFixed(3)}`);
@@ -62,4 +66,11 @@ async function queryIndex(question: string, options: QueryOptions): Promise<void
       console.log();
     }
   }
+}
+
+function normalizeSearchMode(mode: string | undefined): 'hybrid' | 'keyword' | 'graph' {
+  if (mode === 'hybrid' || mode === 'keyword' || mode === 'graph') {
+    return mode;
+  }
+  return 'keyword';
 }

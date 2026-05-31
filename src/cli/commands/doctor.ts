@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE } from '../../shared/constants.js';
 import { LANGUAGE_CONFIGS } from '../../parser/types.js';
 import { createLogger } from '../../shared/logger.js';
+import { safeJsonParse } from '../../shared/utils.js';
 
 const log = createLogger('doctor');
 
@@ -33,6 +34,14 @@ interface CheckResult {
   message: string;
 }
 
+interface DoctorConfig {
+  languages?: string[];
+  embedding?: {
+    provider?: string;
+    model?: string;
+  };
+}
+
 function runDoctor(asJson: boolean): void {
   const projectPath = process.cwd();
   const checks: CheckResult[] = [];
@@ -55,14 +64,33 @@ function runDoctor(asJson: boolean): void {
       : 'No index found. Run "code-memory index --full".',
   });
 
+  let parsedConfig: DoctorConfig | null = null;
   let configuredLanguages: string[] = [];
   if (existsSync(configPath)) {
     try {
-      const config = JSON.parse(readFileSync(configPath, 'utf-8')) as { languages?: string[] };
-      configuredLanguages = config.languages || [];
+      parsedConfig = safeJsonParse<DoctorConfig>(readFileSync(configPath, 'utf-8'));
+      if (!parsedConfig) throw new Error('Invalid config JSON');
+      configuredLanguages = parsedConfig.languages || [];
     } catch {
       checks.push({ name: 'config-json', status: 'error', message: 'Config JSON is invalid.' });
     }
+  }
+
+  if (parsedConfig) {
+    const provider = parsedConfig.embedding?.provider || 'none';
+    const model = parsedConfig.embedding?.model || 'none';
+    checks.push({
+      name: 'embedding',
+      status: 'ok',
+      message: 'Embedding provider: ' + provider + ' (' + model + ').',
+    });
+    checks.push({
+      name: 'vector-search',
+      status: 'warn',
+      message: provider === 'none'
+        ? 'Vector search is disabled because embedding provider is none; hybrid search is keyword + graph only.'
+        : 'Vector search is not wired end to end yet; hybrid search is keyword + graph only.',
+    });
   }
 
   const grammarDirs = getGrammarSearchDirs(projectPath);
