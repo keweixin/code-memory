@@ -171,7 +171,7 @@ export class ContextPacker {
   private getProjectCard(): ProjectCard | null {
     try {
       const metaResults = this.db.exec(
-        "SELECT key, value FROM index_metadata WHERE key IN ('project_name', 'total_files', 'total_symbols', 'languages', 'architecture_style', 'framework')"
+        "SELECT key, value FROM index_metadata WHERE key IN ('project_name', 'total_files', 'total_symbols', 'languages', 'architecture_style', 'framework', 'root_path')"
       );
 
       if (!metaResults.length || !metaResults[0].values.length) return null;

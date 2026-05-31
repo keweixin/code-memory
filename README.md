@@ -14,7 +14,7 @@ Code Memory is a local MCP-first code intelligence engine for coding agents. It 
 
 - Vector search is not enabled yet. `hybrid` currently means keyword retrieval plus graph expansion; LanceDB/embedding code is experimental and not wired into indexing or querying.
 - TS/JS are the reliable first-stage languages. Python and Go symbol indexing are present, but their call/dependency graph quality is not first-stage acceptance scope.
-- TSX parsing requires `tree-sitter-tsx.wasm`. Run `code-memory doctor` to verify whether the grammar is available.
+- TSX parsing uses the bundled `tree-sitter-tsx.wasm`. Run `code-memory doctor` to verify grammar availability in custom installs.
 - Existing v0.1 indexes should be rebuilt with `code-memory index --full` after upgrading because symbol ranges now use 1-based line numbers.
 
 ## Install And Build

@@ -86,7 +86,18 @@ function findSymbolId(db: SqlJsDatabase, name: string): string | null {
 
 function formatCallGraph(
   symbolName: string,
-  subGraph: { nodes: Array<{ id: string; type: string; label: string; kind: string; filePath: string | null }>; edges: Array<{ from: string; to: string; type: string; confidence: number }> },
+  subGraph: {
+    nodes: Array<{
+      id: string;
+      type: string;
+      label: string;
+      kind: string;
+      filePath: string | null;
+      lineRange: [number, number] | null;
+      columnRange: [number, number] | null;
+    }>;
+    edges: Array<{ from: string; to: string; type: string; confidence: number }>;
+  },
 ): string {
   const lines: string[] = [];
   lines.push("=== Call Graph for: " + symbolName + " ===");
@@ -96,7 +107,7 @@ function formatCallGraph(
   // Build a lookup for node labels
   const nodeLabels = new Map<string, string>();
   for (const node of subGraph.nodes) {
-    const loc = node.filePath ? " (" + node.filePath + ")" : "";
+    const loc = formatNodeLocation(node);
     nodeLabels.set(node.id, node.label + " [" + node.kind + "]" + loc);
   }
 
@@ -162,4 +173,16 @@ function formatCallGraph(
   }
 
   return lines.join("\n");
+}
+
+function formatNodeLocation(node: {
+  filePath: string | null;
+  lineRange: [number, number] | null;
+  columnRange: [number, number] | null;
+}): string {
+  if (!node.filePath) return "";
+  if (!node.lineRange) return " (" + node.filePath + ")";
+  if (!node.columnRange) return " (" + node.filePath + ":" + node.lineRange[0] + "-" + node.lineRange[1] + ")";
+  return " (" + node.filePath + ":" + node.lineRange[0] + ":" + node.columnRange[0] +
+    "-" + node.lineRange[1] + ":" + node.columnRange[1] + ")";
 }

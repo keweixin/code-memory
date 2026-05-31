@@ -112,7 +112,7 @@ function collectReferences(
   for (const id of symbolIds) {
     const refEdges = graphEngine.getIncomingNeighbors(id, "REFERENCES");
     for (const edge of refEdges) {
-      const info = getEdgeSymbolInfo(db, edge.from, edge.type, edge.confidence);
+      const info = getEdgeNodeInfo(db, edge.from, edge.type, edge.confidence, symbolName);
       if (info && refMap.size < maxResults * 2) {
         const key = info.filePath + ":" + info.startLine + ":" + info.startColumn;
         if (!refMap.has(key)) refMap.set(key, info);
@@ -122,7 +122,7 @@ function collectReferences(
     if (refMap.size < maxResults * 2) {
       const callEdges = graphEngine.getIncomingNeighbors(id, "CALLS");
       for (const edge of callEdges.slice(0, 10)) {
-        const info = getEdgeSymbolInfo(db, edge.from, edge.type, edge.confidence);
+        const info = getEdgeNodeInfo(db, edge.from, edge.type, edge.confidence, symbolName);
         if (info) {
           const key = info.filePath + ":" + info.startLine + ":" + info.startColumn;
           if (!refMap.has(key)) refMap.set(key, info);
@@ -133,7 +133,7 @@ function collectReferences(
     if (refMap.size < maxResults * 2) {
       const importEdges = graphEngine.getIncomingNeighbors(id, "IMPORTS");
       for (const edge of importEdges.slice(0, 5)) {
-        const info = getEdgeSymbolInfo(db, edge.from, edge.type, edge.confidence);
+        const info = getEdgeNodeInfo(db, edge.from, edge.type, edge.confidence, symbolName);
         if (info) {
           const key = info.filePath + ":" + info.startLine + ":" + info.startColumn;
           if (!refMap.has(key)) refMap.set(key, info);
@@ -183,11 +183,12 @@ function collectReferences(
   return refs.slice(0, maxResults);
 }
 
-function getEdgeSymbolInfo(
+function getEdgeNodeInfo(
   db: SqlJsDatabase,
   nodeId: string,
   edgeType: string,
   confidence: number,
+  targetName: string,
 ): ReferenceInfo | null {
   try {
     const results = db.exec(
@@ -214,7 +215,54 @@ function getEdgeSymbolInfo(
   } catch {
     // not a known symbol
   }
+
+  try {
+    const results = db.exec(
+      "SELECT path, imports FROM files WHERE id = ?",
+      [nodeId],
+    );
+    if (results.length > 0 && results[0].values.length > 0) {
+      const row = results[0].values[0];
+      const filePath = String(row[0]);
+      const importInfo = findImportForSymbol(String(row[1] || "[]"), targetName);
+
+      return {
+        symbolName: filePath.split("/").pop() || filePath,
+        kind: "file",
+        filePath,
+        edgeType,
+        confidence,
+        startLine: importInfo?.startLine || 1,
+        endLine: importInfo?.endLine || importInfo?.startLine || 1,
+        startColumn: importInfo?.startColumn || 0,
+        endColumn: importInfo?.endColumn || importInfo?.startColumn || 0,
+      };
+    }
+  } catch {
+    // not a known file
+  }
   return null;
+}
+
+function findImportForSymbol(importsJson: string, targetName: string): {
+  startLine?: number;
+  endLine?: number;
+  startColumn?: number;
+  endColumn?: number;
+} | null {
+  try {
+    const imports = JSON.parse(importsJson) as Array<{
+      names?: string[];
+      startLine?: number;
+      endLine?: number;
+      startColumn?: number;
+      endColumn?: number;
+    }>;
+    if (!Array.isArray(imports)) return null;
+    return imports.find((imp) => Array.isArray(imp.names) && imp.names.includes(targetName)) || null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveFilePath(db: SqlJsDatabase, fileId: string): string | null {

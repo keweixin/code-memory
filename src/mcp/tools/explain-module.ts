@@ -80,8 +80,10 @@ interface SymbolInfo {
   signature: string | null;
   summary: string | null;
   accessLevel: string | null;
-  rangeStart: number;
-  rangeEnd: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 interface DepInfo {
@@ -122,8 +124,9 @@ function getFileSymbols(db: SqlJsDatabase, fileId: string): SymbolInfo[] {
   const symbols: SymbolInfo[] = [];
   try {
     const results = db.exec(
-      "SELECT id, name, kind, signature, summary, access_level, range_start, range_end " +
-      "FROM symbols WHERE file_id = ? ORDER BY range_start",
+      "SELECT id, name, kind, signature, summary, access_level, " +
+      "start_line, end_line, start_column, end_column " +
+      "FROM symbols WHERE file_id = ? ORDER BY start_line, start_column",
       [fileId],
     );
     if (results.length > 0) {
@@ -135,8 +138,10 @@ function getFileSymbols(db: SqlJsDatabase, fileId: string): SymbolInfo[] {
           signature: row[3] ? String(row[3]) : null,
           summary: row[4] ? String(row[4]) : null,
           accessLevel: row[5] ? String(row[5]) : null,
-          rangeStart: Number(row[6]),
-          rangeEnd: Number(row[7]),
+          startLine: Number(row[6]),
+          endLine: Number(row[7]),
+          startColumn: Number(row[8]),
+          endColumn: Number(row[9]),
         });
       }
     }
@@ -339,7 +344,7 @@ function formatModuleExplanation(
       const access = sym.accessLevel ? " [" + sym.accessLevel + "]" : "";
       const sig = sym.signature ? ": " + sym.signature : "";
       const sum = sym.summary ? " -- " + sym.summary : "";
-      lines.push("  L" + sym.rangeStart + "-L" + sym.rangeEnd + ": " +
+      lines.push("  " + formatSymbolLocation(fileInfo.path, sym) + ": " +
         sym.name + " (" + sym.kind + access + ")" + sig + sum);
     }
     lines.push("");
@@ -406,4 +411,9 @@ function formatModuleExplanation(
     dependencies.length + " dependencies, and " + dependents.length + " dependents.");
 
   return lines.join("\n");
+}
+
+function formatSymbolLocation(filePath: string, sym: SymbolInfo): string {
+  return filePath + ":" + sym.startLine + ":" + sym.startColumn +
+    "-" + sym.endLine + ":" + sym.endColumn;
 }

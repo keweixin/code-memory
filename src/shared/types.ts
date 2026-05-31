@@ -109,6 +109,10 @@ export interface ImportInfo {
   names: string[];          // Imported symbol names
   isTypeOnly: boolean;      // TypeScript type-only imports
   isDefault: boolean;       // Default import
+  startLine?: number;
+  endLine?: number;
+  startColumn?: number;
+  endColumn?: number;
 }
 
 export interface SymbolRecord {
@@ -219,6 +223,7 @@ export interface SearchResult {
   sources: SearchSource[];
   snippet: string | null;
   lineRange: [number, number] | null;
+  columnRange: [number, number] | null;
 }
 
 export type SearchSource = 'vector' | 'keyword' | 'graph';
@@ -452,6 +457,8 @@ export interface GraphNode {
   label: string;
   kind: SymbolKind | FileRole;
   filePath: string | null;
+  lineRange: [number, number] | null;
+  columnRange: [number, number] | null;
 }
 
 export interface GraphEdge {

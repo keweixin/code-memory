@@ -84,6 +84,7 @@ function formatSymbolResults(
     sources: string[];
     snippet: string | null;
     lineRange: [number, number] | null;
+    columnRange: [number, number] | null;
   }>,
 ): string {
   const lines: string[] = [];
@@ -98,9 +99,10 @@ function formatSymbolResults(
     const score = `[${r.score.toFixed(2)}]`.padEnd(8);
 
     lines.push(`${rank} ${score} ${r.name} (${r.kind})`);
-    lines.push(`     Location: ${r.filePath}`);
     if (r.lineRange) {
-      lines.push(`     Lines: ${r.lineRange[0]}-${r.lineRange[1]}`);
+      lines.push(`     Location: ${formatLocation(r.filePath, r.lineRange, r.columnRange)}`);
+    } else {
+      lines.push(`     Location: ${r.filePath}`);
     }
     if (r.snippet) {
       const cleanSnippet = r.snippet.replace(/<</g, "**").replace(/>>/g, "**");
@@ -111,4 +113,13 @@ function formatSymbolResults(
   }
 
   return lines.join("\n");
+}
+
+function formatLocation(
+  filePath: string,
+  lineRange: [number, number],
+  columnRange: [number, number] | null,
+): string {
+  if (!columnRange) return `${filePath}:${lineRange[0]}-${lineRange[1]}`;
+  return `${filePath}:${lineRange[0]}:${columnRange[0]}-${lineRange[1]}:${columnRange[1]}`;
 }

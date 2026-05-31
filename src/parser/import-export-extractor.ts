@@ -105,6 +105,10 @@ export function extractImports(
       names,
       isTypeOnly: node.text.startsWith('import type'),
       isDefault: names.length > 0 && !node.text.includes('{'),
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      startColumn: node.startPosition.column,
+      endColumn: node.endPosition.column,
     });
   }
   log.debug('Extracted ' + result.length + ' imports');

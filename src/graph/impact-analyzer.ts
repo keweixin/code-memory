@@ -138,12 +138,12 @@ export class ImpactAnalyzer {
     const refs: ImpactSymbol[] = [];
     const visited = new Set<string>([symbolId]);
 
-    const edges = this.graphEngine.getIncomingNeighbors(symbolId, 'REFERENCES');
+      const edges = this.graphEngine.getIncomingNeighbors(symbolId, 'REFERENCES');
     for (const edge of edges) {
       if (visited.has(edge.from)) continue;
       visited.add(edge.from);
 
-      const symInfo = this.getSymbolInfo(edge.from);
+      const symInfo = this.getNodeImpactInfo(edge.from);
       if (symInfo) {
         refs.push({
           ...symInfo,
@@ -165,7 +165,7 @@ export class ImpactAnalyzer {
     // Direct TESTS edges
     const testEdges = this.graphEngine.getIncomingNeighbors(symbolId, 'TESTS');
     for (const edge of testEdges) {
-      const symInfo = this.getSymbolInfo(edge.from);
+      const symInfo = this.getNodeImpactInfo(edge.from);
       if (symInfo) {
         tests.push({
           ...symInfo,
@@ -176,7 +176,7 @@ export class ImpactAnalyzer {
     }
 
     // Also check if the symbol's file has a corresponding test file
-    const symInfo = this.getSymbolInfo(symbolId);
+    const symInfo = this.getNodeImpactInfo(symbolId);
     if (symInfo) {
       const testFilePaths = this.findTestFilesForPath(symInfo.filePath);
       for (const testPath of testFilePaths) {
@@ -283,7 +283,7 @@ export class ImpactAnalyzer {
     callees: ImpactSymbol[],
   ): string[] {
     const chains: string[] = [];
-    const targetInfo = this.getSymbolInfo(targetId);
+    const targetInfo = this.getNodeImpactInfo(targetId);
 
     // Caller chain: who → target
     for (const caller of callers.slice(0, 5)) {
@@ -348,6 +348,25 @@ export class ImpactAnalyzer {
     return null;
   }
 
+  private getNodeImpactInfo(nodeId: string): { name: string; kind: any; filePath: string } | null {
+    const symbolInfo = this.getSymbolInfo(nodeId);
+    if (symbolInfo) return symbolInfo;
+
+    try {
+      const result = this.db.exec('SELECT path, role FROM files WHERE id = ?', [nodeId]);
+      if (result.length > 0 && result[0].values.length > 0) {
+        const row = result[0].values[0];
+        const filePath = String(row[0]);
+        return {
+          name: filePath.split('/').pop() || filePath,
+          kind: 'module',
+          filePath,
+        };
+      }
+    } catch { /* not a file */ }
+    return null;
+  }
+
   private findTestFilesForPath(sourcePath: string): string[] {
     // Try common test file naming conventions
     const testPaths: string[] = [];
@@ -396,7 +415,7 @@ export class ImpactAnalyzer {
     };
 
     // Target's own file
-    const targetInfo = this.getSymbolInfo(targetId);
+    const targetInfo = this.getNodeImpactInfo(targetId);
     if (targetInfo) {
       addFile(targetInfo.filePath, 'direct', 0, 'Target file');
     }

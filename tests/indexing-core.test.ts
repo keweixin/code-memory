@@ -207,6 +207,8 @@ describe('core indexing pipeline', () => {
     });
 
     expect(pack.projectCard?.name).toBe('sample-ts-project');
+    expect(pack.projectCard?.rootPath).toBe(tempRoot);
+    expect(pack.projectCard?.languages).toEqual(['typescript', 'javascript']);
     expect(pack.codeSnippets.length).toBeGreaterThan(0);
     const formatted = packer.formatAsText(pack);
     expect(formatted).toContain('async login(request: LoginRequest)');

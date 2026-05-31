@@ -218,7 +218,8 @@ export class GraphEngine {
     // Try as symbol first
     try {
       const symResult = this.db.exec(
-        'SELECT name, kind, file_id FROM symbols WHERE id = ?',
+        `SELECT name, kind, file_id, start_line, end_line, start_column, end_column
+         FROM symbols WHERE id = ?`,
         [nodeId],
       );
       if (symResult.length > 0 && symResult[0].values.length > 0) {
@@ -237,6 +238,8 @@ export class GraphEngine {
           label: String(row[0]),
           kind: String(row[1]) as any,
           filePath,
+          lineRange: [Number(row[3]), Number(row[4])],
+          columnRange: [Number(row[5]), Number(row[6])],
         };
       }
     } catch { /* try as file */ }
@@ -255,6 +258,8 @@ export class GraphEngine {
           label: String(row[0]),
           kind: String(row[1]) as any,
           filePath: String(row[0]),
+          lineRange: null,
+          columnRange: null,
         };
       }
     } catch { /* fallback */ }
@@ -265,6 +270,8 @@ export class GraphEngine {
       label: nodeId,
       kind: 'source',
       filePath: null,
+      lineRange: null,
+      columnRange: null,
     };
   }
 }
