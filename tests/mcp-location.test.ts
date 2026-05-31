@@ -95,6 +95,21 @@ describe('MCP location output', () => {
     expect(text).not.toContain('Lines: 24-45');
   });
 
+  it('resolves qualified class method names in find_definition', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerFindDefinitionTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('find_definition')!({
+      symbolName: 'AuthService.login',
+    });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('No definition found');
+    expect(text).toContain('1. login (method)');
+    expect(text).toMatch(/Location: src\/services\/AuthService\.ts:24:\d+-45:\d+/);
+  });
+
   it('reports reference locations with line and column coordinates', async () => {
     await indexFixture(tempRoot);
     const server = new FakeMcpServer();
@@ -134,6 +149,21 @@ describe('MCP location output', () => {
     });
     const text = result.content[0].text;
 
+    expect(text).toContain('tests/auth.test.js');
+    expect(text).toContain('Method: graph (TESTS edge)');
+  });
+
+  it('resolves qualified class method targets when finding related tests', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerGetRelatedTestsTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('get_related_tests')!({
+      target: 'AuthService.login',
+    });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('No related tests found');
     expect(text).toContain('tests/auth.test.js');
     expect(text).toContain('Method: graph (TESTS edge)');
   });
@@ -211,5 +241,23 @@ describe('MCP location output', () => {
 
     expect(text).toMatch(/login \[method\] \(src\/services\/AuthService\.[jt]s:\d+:\d+-\d+:\d+\)/);
     expect(text).not.toMatch(/login \[method\] \(src\/services\/AuthService\.[jt]s\)/);
+  });
+
+  it('resolves qualified class method names in get_call_graph', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerGetCallGraphTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('get_call_graph')!({
+      symbolName: 'AuthService.login',
+      depth: 1,
+    });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('No symbol found');
+    expect(text).toMatch(/login \[method\] \(src\/services\/AuthService\.ts:24:\d+-45:\d+\)/);
+    expect(text).toContain('findUserByEmail [function]');
+    expect(text).toContain('verifyPassword [function]');
+    expect(text).toContain('issueTokens [function]');
   });
 });

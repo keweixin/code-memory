@@ -7,6 +7,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SqlJsDatabase } from "../storage/database.js";
+import type { VectorSearchProvider } from "../search/vector-search.js";
 import { createLogger } from "../shared/logger.js";
 
 import { registerGetProjectCardTool } from "./tools/get-project-card.js";
@@ -27,13 +28,21 @@ import { registerContextLedgerTools } from "./tools/context-ledger.js";
 
 const log = createLogger("mcp:tool-registry");
 
+export interface ToolRegistryOptions {
+  vectorSearchProvider?: VectorSearchProvider | null;
+}
+
 /**
  * Register all MCP tools on the given server instance.
  *
  * The database must already be initialized (via getDatabase()).
  * Each tool receives the database instance for direct queries.
  */
-export function registerAllTools(server: McpServer, db: SqlJsDatabase): void {
+export function registerAllTools(
+  server: McpServer,
+  db: SqlJsDatabase,
+  options: ToolRegistryOptions = {},
+): void {
   log.info("Registering MCP tools...");
 
   // ---- Navigation & Discovery ----
@@ -41,7 +50,7 @@ export function registerAllTools(server: McpServer, db: SqlJsDatabase): void {
   registerGetRepoMapTool(server, db);
 
   // ---- Search ----
-  registerSearchCodeTool(server, db);
+  registerSearchCodeTool(server, db, options.vectorSearchProvider);
   registerSearchSymbolsTool(server, db);
 
   // ---- Symbol Navigation ----
@@ -57,7 +66,7 @@ export function registerAllTools(server: McpServer, db: SqlJsDatabase): void {
   registerGetRelatedTestsTool(server, db);
 
   // ---- Context ----
-  registerGetContextPackTool(server, db);
+  registerGetContextPackTool(server, db, options.vectorSearchProvider);
 
   // ---- Memory ----
   registerRememberProjectFactTool(server, db);

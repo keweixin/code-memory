@@ -9,7 +9,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import * as posixPath from 'node:path/posix';
 import type { Database as SqlJsDatabase } from 'sql.js';
 import type { CodeMemoryConfig, IndexStatus, FileRecord, SymbolRecord, EdgeRecord, ChunkRecord, ParseResult, ImportInfo, EdgeType } from '../shared/types.js';
@@ -24,6 +24,16 @@ import { upsertSymbol, deleteSymbolsByFileId } from '../storage/symbol-repositor
 import { upsertEdge, deleteEdgesByNodeId } from '../storage/edge-repository.js';
 import { upsertChunk, deleteChunksByFileId } from '../storage/chunk-repository.js';
 import { generateId, normalizePath } from '../shared/utils.js';
+import { CONFIG_DIR, VECTORS_DIR } from '../shared/constants.js';
+import { EmbeddingGenerator } from './embedding-generator.js';
+import {
+  addVectors,
+  deleteVectors,
+  getEmbeddingDimensions,
+  initVectorStore,
+  resetVectorStore,
+  type VectorRecord,
+} from '../search/vector-search.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('index-manager');
@@ -48,6 +58,9 @@ export class IndexManager {
   private rootPath: string;
   private config: CodeMemoryConfig;
   private db: SqlJsDatabase | null = null;
+  private embeddingGenerator: EmbeddingGenerator | null = null;
+  private vectorStoreReady = false;
+  private embeddedVectorCount = 0;
 
   constructor(rootPath: string, config: CodeMemoryConfig) {
     this.rootPath = resolve(rootPath);
@@ -60,6 +73,7 @@ export class IndexManager {
 
     await this.ensureDb();
     await initTreeSitter();
+    await this.prepareVectorStore(true);
 
     this.setMetadata('is_indexing', 'true');
 
@@ -68,7 +82,7 @@ export class IndexManager {
     const files = scanResult.files;
     log.info('Discovered ' + files.length + ' files to index');
 
-    this.pruneFilesNotInFullScan(files);
+    await this.pruneFilesNotInFullScan(files);
 
     let indexedCount = 0, totalSymbols = 0, totalChunks = 0, skipped = 0;
 
@@ -77,8 +91,9 @@ export class IndexManager {
       try {
         const result = await this.indexFile(discovered);
         if (!result) { skipped++; continue; }
-        this.removeFileFromIndex(result.fileId);
+        await this.removeFileFromIndex(result.fileId);
         this.storeParseResult(result, discovered);
+        await this.indexChunkVectors(result, discovered);
         indexedCount++; totalSymbols += result.symbols.length;
         totalChunks += result.chunks.length;
 
@@ -93,7 +108,12 @@ export class IndexManager {
     }
 
     const totalEdges = await this.rebuildGraphEdges(scanResult.files);
-    this.updateFinalMetadata(scanResult, indexedCount, 'full');
+    this.updateFinalMetadata(scanResult, {
+      indexedFiles: indexedCount,
+      symbols: totalSymbols,
+      edges: totalEdges,
+      chunks: totalChunks,
+    }, 'full');
     await saveDatabase();
 
     const elapsed = Date.now() - startTime;
@@ -107,6 +127,7 @@ export class IndexManager {
     log.info('Starting incremental index of: ' + this.rootPath);
     await this.ensureDb();
     await initTreeSitter();
+    await this.prepareVectorStore(forceAll);
 
     this.setMetadata('is_indexing', 'true');
     const scanResult = scanProject(this.rootPath, this.config);
@@ -128,7 +149,7 @@ export class IndexManager {
     for (const [relPath, prevFile] of prevFileMap) {
       const currentFile = currentFileMap.get(relPath);
       if (!currentFile) {
-        this.removeFileFromIndex(prevFile.id);
+        await this.removeFileFromIndex(prevFile.id);
         continue;
       }
       let needsReindex = forceAll;
@@ -141,8 +162,9 @@ export class IndexManager {
       if (needsReindex) {
         const result = await this.indexFile(currentFile);
         if (result) {
-          this.removeFileFromIndex(prevFile.id);
+          await this.removeFileFromIndex(prevFile.id);
           this.storeParseResult(result, currentFile);
+          await this.indexChunkVectors(result, currentFile);
           indexedCount++; totalSymbols += result.symbols.length;
           totalChunks += result.chunks.length;
         }
@@ -155,6 +177,7 @@ export class IndexManager {
         const result = await this.indexFile(currentFile);
         if (result) {
           this.storeParseResult(result, currentFile);
+          await this.indexChunkVectors(result, currentFile);
           indexedCount++; totalSymbols += result.symbols.length;
           totalChunks += result.chunks.length;
         }
@@ -162,7 +185,12 @@ export class IndexManager {
     }
 
     const totalEdges = await this.rebuildGraphEdges(scanResult.files);
-    this.updateFinalMetadata(scanResult, indexedCount, forceAll ? 'full' : 'incremental');
+    this.updateFinalMetadata(scanResult, {
+      indexedFiles: indexedCount,
+      symbols: totalSymbols,
+      edges: totalEdges,
+      chunks: totalChunks,
+    }, forceAll ? 'full' : 'incremental');
     this.setMetadata('is_indexing', 'false');
     await saveDatabase();
 
@@ -251,9 +279,13 @@ export class IndexManager {
     for (const chunk of result.chunks) { upsertChunk(chunk); }
   }
 
-  private removeFileFromIndex(fileId: string): void {
+  private async removeFileFromIndex(fileId: string): Promise<void> {
     try {
-      for (const symbolId of this.getSymbolIdsByFileId(fileId)) {
+      const symbolIds = this.getSymbolIdsByFileId(fileId);
+      if (this.vectorStoreReady && symbolIds.length > 0) {
+        await deleteVectors(symbolIds);
+      }
+      for (const symbolId of symbolIds) {
         deleteEdgesByNodeId(symbolId);
       }
       deleteEdgesByNodeId(fileId);
@@ -265,15 +297,81 @@ export class IndexManager {
     }
   }
 
-  private pruneFilesNotInFullScan(files: DiscoveredFile[]): void {
+  private async pruneFilesNotInFullScan(files: DiscoveredFile[]): Promise<void> {
     const currentFileIds = new Set(
       files.map((file) => generateId('file', normalizePath(file.relativePath))),
     );
 
     for (const previousFile of this.safeGetAllFiles()) {
       if (!currentFileIds.has(previousFile.id)) {
-        this.removeFileFromIndex(previousFile.id);
+        await this.removeFileFromIndex(previousFile.id);
       }
+    }
+  }
+
+  private async prepareVectorStore(reset: boolean): Promise<void> {
+    this.vectorStoreReady = false;
+    this.embeddedVectorCount = 0;
+    this.embeddingGenerator = null;
+    if (this.config.embedding.provider === 'none') return;
+
+    try {
+      const dimensions = getEmbeddingDimensions(this.config.embedding);
+      await initVectorStore(join(this.rootPath, CONFIG_DIR, VECTORS_DIR), dimensions);
+      if (reset) {
+        await resetVectorStore(dimensions);
+      }
+      this.embeddingGenerator = new EmbeddingGenerator(this.config.embedding);
+      this.vectorStoreReady = this.embeddingGenerator.isAvailable();
+    } catch (err) {
+      log.warn('Vector store initialization failed: ' + (err instanceof Error ? err.message : String(err)));
+      this.embeddingGenerator = null;
+      this.vectorStoreReady = false;
+    }
+  }
+
+  private async indexChunkVectors(result: ParseResult, discovered: DiscoveredFile): Promise<void> {
+    if (!this.vectorStoreReady || !this.embeddingGenerator) return;
+
+    const symbolsById = new Map(result.symbols.map((symbol) => [symbol.id, symbol]));
+    const records: VectorRecord[] = [];
+    for (const chunk of result.chunks) {
+      if (!chunk.symbolId) continue;
+      const symbol = symbolsById.get(chunk.symbolId);
+      if (!symbol) continue;
+
+      try {
+        const vector = await this.embeddingGenerator.generate(chunk.content);
+        if (vector.length === 0) continue;
+        records.push({
+          id: symbol.id,
+          vector,
+          name: symbol.name,
+          kind: symbol.kind,
+          filePath: normalizePath(discovered.relativePath),
+          summary: symbol.summary || symbol.signature || '',
+          chunkId: chunk.id,
+          contentHash: chunk.contentHash,
+        });
+        this.setChunkEmbeddingId(chunk.id, symbol.id);
+      } catch (err) {
+        log.warn('Chunk embedding failed for ' + normalizePath(discovered.relativePath) +
+          ':' + chunk.startLine + ' - ' + (err instanceof Error ? err.message : String(err)));
+      }
+    }
+
+    if (records.length > 0) {
+      await addVectors(records);
+      this.embeddedVectorCount += records.length;
+    }
+  }
+
+  private setChunkEmbeddingId(chunkId: string, embeddingId: string): void {
+    try {
+      const db = getDatabaseSync();
+      db.run('UPDATE chunks SET embedding_id = ? WHERE id = ?', [embeddingId, chunkId]);
+    } catch (err) {
+      log.warn('Failed to update chunk embedding id: ' + (err instanceof Error ? err.message : String(err)));
     }
   }
 
@@ -289,11 +387,17 @@ export class IndexManager {
 
   private updateFinalMetadata(
     scanResult: ReturnType<typeof scanProject>,
-    indexedFiles: number,
+    runStats: {
+      indexedFiles: number;
+      symbols: number;
+      edges: number;
+      chunks: number;
+    },
     mode: 'full' | 'incremental',
   ): void {
     const now = new Date().toISOString();
     const totalFiles = scanResult.files.length;
+    const indexedFiles = this.getTableCount('files');
     const totalSymbols = this.getTableCount('symbols');
     const totalEdges = this.getTableCount('edges');
     const totalChunks = this.getTableCount('chunks');
@@ -306,10 +410,18 @@ export class IndexManager {
     this.setMetadata('total_symbols', String(totalSymbols));
     this.setMetadata('total_edges', String(totalEdges));
     this.setMetadata('total_chunks', String(totalChunks));
+    this.setMetadata('last_index_mode', mode);
+    this.setMetadata('last_run_indexed_files', String(runStats.indexedFiles));
+    this.setMetadata('last_run_symbols', String(runStats.symbols));
+    this.setMetadata('last_run_edges', String(runStats.edges));
+    this.setMetadata('last_run_chunks', String(runStats.chunks));
     this.setMetadata('current_commit', scanResult.gitInfo.currentCommit ?? '');
     this.setMetadata('current_branch', scanResult.gitInfo.currentBranch ?? '');
     this.setMetadata('embedding_provider', this.config.embedding.provider);
     this.setMetadata('embedding_model', this.config.embedding.model);
+    const embeddedChunkCount = this.getEmbeddedChunkCount();
+    this.setMetadata('vector_search', embeddedChunkCount > 0 ? 'enabled' : 'disabled');
+    this.setMetadata('embedding_dimensions', String(getEmbeddingDimensions(this.config.embedding)));
     this.setMetadata('is_indexing', 'false');
     this.setMetadata('index_completed', now);
   }
@@ -349,6 +461,16 @@ export class IndexManager {
       return result.length > 0 ? Number(result[0].values[0][0]) : 0;
     } catch {
       return 0;
+    }
+  }
+
+  private getEmbeddedChunkCount(): number {
+    try {
+      const db = getDatabaseSync();
+      const result = db.exec('SELECT COUNT(*) FROM chunks WHERE embedding_id IS NOT NULL');
+      return result.length > 0 ? Number(result[0].values[0][0]) : 0;
+    } catch {
+      return this.embeddedVectorCount;
     }
   }
 
@@ -864,6 +986,7 @@ export class IndexManager {
     const totalSymbols = parseInt(this.getMetadata('total_symbols') ?? '0', 10);
     const totalEdges = parseInt(this.getMetadata('total_edges') ?? '0', 10);
     const totalChunks = parseInt(this.getMetadata('total_chunks') ?? '0', 10);
+    const totalMemories = this.getTableCount('memories');
 
     return {
       projectPath: this.rootPath,
@@ -872,7 +995,7 @@ export class IndexManager {
       totalSymbols: totalSymbols > 0 ? totalSymbols : recentSymbols,
       totalEdges: totalEdges > 0 ? totalEdges : recentEdges,
       totalChunks: totalChunks > 0 ? totalChunks : recentChunks,
-      totalMemories: 0,
+      totalMemories,
       lastFullIndex: this.getMetadata('last_full_index'),
       lastIncrementalIndex: this.getMetadata('last_incremental_index'),
       currentCommit: this.getMetadata('current_commit'),

@@ -105,15 +105,21 @@ export function registerContextLedgerTools(server: McpServer): void {
       feedback: z.enum(FEEDBACK_VALUES).optional().describe("Optional feedback to apply to the latest ledger entry"),
     },
     async ({ sessionId, contextId, contextType, feedback }) => {
-      const entries = getContextLedgerEntries(sessionId);
-      if (feedback && entries.length > 0) {
-        updateContextFeedback(entries[entries.length - 1].id, feedback as ContextFeedback);
-      }
-      const seenIn = entries.filter((entry) => {
+      let entries = getContextLedgerEntries(sessionId);
+      let seenIn = entries.filter((entry) => {
         if (contextType === "file") return entry.returnedFiles.includes(contextId);
         if (contextType === "symbol") return entry.returnedSymbols.includes(contextId);
         return entry.returnedChunks.includes(contextId);
       });
+      if (feedback && seenIn.length > 0) {
+        updateContextFeedback(seenIn[seenIn.length - 1].id, feedback as ContextFeedback);
+        entries = getContextLedgerEntries(sessionId);
+        seenIn = entries.filter((entry) => {
+          if (contextType === "file") return entry.returnedFiles.includes(contextId);
+          if (contextType === "symbol") return entry.returnedSymbols.includes(contextId);
+          return entry.returnedChunks.includes(contextId);
+        });
+      }
       const lines = [
         contextId + " is " + (seenIn.length > 0 ? "repeated" : "new") + " for session " + sessionId,
         "Seen in entries: " + seenIn.length,

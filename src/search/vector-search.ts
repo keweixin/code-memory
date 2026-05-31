@@ -6,8 +6,10 @@
  */
 
 import * as lancedb from '@lancedb/lancedb';
-import type { SearchResult, SymbolKind, SearchSource } from '../shared/types.js';
+import { resolve } from 'node:path';
+import type { EmbeddingConfig, SymbolKind } from '../shared/types.js';
 import { DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_SEARCH_LIMIT } from '../shared/constants.js';
+import { EmbeddingGenerator } from '../indexer/embedding-generator.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('vector-search');
@@ -28,6 +30,8 @@ export interface VectorRecord {
   kind: string;
   filePath: string;
   summary: string;
+  chunkId: string;
+  contentHash: string;
 }
 
 export interface VectorSearchResult {
@@ -39,7 +43,20 @@ export interface VectorSearchResult {
   distance: number;
 }
 
+export interface VectorSearchProvider {
+  isAvailable(): boolean;
+  search(
+    query: string,
+    options: {
+      limit?: number;
+      kindFilter?: SymbolKind;
+      fileFilter?: string;
+    },
+  ): Promise<Array<{ id: string; rank: number }>>;
+}
+
 let dbInstance: lancedb.Connection | null = null;
+let dbInstancePath: string | null = null;
 const TABLE_NAME = 'symbol_vectors';
 
 /**
@@ -49,32 +66,44 @@ export async function initVectorStore(
   dbPath: string,
   dimensions: number = DEFAULT_EMBEDDING_DIMENSIONS,
 ): Promise<lancedb.Connection> {
-  if (dbInstance) return dbInstance;
+  const resolvedPath = resolve(dbPath);
+  if (dbInstance && dbInstancePath === resolvedPath) return dbInstance;
 
-  log.info(`Initializing LanceDB at: ${dbPath}`);
+  if (dbInstance && dbInstancePath !== resolvedPath) {
+    dbInstance.close();
+    dbInstance = null;
+    dbInstancePath = null;
+  }
 
-  dbInstance = await lancedb.connect(dbPath);
+  log.info(`Initializing LanceDB at: ${resolvedPath}`);
+
+  dbInstance = await lancedb.connect(resolvedPath);
+  dbInstancePath = resolvedPath;
 
   // Check if table exists
   const tableNames = await dbInstance.tableNames();
   if (!tableNames.includes(TABLE_NAME)) {
     // Create table with a placeholder record to establish schema
-    const placeholder: VectorRecord = {
-      id: '__schema_placeholder__',
-      vector: new Array(dimensions).fill(0),
-      name: '',
-      kind: '',
-      filePath: '',
-      summary: '',
-    };
-
-    const table = await dbInstance.createTable(TABLE_NAME, [placeholder]);
-    // Delete the placeholder
-    await table.delete("id = '__schema_placeholder__'");
+    await createVectorTable(dimensions);
     log.info(`Created vector table with ${dimensions} dimensions`);
   }
 
   return dbInstance;
+}
+
+export async function resetVectorStore(
+  dimensions: number = DEFAULT_EMBEDDING_DIMENSIONS,
+): Promise<void> {
+  if (!dbInstance) {
+    throw new Error('Vector store not initialized. Call initVectorStore() first.');
+  }
+
+  const tableNames = await dbInstance.tableNames();
+  if (tableNames.includes(TABLE_NAME)) {
+    await dbInstance.dropTable(TABLE_NAME);
+  }
+  await createVectorTable(dimensions);
+  log.info(`Reset vector table with ${dimensions} dimensions`);
 }
 
 /**
@@ -82,6 +111,14 @@ export async function initVectorStore(
  */
 export function getVectorDb(): lancedb.Connection | null {
   return dbInstance;
+}
+
+export function closeVectorStore(): void {
+  if (dbInstance) {
+    dbInstance.close();
+  }
+  dbInstance = null;
+  dbInstancePath = null;
 }
 
 /**
@@ -95,6 +132,7 @@ export async function addVectors(records: VectorRecord[]): Promise<void> {
   if (records.length === 0) return;
 
   const table = await dbInstance.openTable(TABLE_NAME);
+  await deleteVectors(records.map((record) => record.id));
   await table.add(records);
   log.info(`Added ${records.length} vectors`);
 }
@@ -107,7 +145,7 @@ export async function deleteVectors(ids: string[]): Promise<void> {
 
   const table = await dbInstance.openTable(TABLE_NAME);
   for (const id of ids) {
-    await table.delete(`id = '${id}'`);
+    await table.delete(`id = '${escapeSqlString(id)}'`);
   }
   log.info(`Deleted ${ids.length} vectors`);
 }
@@ -129,14 +167,14 @@ export async function searchVectors(
   try {
     const table = await dbInstance.openTable(TABLE_NAME);
 
-    let query = table.search(queryVector).limit(limit * 2); // Over-fetch for filtering
+    let query = table.vectorSearch(queryVector).limit(limit * 2); // Over-fetch for filtering
 
     // Apply metadata filters
     if (kindFilter) {
-      query = query.where(`kind = '${kindFilter}'`);
+      query = query.where(`kind = '${escapeSqlString(kindFilter)}'`);
     }
     if (fileFilter) {
-      query = query.where(`filePath LIKE '%${fileFilter}%'`);
+      query = query.where(`filePath LIKE '%${escapeSqlLike(fileFilter)}%'`);
     }
 
     const results = await query.toArray();
@@ -160,6 +198,87 @@ export async function searchVectors(
     log.warn(`Vector search failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
+}
+
+export function getEmbeddingDimensions(config: EmbeddingConfig): number {
+  if (config.dimensions && config.dimensions > 0) return config.dimensions;
+  return config.provider === 'openai' ? 1536 : DEFAULT_EMBEDDING_DIMENSIONS;
+}
+
+export async function createVectorSearchProvider(
+  projectRoot: string,
+  config: EmbeddingConfig,
+): Promise<VectorSearchProvider | null> {
+  if (config.provider === 'none') return null;
+
+  const dimensions = getEmbeddingDimensions(config);
+  await initVectorStore(projectRoot, dimensions);
+  return new LanceDbVectorSearchProvider(config);
+}
+
+export class LanceDbVectorSearchProvider implements VectorSearchProvider {
+  private generator: EmbeddingGenerator;
+
+  constructor(config: EmbeddingConfig) {
+    this.generator = new EmbeddingGenerator(config);
+  }
+
+  isAvailable(): boolean {
+    return this.generator.isAvailable() && Boolean(getVectorDb());
+  }
+
+  async search(
+    query: string,
+    options: {
+      limit?: number;
+      kindFilter?: SymbolKind;
+      fileFilter?: string;
+    } = {},
+  ): Promise<Array<{ id: string; rank: number }>> {
+    if (!this.isAvailable()) return [];
+    const queryVector = await this.generator.generate(query);
+    if (queryVector.length === 0) return [];
+    const results = await searchVectors(queryVector, {
+      query,
+      queryVector,
+      limit: options.limit,
+      kindFilter: options.kindFilter,
+      fileFilter: options.fileFilter,
+    });
+    return results.map((result, index) => ({
+      id: result.id,
+      rank: index + 1,
+    }));
+  }
+}
+
+function createVectorPlaceholder(dimensions: number): VectorRecord {
+  return {
+    id: '__schema_placeholder__',
+    vector: new Array(dimensions).fill(0),
+    name: '',
+    kind: '',
+    filePath: '',
+    summary: '',
+    chunkId: '',
+    contentHash: '',
+  };
+}
+
+async function createVectorTable(dimensions: number): Promise<void> {
+  if (!dbInstance) {
+    throw new Error('Vector store not initialized. Call initVectorStore() first.');
+  }
+  const table = await dbInstance.createTable(TABLE_NAME, [createVectorPlaceholder(dimensions)]);
+  await table.delete("id = '__schema_placeholder__'");
+}
+
+function escapeSqlString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function escapeSqlLike(value: string): string {
+  return escapeSqlString(value).replace(/[%_]/g, (match) => '\\' + match);
 }
 
 /**

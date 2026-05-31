@@ -12,6 +12,7 @@
 import type { Database as SqlJsDatabase } from 'sql.js';
 import type { ImpactResult, ImpactFile, ImpactSymbol, RiskPoint, RiskLevel } from '../shared/types.js';
 import { GraphEngine } from './graph-engine.js';
+import { resolveTargetId } from './target-resolver.js';
 import { HIGH_RISK_PATTERNS } from '../shared/constants.js';
 import { createLogger } from '../shared/logger.js';
 
@@ -32,9 +33,7 @@ export class ImpactAnalyzer {
   analyze(target: string): ImpactResult {
     log.info(`Analyzing impact for: ${target}`);
 
-    // Determine if target is a file path or symbol name
-    const isFile = target.includes('/') || target.includes('\\') || target.includes('.');
-    const targetId = isFile ? this.findFileId(target) : this.findSymbolId(target);
+    const targetId = resolveTargetId(this.db, target);
 
     if (!targetId) {
       return {
@@ -200,9 +199,12 @@ export class ImpactAnalyzer {
    */
   private findRelatedConfigs(symbolId: string): string[] {
     const configs: string[] = [];
+    const configuredFileId = this.getConfiguredFileId(symbolId);
+    if (!configuredFileId) return configs;
 
-    // Get the symbol's file path and check for CONFIGURES edges
-    const configEdges = this.graphEngine.getIncomingNeighbors(symbolId, 'CONFIGURES');
+    // CONFIGURES edges are file-level: config file -> configured source/test file.
+    // Symbol impact needs to inherit the configuration of its containing file.
+    const configEdges = this.graphEngine.getIncomingNeighbors(configuredFileId, 'CONFIGURES');
     for (const edge of configEdges) {
       const fileResult = this.db.exec('SELECT path FROM files WHERE id = ?', [edge.from]);
       if (fileResult.length > 0 && fileResult[0].values.length > 0) {
@@ -214,6 +216,23 @@ export class ImpactAnalyzer {
     }
 
     return configs;
+  }
+
+  private getConfiguredFileId(nodeId: string): string | null {
+    try {
+      const fileResult = this.db.exec('SELECT id FROM files WHERE id = ?', [nodeId]);
+      if (fileResult.length > 0 && fileResult[0].values.length > 0) {
+        return String(fileResult[0].values[0][0]);
+      }
+
+      const symbolResult = this.db.exec('SELECT file_id FROM symbols WHERE id = ?', [nodeId]);
+      if (symbolResult.length > 0 && symbolResult[0].values.length > 0) {
+        return String(symbolResult[0].values[0][0]);
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   /**
@@ -301,26 +320,6 @@ export class ImpactAnalyzer {
   // ============================================================
   // Helpers
   // ============================================================
-
-  private findFileId(path: string): string | null {
-    try {
-      const result = this.db.exec('SELECT id FROM files WHERE path = ?', [path]);
-      if (result.length > 0 && result[0].values.length > 0) {
-        return String(result[0].values[0][0]);
-      }
-    } catch { /* not found */ }
-    return null;
-  }
-
-  private findSymbolId(name: string): string | null {
-    try {
-      const result = this.db.exec('SELECT id FROM symbols WHERE name = ? LIMIT 1', [name]);
-      if (result.length > 0 && result[0].values.length > 0) {
-        return String(result[0].values[0][0]);
-      }
-    } catch { /* not found */ }
-    return null;
-  }
 
   private getSymbolInfo(symbolId: string): { name: string; kind: any; filePath: string } | null {
     try {

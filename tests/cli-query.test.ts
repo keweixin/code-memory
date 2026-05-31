@@ -81,4 +81,60 @@ describe('CLI query command', () => {
     });
     expect(logSpy).toHaveBeenCalledWith('[]');
   });
+
+  it('defaults to hybrid mode for CLI queries', async () => {
+    const searchSpy = vi
+      .spyOn(HybridSearchEngine.prototype, 'searchCode')
+      .mockResolvedValue([]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await queryIndex('login', {
+      limit: '3',
+      json: true,
+    });
+
+    expect(searchSpy).toHaveBeenCalledWith('login', {
+      limit: 3,
+      searchMode: 'hybrid',
+    });
+    expect(logSpy).toHaveBeenCalledWith('[]');
+  });
+
+  it('falls back invalid CLI search modes to hybrid', async () => {
+    const searchSpy = vi
+      .spyOn(HybridSearchEngine.prototype, 'searchCode')
+      .mockResolvedValue([]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await queryIndex('login', {
+      limit: '3',
+      mode: 'typo',
+      json: true,
+    });
+
+    expect(searchSpy).toHaveBeenCalledWith('login', {
+      limit: 3,
+      searchMode: 'hybrid',
+    });
+    expect(logSpy).toHaveBeenCalledWith('[]');
+  });
+
+  it('passes vector mode through to the hybrid search engine', async () => {
+    const searchSpy = vi
+      .spyOn(HybridSearchEngine.prototype, 'searchCode')
+      .mockResolvedValue([]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await queryIndex('login', {
+      limit: '3',
+      mode: 'vector',
+      json: true,
+    });
+
+    expect(searchSpy).toHaveBeenCalledWith('login', {
+      limit: 3,
+      searchMode: 'vector',
+    });
+    expect(logSpy).toHaveBeenCalledWith('[]');
+  });
 });

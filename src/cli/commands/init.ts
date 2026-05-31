@@ -62,8 +62,7 @@ export async function initProject(options: InitOptions): Promise<void> {
   }
 
   const embeddingProvider = (options.embedding || 'none') as 'ollama' | 'openai' | 'none';
-  const embeddingModel = options.embeddingModel ||
-    (embeddingProvider === 'none' ? 'none' : 'nomic-embed-text');
+  const embeddingModel = options.embeddingModel || getDefaultEmbeddingModel(embeddingProvider);
 
   // Build config
   const config: CodeMemoryConfig = {
@@ -95,4 +94,10 @@ export async function initProject(options: InitOptions): Promise<void> {
   log.info(`Languages: ${config.languages.join(', ')}`);
   log.info(`Embedding: ${config.embedding.provider} (${config.embedding.model})`);
   log.info(`\nNext step: Run "code-memory index" to build the project graph.`);
+}
+
+function getDefaultEmbeddingModel(provider: 'ollama' | 'openai' | 'none'): string {
+  if (provider === 'none') return 'none';
+  if (provider === 'openai') return 'text-embedding-3-small';
+  return 'nomic-embed-text';
 }

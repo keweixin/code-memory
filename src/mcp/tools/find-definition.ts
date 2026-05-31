@@ -8,6 +8,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
+import { resolveTargetNode } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 
 const log = createLogger("mcp:find-definition");
@@ -103,31 +104,73 @@ function findDefinitions(db: SqlJsDatabase, symbolName: string, filePath: string
 
   try {
     const results = db.exec(sql, params);
-    if (!results.length || !results[0].values.length) return [];
-
-    for (const row of results[0].values) {
-      definitions.push({
-        id: String(row[0]),
-        name: String(row[1]),
-        kind: String(row[2]),
-        filePath: String(row[3]),
-        startLine: Number(row[4]),
-        endLine: Number(row[5]),
-        startColumn: Number(row[6]),
-        endColumn: Number(row[7]),
-        signature: row[8] ? String(row[8]) : null,
-        summary: row[9] ? String(row[9]) : null,
-        accessLevel: row[10] ? String(row[10]) : null,
-        exports: safeJsonParseArray(String(row[11])),
-        imports: safeJsonParseImportSources(String(row[12])),
-        language: String(row[13]),
-      });
+    if (results.length > 0 && results[0].values.length > 0) {
+      for (const row of results[0].values) {
+        definitions.push(rowToDefinition(row));
+      }
     }
   } catch {
     // return empty
   }
 
-  return definitions;
+  if (definitions.length > 0) return definitions;
+
+  const resolvedTarget = resolveTargetNode(db, symbolName);
+  if (resolvedTarget?.kind !== "symbol") return [];
+
+  const resolvedDefinition = findDefinitionById(db, resolvedTarget.id, filePath);
+  return resolvedDefinition ? [resolvedDefinition] : [];
+}
+
+function findDefinitionById(
+  db: SqlJsDatabase,
+  symbolId: string,
+  filePath: string | null,
+): DefinitionInfo | null {
+  let sql = `
+    SELECT s.id, s.name, s.kind, f.path AS file_path,
+           s.start_line, s.end_line, s.start_column, s.end_column,
+           s.signature, s.summary,
+           s.access_level, f.exports, f.imports, f.language
+    FROM symbols s
+    JOIN files f ON s.file_id = f.id
+    WHERE s.id = ?
+  `;
+  const params: string[] = [symbolId];
+
+  if (filePath) {
+    sql += " AND f.path = ?";
+    params.push(filePath);
+  }
+
+  sql += " LIMIT 1";
+
+  try {
+    const results = db.exec(sql, params);
+    if (!results.length || !results[0].values.length) return null;
+    return rowToDefinition(results[0].values[0]);
+  } catch {
+    return null;
+  }
+}
+
+function rowToDefinition(row: unknown[]): DefinitionInfo {
+  return {
+    id: String(row[0]),
+    name: String(row[1]),
+    kind: String(row[2]),
+    filePath: String(row[3]),
+    startLine: Number(row[4]),
+    endLine: Number(row[5]),
+    startColumn: Number(row[6]),
+    endColumn: Number(row[7]),
+    signature: row[8] ? String(row[8]) : null,
+    summary: row[9] ? String(row[9]) : null,
+    accessLevel: row[10] ? String(row[10]) : null,
+    exports: safeJsonParseArray(String(row[11])),
+    imports: safeJsonParseImportSources(String(row[12])),
+    language: String(row[13]),
+  };
 }
 
 // ── Helpers ──────────────────────────────────────────────────

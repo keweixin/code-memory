@@ -88,4 +88,71 @@ describe('CLI doctor command', () => {
       message: 'Embedding provider: none (none).',
     });
   });
+
+  it('reports vector search as available after configuring an embedding provider', async () => {
+    writeFileSync(
+      join(tempRoot, '.code-memory', 'config.json'),
+      JSON.stringify({
+        projectName: 'doctor-sample',
+        languages: ['typescript', 'javascript'],
+        embedding: {
+          provider: 'ollama',
+          model: 'nomic-embed-text',
+        },
+      }, null, 2),
+      'utf-8',
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const program = createCli();
+    program.exitOverride();
+
+    await program.parseAsync(['node', 'code-memory', 'doctor', '--json']);
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    const result = JSON.parse(output) as {
+      checks: Array<{ name: string; status: string; message: string }>;
+    };
+
+    expect(result.checks).toContainEqual({
+      name: 'vector-search',
+      status: 'ok',
+      message: 'Vector search is configured; run "code-memory index --full" to generate chunk embeddings.',
+    });
+  });
+
+  it('warns when OpenAI embeddings are configured without credentials', async () => {
+    writeFileSync(
+      join(tempRoot, '.code-memory', 'config.json'),
+      JSON.stringify({
+        projectName: 'doctor-sample',
+        languages: ['typescript', 'javascript'],
+        embedding: {
+          provider: 'openai',
+          model: 'text-embedding-3-small',
+        },
+      }, null, 2),
+      'utf-8',
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const program = createCli();
+    program.exitOverride();
+
+    await program.parseAsync(['node', 'code-memory', 'doctor', '--json']);
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    const result = JSON.parse(output) as {
+      checks: Array<{ name: string; status: string; message: string }>;
+    };
+
+    expect(result.checks).toContainEqual({
+      name: 'embedding',
+      status: 'warn',
+      message: 'Embedding provider: openai (text-embedding-3-small) but no apiKey or custom baseUrl is configured.',
+    });
+    expect(result.checks).toContainEqual({
+      name: 'vector-search',
+      status: 'warn',
+      message: 'Vector search needs an OpenAI apiKey or custom baseUrl before indexing embeddings.',
+    });
+  });
 });

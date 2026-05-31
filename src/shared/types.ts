@@ -129,7 +129,9 @@ export interface SymbolRecord {
   endLine: number;
   startColumn: number;
   endColumn: number;
+  /** @deprecated Compatibility alias for startLine; never a byte offset. */
   rangeStart: number;
+  /** @deprecated Compatibility alias for endLine; never a byte offset. */
   rangeEnd: number;
   signature: string | null;
   summary: string | null;
@@ -279,6 +281,10 @@ export interface ProjectCard {
   architectureStyle: string | null;
   framework: string | null;
   rootPath: string;
+  currentCommit: string | null;
+  currentBranch: string | null;
+  indexCompleted: string | null;
+  vectorSearch: 'disabled' | 'pending_index' | 'enabled';
 }
 
 export interface ContextFile {
@@ -445,7 +451,9 @@ export interface CallReference {
   callerName: string | null;
   callerStartLine: number | null;
   calleeName: string;
+  /** 1-based line where the call expression starts; never a byte offset. */
   rangeStart: number;
+  /** 1-based line where the call expression ends; never a byte offset. */
   rangeEnd: number;
   evidence: string;
 }

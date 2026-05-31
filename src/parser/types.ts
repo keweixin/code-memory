@@ -137,7 +137,21 @@ export const LANGUAGE_CONFIGS: Record<ParserLanguage, LanguageConfig> = {
 export interface ExtractedSymbol {
   name: string;
   kind: SymbolKind;
+  /** Byte offset where the symbol declaration starts. */
+  startByte: number;
+  /** Byte offset where the symbol declaration ends. */
+  endByte: number;
+  /** 1-based line where the symbol declaration starts. */
+  startLine: number;
+  /** 1-based line where the symbol declaration ends. */
+  endLine: number;
+  /** 0-based UTF-16 column where the symbol declaration starts. */
+  startColumn: number;
+  /** 0-based UTF-16 column where the symbol declaration ends. */
+  endColumn: number;
+  /** @deprecated Compatibility alias for startLine; never a byte offset. */
   rangeStart: number;
+  /** @deprecated Compatibility alias for endLine; never a byte offset. */
   rangeEnd: number;
   signature: string | null;
   summary: string | null;
@@ -151,10 +165,14 @@ export interface ExtractedSymbol {
  * Extends ImportInfo with byte offsets for incremental updates.
  */
 export interface ExtractedImport extends ImportInfo {
-  /** Byte offset where the import statement starts */
-  rangeStart: number;
-  /** Byte offset where the import statement ends */
-  rangeEnd: number;
+  /** Byte offset where the import statement starts. */
+  startByte?: number;
+  /** Byte offset where the import statement ends. */
+  endByte?: number;
+  /** @deprecated Compatibility alias for startLine; never a byte offset. */
+  rangeStart?: number;
+  /** @deprecated Compatibility alias for endLine; never a byte offset. */
+  rangeEnd?: number;
 }
 
 /**
@@ -169,9 +187,17 @@ export interface ExtractedCall {
   calleeName: string;
   /** Object expression before the dot (e.g. 'fs' in 'fs.readFile') */
   calleeObject: string | null;
-  /** Byte offset of the call expression */
+  /** Byte offset where the call expression starts. */
+  startByte?: number;
+  /** Byte offset where the call expression ends. */
+  endByte?: number;
+  /** 0-based UTF-16 column where the call expression starts. */
+  startColumn?: number;
+  /** 0-based UTF-16 column where the call expression ends. */
+  endColumn?: number;
+  /** 1-based line where the call expression starts. */
   rangeStart: number;
-  /** Byte end offset of the call expression */
+  /** 1-based line where the call expression ends. */
   rangeEnd: number;
   /** Whether this is a constructor call (new X()) */
   isNew: boolean;

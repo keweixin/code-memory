@@ -224,10 +224,48 @@ describe('core indexing pipeline', () => {
     expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
   });
 
+  it('links project configs into symbol-level impact analysis', async () => {
+    await indexFixture(tempRoot);
+
+    const analyzer = new ImpactAnalyzer(getDatabaseSync());
+    const impact = analyzer.analyze('AuthService');
+
+    expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
+  });
+
+  it('resolves qualified class method targets in impact analysis', async () => {
+    await indexFixture(tempRoot);
+
+    const analyzer = new ImpactAnalyzer(getDatabaseSync());
+    const impact = analyzer.analyze('AuthService.login');
+
+    expect(impact.affectedFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'src/services/AuthService.ts',
+          impactType: 'direct',
+          distance: 0,
+        }),
+      ]),
+    );
+    expect(impact.affectedSymbols.map((symbol) => symbol.name)).toEqual(
+      expect.arrayContaining(['findUserByEmail', 'verifyPassword', 'issueTokens']),
+    );
+    expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
+  });
+
   it('packs real code snippets for high-detail context requests', async () => {
     await indexFixture(tempRoot);
 
     const db = getDatabaseSync();
+    db.run(
+      `INSERT OR REPLACE INTO index_metadata (key, value) VALUES
+        ('current_commit', 'abc123def456'),
+        ('current_branch', 'feature/context-evidence'),
+        ('index_completed', '2026-05-31T09:00:00.000Z'),
+        ('embedding_provider', 'none')`,
+    );
+
     const search = new HybridSearchEngine(db);
     const packer = new ContextPacker(db);
 
@@ -244,8 +282,18 @@ describe('core indexing pipeline', () => {
     expect(pack.projectCard?.name).toBe('sample-ts-project');
     expect(pack.projectCard?.rootPath).toBe(tempRoot);
     expect(pack.projectCard?.languages).toEqual(['typescript', 'javascript']);
+    expect(pack.projectCard).toMatchObject({
+      currentCommit: 'abc123def456',
+      currentBranch: 'feature/context-evidence',
+      indexCompleted: '2026-05-31T09:00:00.000Z',
+      vectorSearch: 'disabled',
+    });
     expect(pack.codeSnippets.length).toBeGreaterThan(0);
     const formatted = packer.formatAsText(pack);
+    expect(formatted).toContain('Commit: abc123def456');
+    expect(formatted).toContain('Branch: feature/context-evidence');
+    expect(formatted).toContain('Index Completed: 2026-05-31T09:00:00.000Z');
+    expect(formatted).toContain('Vector Search: disabled');
     expect(formatted).toContain('async login(request: LoginRequest)');
     expect(formatted).toMatch(/AuthService\.ts:24:\d+-45:\d+/);
   });
@@ -263,6 +311,29 @@ describe('core indexing pipeline', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((result) => result.sources.includes('graph'))).toBe(true);
     expect(results.every((result) => !result.sources.includes('keyword'))).toBe(true);
+  });
+
+  it('applies file filters to keyword symbol and file search results', async () => {
+    await indexFixture(tempRoot);
+
+    const db = getDatabaseSync();
+    const search = new HybridSearchEngine(db);
+    const symbolResults = await search.searchCode('login', {
+      limit: 20,
+      searchMode: 'keyword',
+      fileFilter: 'src/services/AuthService.ts',
+    });
+
+    expect(symbolResults.length).toBeGreaterThan(0);
+    expect(symbolResults.every((result) => result.filePath === 'src/services/AuthService.ts')).toBe(true);
+
+    const fileResults = await search.searchCode('README', {
+      limit: 20,
+      searchMode: 'keyword',
+      fileFilter: 'src/**',
+    });
+
+    expect(fileResults).toHaveLength(0);
   });
 
   it('resolves aliased named imports when building CALLS edges', async () => {
@@ -744,7 +815,7 @@ describe('core indexing pipeline', () => {
     expect(namespaceBarrelCalls).toEqual(['findUserByEmail']);
   });
 
-  it('rejects vector-only search while embeddings are not wired', async () => {
+  it('rejects vector-only search when no vector provider is available', async () => {
     await indexFixture(tempRoot);
 
     const db = getDatabaseSync();
@@ -753,7 +824,7 @@ describe('core indexing pipeline', () => {
     await expect(search.search({
       query: 'login',
       searchMode: 'vector',
-    })).rejects.toThrow('Vector search is not available');
+    })).rejects.toThrow('configure an embedding provider');
   });
 
   it('indexes TSX components with real symbols and chunks', async () => {
@@ -846,5 +917,48 @@ describe('core indexing pipeline', () => {
       `SELECT path FROM files WHERE path = 'src/services/token-service.ts'`,
     );
     expect(staleDeletedFile).toHaveLength(0);
+  });
+
+  it('keeps incremental run stats separate from current index totals', async () => {
+    await indexFixture(tempRoot);
+
+    writeFileSync(
+      join(tempRoot, 'src/services/incremental-service.ts'),
+      [
+        'export function incrementalProbe() {',
+        "  return 'indexed';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const manager = new IndexManager(tempRoot, createConfig(tempRoot));
+    const status = await manager.incrementalIndex();
+
+    const fileCount = Number(queryRows('SELECT COUNT(*) FROM files')[0][0]);
+    const symbolCount = Number(queryRows('SELECT COUNT(*) FROM symbols')[0][0]);
+    const edgeCount = Number(queryRows('SELECT COUNT(*) FROM edges')[0][0]);
+    const chunkCount = Number(queryRows('SELECT COUNT(*) FROM chunks')[0][0]);
+    const metadata = new Map(
+      queryRows('SELECT key, value FROM index_metadata').map(([key, value]) => [
+        String(key),
+        String(value),
+      ]),
+    );
+
+    expect(status.indexedFiles).toBe(fileCount);
+    expect(status.totalSymbols).toBe(symbolCount);
+    expect(status.totalEdges).toBe(edgeCount);
+    expect(status.totalChunks).toBe(chunkCount);
+    expect(Number(metadata.get('indexed_files'))).toBe(fileCount);
+    expect(Number(metadata.get('total_symbols'))).toBe(symbolCount);
+    expect(Number(metadata.get('total_edges'))).toBe(edgeCount);
+    expect(Number(metadata.get('total_chunks'))).toBe(chunkCount);
+    expect(metadata.get('last_index_mode')).toBe('incremental');
+    expect(Number(metadata.get('last_run_indexed_files'))).toBe(1);
+    expect(Number(metadata.get('last_run_symbols'))).toBe(1);
+    expect(Number(metadata.get('last_run_chunks'))).toBe(1);
+    expect(Number(metadata.get('last_run_edges'))).toBe(edgeCount);
   });
 });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createCli } from '../src/cli/cli.js';
 import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
 import { DEFAULT_TOKEN_BUDGETS, type CodeMemoryConfig } from '../src/shared/types.js';
-import { closeDatabase } from '../src/storage/database.js';
+import { closeDatabase, getDatabaseSync } from '../src/storage/database.js';
 
 const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
@@ -97,5 +97,34 @@ describe('CLI index command', () => {
     expect(status.files).toBeGreaterThanOrEqual(14);
     expect(status.symbols).toBeGreaterThan(0);
     expect(status.chunks).toBeGreaterThan(0);
+  });
+
+  it('reports enabled vector search from status json when metadata proves it', async () => {
+    const program = createCli();
+    program.exitOverride();
+    await program.parseAsync(['node', 'code-memory', 'index', '--full']);
+    getDatabaseSync().run(
+      `INSERT OR REPLACE INTO index_metadata (key, value) VALUES
+        ('embedding_provider', 'ollama'),
+        ('embedding_model', 'test-embed'),
+        ('vector_search', 'enabled')`,
+    );
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const statusProgram = createCli();
+    statusProgram.exitOverride();
+
+    await statusProgram.parseAsync(['node', 'code-memory', 'status', '--json']);
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    const status = JSON.parse(output) as {
+      embeddingProvider: string;
+      embeddingModel: string;
+      vectorSearch: string;
+    };
+
+    expect(status.embeddingProvider).toBe('ollama');
+    expect(status.embeddingModel).toBe('test-embed');
+    expect(status.vectorSearch).toBe('enabled');
   });
 });
