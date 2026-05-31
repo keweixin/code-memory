@@ -233,6 +233,27 @@ describe('core indexing pipeline', () => {
     expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
   });
 
+  it('resolves qualified class method targets in impact analysis', async () => {
+    await indexFixture(tempRoot);
+
+    const analyzer = new ImpactAnalyzer(getDatabaseSync());
+    const impact = analyzer.analyze('AuthService.login');
+
+    expect(impact.affectedFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'src/services/AuthService.ts',
+          impactType: 'direct',
+          distance: 0,
+        }),
+      ]),
+    );
+    expect(impact.affectedSymbols.map((symbol) => symbol.name)).toEqual(
+      expect.arrayContaining(['findUserByEmail', 'verifyPassword', 'issueTokens']),
+    );
+    expect(impact.relatedConfigs).toEqual(['package.json', 'tsconfig.json']);
+  });
+
   it('packs real code snippets for high-detail context requests', async () => {
     await indexFixture(tempRoot);
 
