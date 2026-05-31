@@ -341,6 +341,54 @@ describe('core indexing pipeline', () => {
     expect(defaultCalls).toEqual(['issueDefaultToken']);
   });
 
+  it('resolves mixed default and named imports when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/mixed-token.ts'),
+      [
+        'export default function issueMixedToken(userId: string) {',
+        "  return `mixed_${userId}`;",
+        '}',
+        '',
+        'export function revokeMixedToken(userId: string) {',
+        '  return userId;',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/mixed-login.ts'),
+      [
+        "import makeMixedToken, { revokeMixedToken } from './mixed-token.js';",
+        '',
+        'export function mixedLogin(userId: string) {',
+        '  revokeMixedToken(userId);',
+        '  return makeMixedToken(userId);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const mixedCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'mixedLogin'
+         AND caller_file.path = 'src/services/mixed-login.ts'
+         AND callee_file.path = 'src/services/mixed-token.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(mixedCalls).toEqual(['issueMixedToken', 'revokeMixedToken']);
+  });
+
   it('resolves namespace imports when building CALLS edges', async () => {
     writeFileSync(
       join(tempRoot, 'src/services/namespace-login.ts'),
@@ -415,6 +463,47 @@ describe('core indexing pipeline', () => {
     expect(barrelCalls).toEqual(['findUserByEmail']);
   });
 
+  it('resolves aliased barrel re-exports when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/token-barrel.ts'),
+      [
+        "export { issueTokens as createTokens } from './token-service.js';",
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/alias-barrel-login.ts'),
+      [
+        "import { createTokens } from './token-barrel.js';",
+        '',
+        'export async function aliasBarrelLogin(userId: string, email: string) {',
+        '  return createTokens({ userId, email });',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const aliasBarrelCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'aliasBarrelLogin'
+         AND caller_file.path = 'src/services/alias-barrel-login.ts'
+         AND callee_file.path = 'src/services/token-service.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(aliasBarrelCalls).toEqual(['issueTokens']);
+  });
+
   it('rejects vector-only search while embeddings are not wired', async () => {
     await indexFixture(tempRoot);
 
@@ -472,5 +561,50 @@ describe('core indexing pipeline', () => {
     expect(chunks.length).toBeGreaterThan(0);
     expect(String(chunks[0][0])).toContain('return <section>');
     expect(chunks[0][1]).toBe(7);
+  });
+
+  it('full re-index removes stale files, symbols, and chunks', async () => {
+    await indexFixture(tempRoot);
+
+    const manager = new IndexManager(tempRoot, createConfig(tempRoot));
+    writeFileSync(
+      join(tempRoot, 'src/services/AuthService.ts'),
+      [
+        'export class AuthService {',
+        '  async logout(userId: string): Promise<void> {',
+        '    console.error(userId);',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    rmSync(join(tempRoot, 'src/services/token-service.ts'), { force: true });
+
+    await manager.fullIndex();
+
+    const staleLoginSymbols = queryRows(
+      `SELECT s.name
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE s.name = 'login'
+         AND f.path = 'src/services/AuthService.ts'`,
+    );
+    expect(staleLoginSymbols).toHaveLength(0);
+
+    const staleLoginChunks = queryRows(
+      `SELECT c.id
+       FROM chunks c
+       JOIN symbols s ON s.id = c.symbol_id
+       JOIN files f ON f.id = c.file_id
+       WHERE s.name = 'login'
+         AND f.path = 'src/services/AuthService.ts'`,
+    );
+    expect(staleLoginChunks).toHaveLength(0);
+
+    const staleDeletedFile = queryRows(
+      `SELECT path FROM files WHERE path = 'src/services/token-service.ts'`,
+    );
+    expect(staleDeletedFile).toHaveLength(0);
   });
 });

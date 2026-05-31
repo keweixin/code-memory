@@ -104,6 +104,7 @@ export function extractImports(
       aliases: bindings.aliases,
       isTypeOnly: node.text.startsWith('import type'),
       isDefault: bindings.isDefault,
+      defaultName: bindings.defaultName,
       isNamespace: bindings.isNamespace,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
@@ -119,6 +120,7 @@ function extractImportBindings(importText: string): {
   names: string[];
   aliases: Record<string, string>;
   isDefault: boolean;
+  defaultName?: string;
   isNamespace: boolean;
 } {
   const aliases: Record<string, string> = {};
@@ -152,15 +154,13 @@ function extractImportBindings(importText: string): {
 
   const defaultMatch = importText.match(/^import\s+([A-Za-z_$][\w$]*)\s*(?:,|\s+from\s+)/);
   const hasDefault = Boolean(defaultMatch) && !importText.startsWith('import type');
-  if (defaultMatch && !namedBlock && !namespaceMatch) {
-    add(defaultMatch[1]);
-  }
+  const defaultName = hasDefault ? defaultMatch?.[1] : undefined;
 
   if (names.length === 0) {
     for (const n of extractImportIdentifiersFallback(importText)) add(n);
   }
 
-  return { names, aliases, isDefault: hasDefault && !namedBlock && !namespaceMatch, isNamespace };
+  return { names, aliases, isDefault: hasDefault, defaultName, isNamespace };
 }
 
 function extractImportIdentifiersFallback(importText: string): string[] {
@@ -204,7 +204,11 @@ export function extractExports(
     // Check if it's a re-export (export { x } from '...' or export * from '...')
     const strings = extractStringChildren(node);
     if (strings.length > 0) {
-      ex.add('reexport:' + stripQuotes(strings[0]));
+      const source = stripQuotes(strings[0]);
+      ex.add('reexport:' + source);
+      for (const alias of extractExportAliases(node.text)) {
+        ex.add('reexportAlias:' + JSON.stringify({ source, ...alias }));
+      }
     }
 
     // Extract declared names (function/class/variable names)
@@ -213,6 +217,30 @@ export function extractExports(
     for (const n of names) ex.add(n);
   }
   return Array.from(ex);
+}
+
+function extractExportAliases(exportText: string): Array<{ importedName: string; exportedName: string }> {
+  const namedBlock = exportText.match(/\{([\s\S]*?)\}/);
+  if (!namedBlock) return [];
+
+  const aliases: Array<{ importedName: string; exportedName: string }> = [];
+  for (const rawPart of namedBlock[1].split(',')) {
+    const cleaned = rawPart.trim().replace(/^type\s+/, '');
+    if (!cleaned) continue;
+
+    const aliasMatch = cleaned.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+    if (aliasMatch) {
+      aliases.push({ importedName: aliasMatch[1], exportedName: aliasMatch[2] });
+      continue;
+    }
+
+    const nameMatch = cleaned.match(/^([A-Za-z_$][\w$]*)$/);
+    if (nameMatch) {
+      aliases.push({ importedName: nameMatch[1], exportedName: nameMatch[1] });
+    }
+  }
+
+  return aliases;
 }
 
 // ── Node walk helpers ───────────────────────────────────────

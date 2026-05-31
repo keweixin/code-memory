@@ -28,6 +28,17 @@ import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('index-manager');
 
+interface ResolvedImportSymbol {
+  symbol: SymbolRecord;
+  resolutionNames: string[];
+}
+
+interface ReexportAlias {
+  source: string;
+  importedName: string;
+  exportedName: string;
+}
+
 export class IndexManager {
   private rootPath: string;
   private config: CodeMemoryConfig;
@@ -52,6 +63,8 @@ export class IndexManager {
     const files = scanResult.files;
     log.info('Discovered ' + files.length + ' files to index');
 
+    this.pruneFilesNotInFullScan(files);
+
     let indexedCount = 0, totalSymbols = 0, totalChunks = 0, skipped = 0;
 
     for (let i = 0; i < files.length; i++) {
@@ -59,6 +72,7 @@ export class IndexManager {
       try {
         const result = await this.indexFile(discovered);
         if (!result) { skipped++; continue; }
+        this.removeFileFromIndex(result.fileId);
         this.storeParseResult(result, discovered);
         indexedCount++; totalSymbols += result.symbols.length;
         totalChunks += result.chunks.length;
@@ -234,12 +248,37 @@ export class IndexManager {
 
   private removeFileFromIndex(fileId: string): void {
     try {
-      deleteSymbolsByFileId(fileId);
+      for (const symbolId of this.getSymbolIdsByFileId(fileId)) {
+        deleteEdgesByNodeId(symbolId);
+      }
       deleteEdgesByNodeId(fileId);
       deleteChunksByFileId(fileId);
+      deleteSymbolsByFileId(fileId);
       deleteFile(fileId);
     } catch (err) {
       log.error('Failed to remove file from index: ' + fileId, err);
+    }
+  }
+
+  private pruneFilesNotInFullScan(files: DiscoveredFile[]): void {
+    const currentFileIds = new Set(
+      files.map((file) => generateId('file', normalizePath(file.relativePath))),
+    );
+
+    for (const previousFile of this.safeGetAllFiles()) {
+      if (!currentFileIds.has(previousFile.id)) {
+        this.removeFileFromIndex(previousFile.id);
+      }
+    }
+  }
+
+  private getSymbolIdsByFileId(fileId: string): string[] {
+    try {
+      const db = getDatabaseSync();
+      const rows = db.exec('SELECT id FROM symbols WHERE file_id = ?', [fileId]);
+      return rows[0]?.values.map(([id]) => String(id)) ?? [];
+    } catch {
+      return [];
     }
   }
 
@@ -387,10 +426,16 @@ export class IndexManager {
         edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'TESTS', 0.8, imp.source);
       }
 
-      const importedSymbols = this.resolveImportedSymbols(imp, importedFile, filesByPath, symbolsByFile);
+      const importedSymbols = this.resolveImportedSymbolBindings(imp, importedFile, filesByPath, symbolsByFile);
 
-      for (const symbol of importedSymbols) {
-        const resolutionNames = this.getImportResolutionNames(imp, symbol.name);
+      for (const importedSymbol of importedSymbols) {
+        const symbol = importedSymbol.symbol;
+        const resolutionNames = [
+          ...new Set([
+            ...this.getImportResolutionNames(imp, symbol.name),
+            ...importedSymbol.resolutionNames,
+          ]),
+        ];
         for (const resolutionName of resolutionNames) {
           const current = symbolsByName.get(resolutionName) || [];
           current.push(symbol);
@@ -408,26 +453,37 @@ export class IndexManager {
     return { edgeCount, symbolsByName };
   }
 
-  private resolveImportedSymbols(
+  private resolveImportedSymbolBindings(
     imp: ImportInfo,
     importedFile: FileRecord,
     filesByPath: Map<string, FileRecord>,
     symbolsByFile: Map<string, SymbolRecord[]>,
     seenFileIds: Set<string> = new Set(),
-  ): SymbolRecord[] {
+  ): ResolvedImportSymbol[] {
     if (seenFileIds.has(importedFile.id)) return [];
     seenFileIds.add(importedFile.id);
 
     const directSymbols = symbolsByFile.get(importedFile.id) || [];
     const directNames = this.getImportedSymbolNames(imp, importedFile, directSymbols);
     const directMatches = this.matchSymbolsByName(directSymbols, directNames);
-    if (directMatches.length > 0) return directMatches;
+    if (directMatches.length > 0) {
+      return directMatches.map((symbol) => ({ symbol, resolutionNames: [] }));
+    }
+
+    const aliasedReexportMatches = this.resolveAliasedReexportSymbols(
+      imp,
+      importedFile,
+      filesByPath,
+      symbolsByFile,
+      seenFileIds,
+    );
+    if (aliasedReexportMatches.length > 0) return aliasedReexportMatches;
 
     const reexportSources = importedFile.exports
       .filter((exportName) => exportName.startsWith('reexport:'))
       .map((exportName) => exportName.slice('reexport:'.length));
 
-    const reexportedMatches: SymbolRecord[] = [];
+    const reexportedMatches: ResolvedImportSymbol[] = [];
     for (const source of reexportSources) {
       const reexportFile = this.resolveImportTarget(importedFile, source, filesByPath);
       if (!reexportFile) continue;
@@ -441,16 +497,68 @@ export class IndexManager {
         : targetSymbols.map((symbol) => symbol.name);
       const matches = this.matchSymbolsByName(targetSymbols, names);
       if (matches.length > 0) {
-        reexportedMatches.push(...matches);
+        reexportedMatches.push(
+          ...matches.map((symbol) => ({ symbol, resolutionNames: [] })),
+        );
         continue;
       }
 
       reexportedMatches.push(
-        ...this.resolveImportedSymbols(imp, reexportFile, filesByPath, symbolsByFile, seenFileIds),
+        ...this.resolveImportedSymbolBindings(imp, reexportFile, filesByPath, symbolsByFile, seenFileIds),
       );
     }
 
     return reexportedMatches;
+  }
+
+  private resolveAliasedReexportSymbols(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    seenFileIds: Set<string>,
+  ): ResolvedImportSymbol[] {
+    const requestedNames = new Set(imp.names);
+    if (imp.defaultName) requestedNames.add(imp.defaultName);
+    if (requestedNames.size === 0 && !imp.isNamespace) return [];
+
+    const matches: ResolvedImportSymbol[] = [];
+    for (const alias of this.getReexportAliases(importedFile.exports)) {
+      if (!imp.isNamespace && !requestedNames.has(alias.exportedName)) continue;
+
+      const reexportFile = this.resolveImportTarget(importedFile, alias.source, filesByPath);
+      if (!reexportFile || seenFileIds.has(reexportFile.id)) continue;
+
+      const targetSymbols = symbolsByFile.get(reexportFile.id) || [];
+      for (const symbol of this.matchSymbolsByName(targetSymbols, [alias.importedName])) {
+        matches.push({
+          symbol,
+          resolutionNames: [alias.exportedName],
+        });
+      }
+    }
+
+    return matches;
+  }
+
+  private getReexportAliases(exports: string[]): ReexportAlias[] {
+    const aliases: ReexportAlias[] = [];
+    for (const exportName of exports) {
+      if (!exportName.startsWith('reexportAlias:')) continue;
+      try {
+        const parsed = JSON.parse(exportName.slice('reexportAlias:'.length)) as Partial<ReexportAlias>;
+        if (parsed.source && parsed.importedName && parsed.exportedName) {
+          aliases.push({
+            source: parsed.source,
+            importedName: parsed.importedName,
+            exportedName: parsed.exportedName,
+          });
+        }
+      } catch {
+        // Ignore malformed legacy export metadata.
+      }
+    }
+    return aliases;
   }
 
   private matchSymbolsByName(symbols: SymbolRecord[], names: string[]): SymbolRecord[] {
@@ -473,10 +581,10 @@ export class IndexManager {
     }
 
     if (imp.isDefault && imp.names.length > 0) {
-      const exportedSymbol = targetSymbols.find((symbol) => importedFile.exports.includes(symbol.name));
-      return exportedSymbol
-        ? [exportedSymbol.name]
-        : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+      const names = new Set(imp.names);
+      const defaultSymbol = this.findDefaultImportSymbol(importedFile, targetSymbols);
+      if (defaultSymbol) names.add(defaultSymbol.name);
+      return [...names];
     }
 
     return imp.names.length > 0
@@ -486,13 +594,23 @@ export class IndexManager {
 
   private getImportResolutionNames(imp: ImportInfo, importedName: string): string[] {
     const names = new Set([importedName]);
-    if (imp.isDefault && imp.names.length > 0) {
-      names.add(imp.names[0]);
+    const namedExportNames = new Set(Object.values(imp.aliases || {}));
+    if (imp.defaultName && !imp.isNamespace && !namedExportNames.has(importedName)) {
+      names.add(imp.defaultName);
     }
     for (const [localName, exportedName] of Object.entries(imp.aliases || {})) {
       if (exportedName === importedName) names.add(localName);
     }
     return [...names];
+  }
+
+  private findDefaultImportSymbol(
+    importedFile: FileRecord,
+    targetSymbols: SymbolRecord[],
+  ): SymbolRecord | null {
+    return targetSymbols.find((symbol) => importedFile.exports.includes(symbol.name))
+      || targetSymbols[0]
+      || null;
   }
 
   private createCallEdges(

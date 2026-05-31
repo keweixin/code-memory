@@ -110,6 +110,7 @@ export interface ImportInfo {
   aliases?: Record<string, string>; // Local imported name -> exported symbol name
   isTypeOnly: boolean;      // TypeScript type-only imports
   isDefault: boolean;       // Default import
+  defaultName?: string;     // Local name for the default import binding
   isNamespace?: boolean;    // import * as ns from '...'
   startLine?: number;
   endLine?: number;
