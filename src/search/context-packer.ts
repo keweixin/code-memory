@@ -255,90 +255,67 @@ export class ContextPacker {
    * Build context files from search results.
    */
   private getContextFiles(results: SearchResult[]): ContextFile[] {
-    const seen = new Set<string>();
-    const files: ContextFile[] = [];
+    const paths = [...new Set(results.map((result) => result.filePath))];
+    if (paths.length === 0) return [];
 
-    for (const r of results) {
-      if (seen.has(r.filePath)) continue;
-      seen.add(r.filePath);
+    const placeholders = paths.map(() => '?').join(',');
+    const rows = this.db.exec(
+      `SELECT path, role, language FROM files WHERE path IN (${placeholders})`,
+      paths,
+    )[0]?.values ?? [];
+    const byPath = new Map(rows.map((row) => [String(row[0]), {
+      role: String(row[1]) as ContextFile['role'],
+      language: String(row[2]) as ContextFile['language'],
+    }]));
 
-      // Get file role
-      let role = 'source';
-      try {
-        const fileResult = this.db.exec(
-          'SELECT role, language FROM files WHERE path = ?',
-          [r.filePath],
-        );
-        if (fileResult.length > 0 && fileResult[0].values.length > 0) {
-          role = String(fileResult[0].values[0][0]);
-        }
-      } catch {
-        // Use default
-      }
-
-      files.push({
-        path: r.filePath,
-        role: role as ContextFile['role'],
-        language: 'unknown' as any,
-        reason: `Matched by ${r.sources.join('+')} (score: ${r.score.toFixed(3)})`,
-        confidence: r.score,
-      });
-    }
-
-    return files;
+    return paths.map((path) => {
+      const result = results.find((item) => item.filePath === path);
+      const file = byPath.get(path);
+      return {
+        path,
+        role: file?.role || 'source',
+        language: file?.language || 'unknown' as ContextFile['language'],
+        reason: result
+          ? `Matched by ${result.sources.join('+')} (score: ${result.score.toFixed(3)})`
+          : 'Matched by search result',
+        confidence: result?.score || 0,
+      };
+    });
   }
 
   /**
    * Build context symbols from search results.
    */
   private getContextSymbols(results: SearchResult[]): ContextSymbol[] {
-    const symbols: ContextSymbol[] = [];
+    const ids = results.filter((result) => result.kind !== 'file').map((result) => result.id);
+    if (ids.length === 0) return [];
 
-    for (const r of results) {
-      if (r.kind === 'file') continue;
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = this.db.exec(
+      `SELECT s.id, s.name, s.kind, f.path, s.start_line, s.end_line,
+              s.start_column, s.end_column, s.signature, s.summary
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE s.id IN (${placeholders})`,
+      ids,
+    )[0]?.values ?? [];
+    const resultById = new Map(results.map((result) => [result.id, result]));
 
-      try {
-        const symResult = this.db.exec(
-          `SELECT name, kind, file_id, start_line, end_line, start_column,
-                  end_column, signature, summary
-           FROM symbols WHERE id = ?`,
-          [r.id],
-        );
-
-        if (symResult.length > 0 && symResult[0].values.length > 0) {
-          const row = symResult[0].values[0];
-
-          // Get file path
-          let filePath = r.filePath;
-          try {
-            const filePathResult = this.db.exec(
-              'SELECT path FROM files WHERE id = ?',
-              [String(row[2])],
-            );
-            if (filePathResult.length > 0 && filePathResult[0].values.length > 0) {
-              filePath = String(filePathResult[0].values[0][0]);
-            }
-          } catch {
-            // Use search result filePath
-          }
-
-          symbols.push({
-            name: String(row[0]),
-            kind: String(row[1]) as SymbolKind,
-            filePath,
-            signature: row[7] ? String(row[7]) : null,
-            summary: row[8] ? String(row[8]) : null,
-            lineRange: [Number(row[3]), Number(row[4])],
-            columnRange: [Number(row[5]), Number(row[6])],
-            reason: `Matched by ${r.sources.join('+')}`,
-          });
-        }
-      } catch {
-        // Skip
-      }
-    }
-
-    return symbols;
+    return rows.map((row) => {
+      const result = resultById.get(String(row[0]));
+      return {
+        name: String(row[1]),
+        kind: String(row[2]) as SymbolKind,
+        filePath: String(row[3]),
+        signature: row[8] ? String(row[8]) : null,
+        summary: row[9] ? String(row[9]) : null,
+        lineRange: [Number(row[4]), Number(row[5])],
+        columnRange: [Number(row[6]), Number(row[7])],
+        reason: result
+          ? `Matched by ${result.sources.join('+')} (score: ${result.score.toFixed(3)})`
+          : 'Matched by search result',
+      };
+    });
   }
 
   /**
@@ -474,6 +451,24 @@ export class ContextPacker {
 
     if (pack.relevantMemories.length === 0) {
       missing.push('No project memories found. Consider adding project facts with remember_project_fact.');
+    }
+
+    try {
+      const unresolvedRows = this.db.exec(
+        `SELECT f.path, COUNT(*)
+         FROM call_refs c
+         JOIN files f ON f.id = c.file_id
+         WHERE c.resolution_status != 'resolved'
+         GROUP BY f.path
+         ORDER BY COUNT(*) DESC
+         LIMIT 5`,
+      )[0]?.values ?? [];
+      if (unresolvedRows.length > 0) {
+        missing.push('Unresolved call references remain: ' +
+          unresolvedRows.map((row) => `${String(row[0])}=${Number(row[1])}`).join(', '));
+      }
+    } catch {
+      // Older indexes may not have call_refs yet.
     }
 
     return missing;

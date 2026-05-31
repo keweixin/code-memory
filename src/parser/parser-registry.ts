@@ -53,9 +53,9 @@ export async function loadLanguage(
   if (!resolvedPath) {
     const msg = [
       `Grammar WASM not found for ${config.name} (${config.wasmFile}).`,
-      "Place grammar .wasm files in a grammars/ directory at the project root, or run:",
-      "  code-memory download-grammars",
-      "Download from GitHub: https://github.com/tree-sitter/tree-sitter-<lang>/releases/latest",
+      "Set CODE_MEMORY_GRAMMARS to a directory containing grammar .wasm files,",
+      "or install the published package with bundled grammars.",
+      "Run code-memory doctor to verify grammar resolution.",
     ].join("\n");
     log.error(msg);
     throw new Error(msg);

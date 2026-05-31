@@ -50,6 +50,22 @@ export function upsertEdge(edge: EdgeRecord): void {
   );
 }
 
+export function upsertEdges(edges: EdgeRecord[]): void {
+  if (edges.length === 0) return;
+  const db = getDatabaseSync();
+  const stmt = db.native.prepare(
+    `INSERT OR REPLACE INTO edges
+       (id, from_id, to_id, type, confidence, evidence)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const write = db.native.transaction((records: EdgeRecord[]) => {
+    for (const edge of records) {
+      stmt.run(edge.id, edge.fromId, edge.toId, edge.type, edge.confidence, edge.evidence ?? null);
+    }
+  });
+  write(edges);
+}
+
 export function getOutgoingEdges(fromId: string, type?: EdgeType): EdgeRecord[] {
   const db = getDatabaseSync();
   const results: EdgeRecord[] = [];

@@ -72,7 +72,7 @@ describe('large-repo storage and graph upgrade contracts', () => {
 
     const journal = db.exec('PRAGMA journal_mode')[0]?.values[0]?.[0];
     expect(String(journal).toLowerCase()).toBe('wal');
-    expect(queryRows("SELECT value FROM index_metadata WHERE key = 'schema_version'")[0]?.[0]).toBe('3');
+    expect(queryRows("SELECT value FROM index_metadata WHERE key = 'schema_version'")[0]?.[0]).toBe('4');
 
     db.run(
       `INSERT INTO files
@@ -317,14 +317,22 @@ describe('large-repo storage and graph upgrade contracts', () => {
       schemaVersion: number;
       needsReindex: boolean;
       lastIndexDurationMs: number;
+      lastIndexParseMs: number;
+      lastIndexWriteMs: number;
+      lastIndexEdgeMs: number;
+      lastIndexPeakRssMb: number;
       parseWorkers: number;
       dirtyFiles: number;
       unresolvedCalls: number;
     };
 
-    expect(status.schemaVersion).toBe(3);
+    expect(status.schemaVersion).toBe(4);
     expect(status.needsReindex).toBe(false);
     expect(status.lastIndexDurationMs).toBeGreaterThan(0);
+    expect(status.lastIndexParseMs).toBeGreaterThanOrEqual(0);
+    expect(status.lastIndexWriteMs).toBeGreaterThanOrEqual(0);
+    expect(status.lastIndexEdgeMs).toBeGreaterThanOrEqual(0);
+    expect(status.lastIndexPeakRssMb).toBeGreaterThan(0);
     expect(status.parseWorkers).toBe(0);
     expect(status.dirtyFiles).toBeGreaterThanOrEqual(0);
     expect(status.unresolvedCalls).toBeGreaterThanOrEqual(0);

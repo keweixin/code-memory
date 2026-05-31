@@ -216,6 +216,19 @@ export function updateCallRefResolution(id: string, status: 'resolved' | 'unreso
   getDatabaseSync().run('UPDATE call_refs SET resolution_status = ? WHERE id = ?', [status, id]);
 }
 
+export function updateCallRefResolutions(updates: Array<{
+  id: string;
+  status: 'resolved' | 'unresolved' | 'ambiguous';
+}>): void {
+  if (updates.length === 0) return;
+  const db = getDatabaseSync();
+  const stmt = db.native.prepare('UPDATE call_refs SET resolution_status = ? WHERE id = ?');
+  const write = db.native.transaction((items: Array<{ id: string; status: 'resolved' | 'unresolved' | 'ambiguous' }>) => {
+    for (const item of items) stmt.run(item.status, item.id);
+  });
+  write(updates);
+}
+
 export function countUnresolvedCalls(): number {
   const result = getDatabaseSync().exec(
     "SELECT COUNT(*) FROM call_refs WHERE resolution_status != 'resolved'",

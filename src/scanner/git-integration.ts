@@ -91,7 +91,7 @@ export function getGitInfo(rootPath: string): GitInfo {
     `log -20 --format=${logFormat}`,
   );
 
-  let lastCommits: CommitInfo[] = [];
+  const lastCommits: CommitInfo[] = [];
   if (logOutput) {
     // The format gives us: hash\nsubject\nauthor\ndate\0 per commit
     // Re-parse with the expected structure

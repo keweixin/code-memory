@@ -29,10 +29,52 @@ export async function parseFilesWithWorkers(
   files: DiscoveredFile[],
   options: ParseWorkerOptions,
 ): Promise<ParseWorkerResult[]> {
-  if (files.length === 0) return [];
+  const results: ParseWorkerResult[] = [];
+  for await (const batch of parseFilesWithWorkersBatched(files, {
+    ...options,
+    batchSize: files.length || 1,
+  })) {
+    results.push(...batch);
+  }
+  return results;
+}
+
+export async function* parseFilesWithWorkersBatched(
+  files: DiscoveredFile[],
+  options: ParseWorkerOptions & { batchSize: number },
+): AsyncGenerator<ParseWorkerResult[]> {
+  if (files.length === 0) return;
   const pool = new ParseWorkerPool(options.rootPath, Math.max(1, options.workers));
+  const batchSize = Math.max(1, Math.floor(options.batchSize));
+  const maxInFlight = Math.max(1, Math.max(options.workers, batchSize));
+  const inFlight = new Set<Promise<ParseWorkerResult>>();
+  let nextFileIndex = 0;
+  let batch: ParseWorkerResult[] = [];
+
+  const enqueue = () => {
+    while (nextFileIndex < files.length && inFlight.size < maxInFlight) {
+      const promise = pool.run(files[nextFileIndex++]);
+      inFlight.add(promise);
+    }
+  };
+
   try {
-    return await Promise.all(files.map((file) => pool.run(file)));
+    enqueue();
+    while (inFlight.size > 0) {
+      const settled = await Promise.race(
+        [...inFlight].map((promise) => promise.then((result) => ({ promise, result }))),
+      );
+      inFlight.delete(settled.promise);
+      batch.push(settled.result);
+      enqueue();
+
+      if (batch.length >= batchSize) {
+        yield batch;
+        batch = [];
+      }
+    }
+
+    if (batch.length > 0) yield batch;
   } finally {
     await pool.close();
   }

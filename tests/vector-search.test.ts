@@ -184,6 +184,25 @@ describe('vector-backed hybrid search', () => {
     expect(vectorSearch).toBe('disabled');
   });
 
+  it('skips embeddings whose dimensions do not match the configured vector store', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ embedding: [1, 0] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await indexFixture(tempRoot);
+
+    const embeddedChunkCount = Number(queryRows(
+      'SELECT COUNT(*) FROM chunks WHERE embedding_id IS NOT NULL',
+    )[0][0]);
+    const vectorSearch = String(queryRows(
+      "SELECT value FROM index_metadata WHERE key = 'vector_search'",
+    )[0][0]);
+
+    expect(embeddedChunkCount).toBe(0);
+    expect(vectorSearch).toBe('disabled');
+  });
+
   it('keeps vector search enabled after an incremental index with no file changes', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body || '{}')) as { prompt?: string };

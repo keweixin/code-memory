@@ -18,7 +18,11 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/",
+    "lint": "eslint .",
+    "check": "npm run lint && npm run build && npm test",
+    "audit:official": "npm audit --registry=https://registry.npmjs.org",
+    "pack:check": "npm pack --dry-run",
+    "test:smoke": "npm run build && node tools/pack-smoke.mjs",
     "start": "node dist/index.js",
     "benchmark:index": "node tools/benchmark-index.mjs"
   },
@@ -51,6 +55,7 @@
     "@types/node": "^22.0.0",
     "eslint": "^9.0.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.60.0",
     "vitest": "^3.0.0"
   }
 }

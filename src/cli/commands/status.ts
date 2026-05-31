@@ -89,6 +89,12 @@ async function showStatus(options: StatusOptions): Promise<void> {
         schemaVersion: health.schemaVersion,
         needsReindex: health.needsReindex,
         lastIndexDurationMs: Number(meta.get('last_index_duration_ms') || 0),
+        lastIndexScanMs: Number(meta.get('last_index_scan_ms') || 0),
+        lastIndexParseMs: Number(meta.get('last_index_parse_ms') || 0),
+        lastIndexWriteMs: Number(meta.get('last_index_write_ms') || 0),
+        lastIndexEdgeMs: Number(meta.get('last_index_edge_ms') || 0),
+        lastIndexVectorMs: Number(meta.get('last_index_vector_ms') || 0),
+        lastIndexPeakRssMb: Number(meta.get('last_index_peak_rss_mb') || 0),
         parseWorkers: Number(meta.get('parse_workers') || 0),
         dirtyFiles: Number(meta.get('dirty_files') || 0),
         unresolvedCalls: Number(meta.get('unresolved_calls') || 0),
@@ -107,6 +113,8 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log(`Vector:      ${getVectorSearchStatus(meta).replace('_', ' ')}`);
       console.log(`Schema:      v${health.schemaVersion}${health.needsReindex ? ' (needs index --full)' : ''}`);
       console.log(`Last Index:  ${meta.get('last_full_index') || '(never)'}`);
+      console.log(`Duration:    ${Number(meta.get('last_index_duration_ms') || 0)} ms`);
+      console.log(`Peak RSS:    ${Number(meta.get('last_index_peak_rss_mb') || 0)} MB`);
       console.log('');
       console.log(`Files:       ${fileCount}`);
       console.log(`Symbols:     ${symCount}`);
