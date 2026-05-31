@@ -41,6 +41,16 @@ export interface StoredCallRefRow {
   resolution_status: string;
 }
 
+export interface StoredExportRow {
+  file_id: string;
+  exported_name: string;
+  local_name: string | null;
+  source: string | null;
+  kind: string;
+  start_line: number;
+  start_column: number;
+}
+
 export interface StoredScopeBindingRow {
   id: string;
   file_id: string;
@@ -188,6 +198,10 @@ export function replaceParseMetadata(params: {
 
 export function getCallRefsByFileIds(fileIds?: string[]): StoredCallRefRow[] {
   return getRowsByFileIds<StoredCallRefRow>('call_refs', fileIds);
+}
+
+export function getFileExportsByFileIds(fileIds?: string[]): StoredExportRow[] {
+  return getRowsByFileIds<StoredExportRow>('file_exports', fileIds);
 }
 
 export function getScopeBindingsByFileIds(fileIds?: string[]): StoredScopeBindingRow[] {

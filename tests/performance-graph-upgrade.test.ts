@@ -108,6 +108,42 @@ describe('large-repo storage and graph upgrade contracts', () => {
     expect(indexFileSpy.mock.calls.length).toBe(indexedFiles);
   });
 
+  it('rebuilds graph edges from persisted metadata without parsing files again', async () => {
+    cpSync(fixtureRoot, tempRoot, { recursive: true });
+    const config = createConfig(tempRoot);
+    writeConfig(tempRoot, config);
+    const manager = new IndexManager(tempRoot, config);
+    await manager.fullIndex();
+
+    const indexFileSpy = vi.spyOn(manager as unknown as { indexFile: () => unknown }, 'indexFile');
+    getDatabaseSync().run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES')");
+
+    const rebuiltEdges = await (manager as unknown as {
+      rebuildGraphEdges: (mode: 'full', dirtyFileIds?: string[]) => Promise<number>;
+    }).rebuildGraphEdges('full');
+
+    expect(indexFileSpy).not.toHaveBeenCalled();
+    expect(rebuiltEdges).toBeGreaterThan(0);
+    expect(queryRows('SELECT COUNT(*) FROM call_refs')[0][0]).toBeGreaterThan(0);
+
+    const restoredCalls = queryRows(
+      `SELECT ts.name
+       FROM edges e
+       JOIN symbols ts ON ts.id = e.to_id
+       WHERE e.type = 'CALLS' AND ts.name IN ('findUserByEmail', 'verifyPassword', 'issueTokens')`,
+    ).map((row) => String(row[0]));
+    expect(restoredCalls).toContain('findUserByEmail');
+    expect(restoredCalls).toContain('verifyPassword');
+    expect(restoredCalls).toContain('issueTokens');
+
+    const dirtyFileId = String(queryRows("SELECT id FROM files WHERE path = 'src/services/AuthService.ts'")[0][0]);
+    indexFileSpy.mockClear();
+    await (manager as unknown as {
+      rebuildGraphEdges: (mode: 'dirty', dirtyFileIds?: string[]) => Promise<number>;
+    }).rebuildGraphEdges('dirty', [dirtyFileId]);
+    expect(indexFileSpy).not.toHaveBeenCalled();
+  });
+
   it('persists parse metadata and resolves high-confidence receiver calls without global same-name guessing', async () => {
     mkdirSync(join(tempRoot, 'src'), { recursive: true });
     writeFileSync(
@@ -166,6 +202,88 @@ describe('large-repo storage and graph upgrade contracts', () => {
       "SELECT resolution_status FROM call_refs WHERE receiver_name = 'obj' AND member_name = 'save'",
     );
     expect(unresolvedObjSave[0]?.[0]).toBe('unresolved');
+  });
+
+  it('resolves barrel, alias, and namespace re-exports from structured export metadata', async () => {
+    mkdirSync(join(tempRoot, 'src'), { recursive: true });
+    writeFileSync(
+      join(tempRoot, 'src', 'auth-core.ts'),
+      [
+        'export function issueTokens(): string {',
+        "  return 'token';",
+        '}',
+        'export function revokeTokens(): void {}',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src', 'barrel.ts'),
+      [
+        "export { issueTokens as mintTokens } from './auth-core.js';",
+        "export * as authNS from './auth-core.js';",
+        "export * from './auth-core.js';",
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src', 'use.ts'),
+      [
+        "import { mintTokens, authNS, revokeTokens } from './barrel.js';",
+        'export function run(): void {',
+        '  mintTokens();',
+        '  authNS.issueTokens();',
+        '  revokeTokens();',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    );
+    const config = createConfig(tempRoot);
+    writeConfig(tempRoot, config);
+    const manager = new IndexManager(tempRoot, config);
+    await manager.fullIndex();
+
+    const barrelId = String(queryRows("SELECT id FROM files WHERE path = 'src/barrel.ts'")[0][0]);
+    expect(queryRows("SELECT COUNT(*) FROM file_exports WHERE file_id = ? AND kind = 'reexport_alias'", [barrelId])[0][0]).toBe(1);
+    expect(queryRows("SELECT COUNT(*) FROM file_exports WHERE file_id = ? AND kind = 'reexport_namespace'", [barrelId])[0][0]).toBe(1);
+
+    getDatabaseSync().run(
+      'UPDATE files SET exports = ? WHERE id = ?',
+      [JSON.stringify(['reexportAlias:{malformed-json', 'reexportNamespace:{malformed-json}']), barrelId],
+    );
+    getDatabaseSync().run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS', 'CONFIGURES')");
+
+    const indexFileSpy = vi.spyOn(manager as unknown as { indexFile: () => unknown }, 'indexFile');
+    await (manager as unknown as {
+      rebuildGraphEdges: (mode: 'full', dirtyFileIds?: string[]) => Promise<number>;
+    }).rebuildGraphEdges('full');
+
+    expect(indexFileSpy).not.toHaveBeenCalled();
+    const callTargets = queryRows(
+      `SELECT ts.name, e.evidence
+       FROM edges e
+       JOIN symbols ts ON ts.id = e.to_id
+       WHERE e.type = 'CALLS'
+       ORDER BY e.evidence`,
+    ).map((row) => `${String(row[0])}:${String(row[1])}`);
+
+    expect(callTargets.some((entry) => entry.includes('issueTokens:authNS.issueTokens'))).toBe(true);
+    expect(callTargets.some((entry) => entry.includes('revokeTokens:revokeTokens'))).toBe(true);
+    const resolvedReexportCalls = queryRows(
+      `SELECT evidence, resolution_status
+       FROM call_refs
+       WHERE evidence IN ('mintTokens()', 'authNS.issueTokens()', 'revokeTokens()')
+       ORDER BY evidence`,
+    );
+    expect(resolvedReexportCalls).toEqual([
+      ['authNS.issueTokens()', 'resolved'],
+      ['mintTokens()', 'resolved'],
+      ['revokeTokens()', 'resolved'],
+    ]);
+
+    const dirty = (manager as unknown as {
+      expandDirtyFileSet: (fileIds: string[]) => string[];
+    }).expandDirtyFileSet([String(queryRows("SELECT id FROM files WHERE path = 'src/auth-core.ts'")[0][0])]);
+    expect(dirty).toContain(barrelId);
   });
 
   it('matches camelCase symbols through normalized FTS5 search text', async () => {

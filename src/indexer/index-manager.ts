@@ -42,12 +42,15 @@ import {
   countUnresolvedCalls,
   deleteParseMetadataByFileId,
   getCallRefsByFileIds,
+  getFileExportsByFileIds,
   getScopeBindingsByFileIds,
   getTypeRelationsByFileIds,
   replaceParseMetadata,
   updateCallRefResolution,
   type StoredCallRefRow,
+  type StoredExportRow,
   type StoredScopeBindingRow,
+  type StoredTypeRelationRow,
 } from '../storage/parse-metadata-repository.js';
 import { parseFilesWithWorkers } from './parse-worker-pool.js';
 
@@ -75,6 +78,20 @@ interface ReexportAlias {
 interface ReexportNamespace {
   source: string;
   exportedName: string;
+}
+
+interface ReexportIndex {
+  aliasesByFileId: Map<string, ReexportAlias[]>;
+  namespacesByFileId: Map<string, ReexportNamespace[]>;
+  sourcesByFileId: Map<string, string[]>;
+  exportedNamesByFileId: Map<string, Set<string>>;
+}
+
+interface CallEdgeMetadata {
+  callRefsByFileId: Map<string, StoredCallRefRow[]>;
+  scopeBindingsByFileId: Map<string, StoredScopeBindingRow[]>;
+  symbolsById: Map<string, SymbolRecord>;
+  classMethodIndex: Map<string, Map<string, SymbolRecord[]>>;
 }
 
 export class IndexManager {
@@ -591,13 +608,12 @@ export class IndexManager {
 
     const indexedFiles = this.safeGetAllFiles();
     const filesByPath = new Map<string, FileRecord>();
-    const filesById = new Map<string, FileRecord>();
     for (const file of indexedFiles) {
       filesByPath.set(normalizePath(file.path), file);
-      filesById.set(file.id, file);
     }
 
     const symbols = this.getAllIndexedSymbols();
+    const symbolsById = new Map(symbols.map((symbol) => [symbol.id, symbol]));
     const symbolsByFile = new Map<string, SymbolRecord[]>();
     for (const symbol of symbols) {
       const list = symbolsByFile.get(symbol.fileId) || [];
@@ -609,12 +625,27 @@ export class IndexManager {
     const rebuildFileIds = mode === 'dirty' && dirtyFileIds.length > 0
       ? new Set(dirtyFileIds)
       : new Set(indexedFiles.map((file) => file.id));
+    const rebuildFileIdList = [...rebuildFileIds];
+    const reexportIndex = this.buildReexportIndex(getFileExportsByFileIds());
+    const callMetadata: CallEdgeMetadata = {
+      callRefsByFileId: this.groupByFileId(getCallRefsByFileIds(rebuildFileIdList)),
+      scopeBindingsByFileId: this.groupByFileId(getScopeBindingsByFileIds(rebuildFileIdList)),
+      symbolsById,
+      classMethodIndex: this.buildClassMethodIndex(symbols),
+    };
+    const typeRelations = getTypeRelationsByFileIds(mode === 'dirty' ? rebuildFileIdList : undefined);
 
     for (const fileRecord of indexedFiles) {
       if (!rebuildFileIds.has(fileRecord.id)) continue;
-      const importedSymbols = this.createImportEdges(fileRecord, fileRecord.imports, filesByPath, symbolsByFile);
+      const importedSymbols = this.createImportEdges(
+        fileRecord,
+        fileRecord.imports,
+        filesByPath,
+        symbolsByFile,
+        reexportIndex,
+      );
       edgeCount += importedSymbols.edgeCount;
-      edgeCount += this.createCallEdgesFromMetadata(fileRecord, symbolsByFile, symbols, importedSymbols);
+      edgeCount += this.createCallEdgesFromMetadata(fileRecord, symbolsByFile, callMetadata, importedSymbols);
     }
 
     if (mode === 'full') {
@@ -622,7 +653,7 @@ export class IndexManager {
     } else {
       edgeCount += this.createConfigEdges(indexedFiles.filter((file) => rebuildFileIds.has(file.id)));
     }
-    edgeCount += this.createTypeRelationEdges(mode === 'dirty' ? [...rebuildFileIds] : undefined, symbols);
+    edgeCount += this.createTypeRelationEdges(typeRelations, symbolsById, symbols);
 
     const totalEdges = this.getTableCount('edges');
     log.info('Rebuilt graph edges: ' + totalEdges);
@@ -649,28 +680,85 @@ export class IndexManager {
   private expandDirtyFileSet(fileIds: string[]): string[] {
     if (fileIds.length === 0) return [];
     const dirty = new Set(fileIds);
+    const indexedFiles = this.safeGetAllFiles();
+    const filesByPath = new Map(indexedFiles.map((file) => [normalizePath(file.path), file]));
+    const filesById = new Map(indexedFiles.map((file) => [file.id, file]));
+    const reexportIndex = this.buildReexportIndex(getFileExportsByFileIds());
     const changedPaths = new Set(
       fileIds
-        .map((id) => this.safeGetAllFiles().find((file) => file.id === id)?.path)
+        .map((id) => filesById.get(id)?.path)
         .filter((path): path is string => Boolean(path)),
     );
     if (changedPaths.size === 0) return [...dirty];
 
-    for (const file of this.safeGetAllFiles()) {
+    for (const file of indexedFiles) {
       for (const imp of file.imports) {
-        const target = this.resolveImportTarget(file, imp.source, new Map(this.safeGetAllFiles().map((f) => [normalizePath(f.path), f])));
+        const target = this.resolveImportTarget(file, imp.source, filesByPath);
         if (target && changedPaths.has(target.path)) dirty.add(file.id);
       }
-      if (file.exports.some((exportName) => exportName.startsWith('reexport:') || exportName.startsWith('reexportAlias:') || exportName.startsWith('reexportNamespace:'))) {
-        for (const exportName of file.exports) {
-          const source = this.extractReexportSource(exportName);
-          if (!source) continue;
-          const target = this.resolveImportTarget(file, source, new Map(this.safeGetAllFiles().map((f) => [normalizePath(f.path), f])));
-          if (target && changedPaths.has(target.path)) dirty.add(file.id);
-        }
+      for (const source of this.getReexportSources(file.id, reexportIndex)) {
+        const target = this.resolveImportTarget(file, source, filesByPath);
+        if (target && changedPaths.has(target.path)) dirty.add(file.id);
       }
     }
     return [...dirty];
+  }
+
+  private buildReexportIndex(exportRows: StoredExportRow[]): ReexportIndex {
+    const aliasesByFileId = new Map<string, ReexportAlias[]>();
+    const namespacesByFileId = new Map<string, ReexportNamespace[]>();
+    const sourcesByFileId = new Map<string, string[]>();
+    const exportedNamesByFileId = new Map<string, Set<string>>();
+
+    const addSource = (fileId: string, source: string) => {
+      const sources = sourcesByFileId.get(fileId) || [];
+      if (!sources.includes(source)) sources.push(source);
+      sourcesByFileId.set(fileId, sources);
+    };
+
+    for (const row of exportRows) {
+      if (!row.source && !row.kind.startsWith('reexport')) {
+        const names = exportedNamesByFileId.get(row.file_id) || new Set<string>();
+        names.add(row.local_name || row.exported_name);
+        exportedNamesByFileId.set(row.file_id, names);
+        continue;
+      }
+
+      if (!row.source) continue;
+      addSource(row.file_id, row.source);
+
+      if (row.kind === 'reexport_alias' && row.local_name) {
+        const aliases = aliasesByFileId.get(row.file_id) || [];
+        aliases.push({
+          source: row.source,
+          importedName: row.local_name,
+          exportedName: row.exported_name,
+        });
+        aliasesByFileId.set(row.file_id, aliases);
+        continue;
+      }
+
+      if (row.kind === 'reexport_namespace') {
+        const namespaces = namespacesByFileId.get(row.file_id) || [];
+        namespaces.push({
+          source: row.source,
+          exportedName: row.exported_name,
+        });
+        namespacesByFileId.set(row.file_id, namespaces);
+      }
+    }
+
+    return { aliasesByFileId, namespacesByFileId, sourcesByFileId, exportedNamesByFileId };
+  }
+
+  private groupByFileId<T extends { file_id: string }>(rows: T[]): Map<string, T[]> {
+    const grouped = new Map<string, T[]>();
+    for (const row of rows) {
+      const list = grouped.get(row.file_id) || [];
+      list.push(row);
+      grouped.set(row.file_id, list);
+    }
+    return grouped;
   }
 
   private createConfigEdges(indexedFiles: FileRecord[]): number {
@@ -693,16 +781,19 @@ export class IndexManager {
     return edgeCount;
   }
 
-  private createTypeRelationEdges(fileIds: string[] | undefined, symbols: SymbolRecord[]): number {
+  private createTypeRelationEdges(
+    relations: StoredTypeRelationRow[],
+    symbolsById: Map<string, SymbolRecord>,
+    symbols: SymbolRecord[],
+  ): number {
     let edgeCount = 0;
-    const relations = getTypeRelationsByFileIds(fileIds);
     for (const relation of relations) {
       const from = relation.from_symbol_id
-        ? symbols.find((symbol) => symbol.id === relation.from_symbol_id)
+        ? symbolsById.get(relation.from_symbol_id)
         : null;
       if (!from) continue;
       const target = relation.target_symbol_id
-        ? symbols.find((symbol) => symbol.id === relation.target_symbol_id)
+        ? symbolsById.get(relation.target_symbol_id)
         : symbols.find((symbol) => (
           symbol.name === relation.target_name &&
           (symbol.kind === 'class' || symbol.kind === 'interface')
@@ -724,6 +815,7 @@ export class IndexManager {
     imports: ImportInfo[],
     filesByPath: Map<string, FileRecord>,
     symbolsByFile: Map<string, SymbolRecord[]>,
+    reexportIndex: ReexportIndex,
   ): ImportResolution {
     let edgeCount = 0;
     const symbolsByName = new Map<string, SymbolRecord[]>();
@@ -743,8 +835,14 @@ export class IndexManager {
 
       if (this.isSideEffectImport(imp)) continue;
 
-      const importedSymbols = this.resolveImportedSymbolBindings(imp, importedFile, filesByPath, symbolsByFile);
-      const namespaceLocalNames = this.getNamespaceBindingLocalNames(imp, importedFile);
+      const importedSymbols = this.resolveImportedSymbolBindings(
+        imp,
+        importedFile,
+        filesByPath,
+        symbolsByFile,
+        reexportIndex,
+      );
+      const namespaceLocalNames = this.getNamespaceBindingLocalNames(imp, importedFile, reexportIndex);
       for (const namespaceName of namespaceLocalNames) {
         if (namespaceName) {
           const byName = namespaceSymbolsByName.get(namespaceName) || new Map<string, SymbolRecord[]>();
@@ -784,14 +882,18 @@ export class IndexManager {
     return { edgeCount, symbolsByName, namespaceSymbolsByName };
   }
 
-  private getNamespaceBindingLocalNames(imp: ImportInfo, importedFile: FileRecord): string[] {
+  private getNamespaceBindingLocalNames(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    reexportIndex: ReexportIndex,
+  ): string[] {
     const names = new Set<string>();
     if (imp.isNamespace) {
       const namespaceName = Object.keys(imp.aliases || {})[0] || imp.names[0] || imp.defaultName;
       if (namespaceName) names.add(namespaceName);
     }
 
-    for (const namespace of this.getReexportNamespaces(importedFile.exports)) {
+    for (const namespace of this.getReexportNamespaces(importedFile.id, reexportIndex)) {
       for (const [localName, exportedName] of Object.entries(imp.aliases || {})) {
         if (exportedName === namespace.exportedName) names.add(localName);
       }
@@ -814,6 +916,7 @@ export class IndexManager {
     importedFile: FileRecord,
     filesByPath: Map<string, FileRecord>,
     symbolsByFile: Map<string, SymbolRecord[]>,
+    reexportIndex: ReexportIndex,
     seenFileIds: Set<string> = new Set(),
   ): ResolvedImportSymbol[] {
     if (seenFileIds.has(importedFile.id)) return [];
@@ -822,33 +925,31 @@ export class IndexManager {
     const directSymbols = symbolsByFile.get(importedFile.id) || [];
     const directNames = this.getImportedSymbolNames(imp, importedFile, directSymbols);
     const directMatches = this.matchSymbolsByName(directSymbols, directNames);
-    if (directMatches.length > 0) {
-      return directMatches.map((symbol) => ({ symbol, resolutionNames: [] }));
-    }
+    const matches: ResolvedImportSymbol[] = directMatches
+      .map((symbol) => ({ symbol, resolutionNames: [] }));
 
     const aliasedReexportMatches = this.resolveAliasedReexportSymbols(
       imp,
       importedFile,
       filesByPath,
       symbolsByFile,
+      reexportIndex,
       seenFileIds,
     );
-    if (aliasedReexportMatches.length > 0) return aliasedReexportMatches;
+    matches.push(...aliasedReexportMatches);
 
     const namespaceReexportMatches = this.resolveNamespaceReexportSymbols(
       imp,
       importedFile,
       filesByPath,
       symbolsByFile,
+      reexportIndex,
       seenFileIds,
     );
-    if (namespaceReexportMatches.length > 0) return namespaceReexportMatches;
+    matches.push(...namespaceReexportMatches);
 
-    const reexportSources = importedFile.exports
-      .filter((exportName) => exportName.startsWith('reexport:'))
-      .map((exportName) => exportName.slice('reexport:'.length));
+    const reexportSources = reexportIndex.sourcesByFileId.get(importedFile.id) || [];
 
-    const reexportedMatches: ResolvedImportSymbol[] = [];
     for (const source of reexportSources) {
       const reexportFile = this.resolveImportTarget(importedFile, source, filesByPath);
       if (!reexportFile) continue;
@@ -856,24 +957,45 @@ export class IndexManager {
       const targetSymbols = symbolsByFile.get(reexportFile.id) || [];
       const requestedNames = imp.names.length > 0
         ? imp.names
-        : importedFile.exports.filter((exportName) => !exportName.startsWith('reexport:'));
+        : [...(reexportIndex.exportedNamesByFileId.get(importedFile.id) || [])];
       const names = requestedNames.length > 0
         ? requestedNames
         : targetSymbols.map((symbol) => symbol.name);
-      const matches = this.matchSymbolsByName(targetSymbols, names);
-      if (matches.length > 0) {
-        reexportedMatches.push(
-          ...matches.map((symbol) => ({ symbol, resolutionNames: [] })),
+      const sourceMatches = this.matchSymbolsByName(targetSymbols, names);
+      if (sourceMatches.length > 0) {
+        matches.push(
+          ...sourceMatches.map((symbol) => ({ symbol, resolutionNames: [] })),
         );
         continue;
       }
 
-      reexportedMatches.push(
-        ...this.resolveImportedSymbolBindings(imp, reexportFile, filesByPath, symbolsByFile, seenFileIds),
+      matches.push(
+        ...this.resolveImportedSymbolBindings(imp, reexportFile, filesByPath, symbolsByFile, reexportIndex, seenFileIds),
       );
     }
 
-    return reexportedMatches;
+    return this.mergeResolvedImportSymbols(matches);
+  }
+
+  private mergeResolvedImportSymbols(matches: ResolvedImportSymbol[]): ResolvedImportSymbol[] {
+    const bySymbolId = new Map<string, ResolvedImportSymbol>();
+    for (const match of matches) {
+      const existing = bySymbolId.get(match.symbol.id);
+      if (!existing) {
+        bySymbolId.set(match.symbol.id, {
+          symbol: match.symbol,
+          resolutionNames: [...new Set(match.resolutionNames)],
+        });
+        continue;
+      }
+      existing.resolutionNames = [
+        ...new Set([
+          ...existing.resolutionNames,
+          ...match.resolutionNames,
+        ]),
+      ];
+    }
+    return [...bySymbolId.values()];
   }
 
   private resolveNamespaceReexportSymbols(
@@ -881,6 +1003,7 @@ export class IndexManager {
     importedFile: FileRecord,
     filesByPath: Map<string, FileRecord>,
     symbolsByFile: Map<string, SymbolRecord[]>,
+    reexportIndex: ReexportIndex,
     seenFileIds: Set<string>,
   ): ResolvedImportSymbol[] {
     const requestedNames = new Set(imp.names);
@@ -888,13 +1011,17 @@ export class IndexManager {
     if (requestedNames.size === 0 && !imp.isNamespace) return [];
 
     const matches: ResolvedImportSymbol[] = [];
-    for (const namespace of this.getReexportNamespaces(importedFile.exports)) {
+    for (const namespace of this.getReexportNamespaces(importedFile.id, reexportIndex)) {
       if (!imp.isNamespace && !requestedNames.has(namespace.exportedName)) continue;
 
       const reexportFile = this.resolveImportTarget(importedFile, namespace.source, filesByPath);
       if (!reexportFile || seenFileIds.has(reexportFile.id)) continue;
 
-      const targetSymbols = this.getExportedSymbols(reexportFile, symbolsByFile.get(reexportFile.id) || []);
+      const targetSymbols = this.getExportedSymbols(
+        reexportFile,
+        symbolsByFile.get(reexportFile.id) || [],
+        reexportIndex,
+      );
       matches.push(
         ...targetSymbols.map((symbol) => ({
           symbol,
@@ -911,6 +1038,7 @@ export class IndexManager {
     importedFile: FileRecord,
     filesByPath: Map<string, FileRecord>,
     symbolsByFile: Map<string, SymbolRecord[]>,
+    reexportIndex: ReexportIndex,
     seenFileIds: Set<string>,
   ): ResolvedImportSymbol[] {
     const requestedNames = new Set(imp.names);
@@ -918,7 +1046,7 @@ export class IndexManager {
     if (requestedNames.size === 0 && !imp.isNamespace) return [];
 
     const matches: ResolvedImportSymbol[] = [];
-    for (const alias of this.getReexportAliases(importedFile.exports)) {
+    for (const alias of this.getReexportAliases(importedFile.id, reexportIndex)) {
       if (!imp.isNamespace && !requestedNames.has(alias.exportedName)) continue;
 
       const reexportFile = this.resolveImportTarget(importedFile, alias.source, filesByPath);
@@ -936,72 +1064,26 @@ export class IndexManager {
     return matches;
   }
 
-  private getExportedSymbols(file: FileRecord, symbols: SymbolRecord[]): SymbolRecord[] {
-    const exportedNames = new Set(
-      file.exports.filter((exportName) => !exportName.startsWith('reexport')),
-    );
+  private getExportedSymbols(
+    file: FileRecord,
+    symbols: SymbolRecord[],
+    reexportIndex: ReexportIndex,
+  ): SymbolRecord[] {
+    const exportedNames = reexportIndex.exportedNamesByFileId.get(file.id) || new Set<string>();
     const exported = symbols.filter((symbol) => exportedNames.has(symbol.name));
     return exported.length > 0 ? exported : symbols;
   }
 
-  private getReexportAliases(exports: string[]): ReexportAlias[] {
-    const aliases: ReexportAlias[] = [];
-    for (const exportName of exports) {
-      if (!exportName.startsWith('reexportAlias:')) continue;
-      try {
-        const parsed = JSON.parse(exportName.slice('reexportAlias:'.length)) as Partial<ReexportAlias>;
-        if (parsed.source && parsed.importedName && parsed.exportedName) {
-          aliases.push({
-            source: parsed.source,
-            importedName: parsed.importedName,
-            exportedName: parsed.exportedName,
-          });
-        }
-      } catch {
-        // Ignore malformed legacy export metadata.
-      }
-    }
-    return aliases;
+  private getReexportAliases(fileId: string, reexportIndex: ReexportIndex): ReexportAlias[] {
+    return reexportIndex.aliasesByFileId.get(fileId) || [];
   }
 
-  private getReexportNamespaces(exports: string[]): ReexportNamespace[] {
-    const namespaces: ReexportNamespace[] = [];
-    for (const exportName of exports) {
-      if (!exportName.startsWith('reexportNamespace:')) continue;
-      try {
-        const parsed = JSON.parse(exportName.slice('reexportNamespace:'.length)) as Partial<ReexportNamespace>;
-        if (parsed.source && parsed.exportedName) {
-          namespaces.push({
-            source: parsed.source,
-            exportedName: parsed.exportedName,
-          });
-        }
-      } catch {
-        // Ignore malformed legacy export metadata.
-      }
-    }
-    return namespaces;
+  private getReexportNamespaces(fileId: string, reexportIndex: ReexportIndex): ReexportNamespace[] {
+    return reexportIndex.namespacesByFileId.get(fileId) || [];
   }
 
-  private extractReexportSource(exportName: string): string | null {
-    if (exportName.startsWith('reexport:')) return exportName.slice('reexport:'.length);
-    if (exportName.startsWith('reexportAlias:')) {
-      try {
-        const parsed = JSON.parse(exportName.slice('reexportAlias:'.length)) as Partial<ReexportAlias>;
-        return parsed.source || null;
-      } catch {
-        return null;
-      }
-    }
-    if (exportName.startsWith('reexportNamespace:')) {
-      try {
-        const parsed = JSON.parse(exportName.slice('reexportNamespace:'.length)) as Partial<ReexportNamespace>;
-        return parsed.source || null;
-      } catch {
-        return null;
-      }
-    }
-    return null;
+  private getReexportSources(fileId: string, reexportIndex: ReexportIndex): string[] {
+    return reexportIndex.sourcesByFileId.get(fileId) || [];
   }
 
   private matchSymbolsByName(symbols: SymbolRecord[], names: string[]): SymbolRecord[] {
@@ -1056,44 +1138,20 @@ export class IndexManager {
       || null;
   }
 
-  private createCallEdges(
-    file: FileRecord,
-    parsed: ParseResult,
-    symbolsByFile: Map<string, SymbolRecord[]>,
-    importedSymbolsByName: Map<string, SymbolRecord[]>,
-  ): number {
-    let edgeCount = 0;
-    const localSymbols = symbolsByFile.get(file.id) || [];
-
-    for (const call of parsed.calls) {
-      const caller = call.callerName
-        ? this.findSymbolByNameAndLine(localSymbols, call.callerName, call.callerStartLine)
-        : null;
-      const callee = this.findCallableSymbol(localSymbols, importedSymbolsByName, call.calleeName);
-      if (!callee) continue;
-
-      const fromId = caller?.id || file.id;
-      edgeCount += this.upsertGraphEdge(fromId, callee.id, 'CALLS', caller ? 0.92 : 0.72, call.evidence);
-    }
-
-    return edgeCount;
-  }
-
   private createCallEdgesFromMetadata(
     file: FileRecord,
     symbolsByFile: Map<string, SymbolRecord[]>,
-    allSymbols: SymbolRecord[],
+    metadata: CallEdgeMetadata,
     importedSymbols: ImportResolution,
   ): number {
     let edgeCount = 0;
     const localSymbols = symbolsByFile.get(file.id) || [];
-    const callRefs = getCallRefsByFileIds([file.id]);
-    const scopeBindings = getScopeBindingsByFileIds([file.id]);
-    const classMethodIndex = this.buildClassMethodIndex(allSymbols);
+    const callRefs = metadata.callRefsByFileId.get(file.id) || [];
+    const scopeBindings = metadata.scopeBindingsByFileId.get(file.id) || [];
 
     for (const call of callRefs) {
       const caller = call.caller_symbol_id
-        ? allSymbols.find((symbol) => symbol.id === call.caller_symbol_id) ?? null
+        ? metadata.symbolsById.get(call.caller_symbol_id) ?? null
         : call.caller_name
           ? this.findSymbolByNameAndLine(localSymbols, call.caller_name, call.caller_start_line)
           : null;
@@ -1103,7 +1161,7 @@ export class IndexManager {
         localSymbols,
         importedSymbols,
         scopeBindings,
-        classMethodIndex,
+        metadata.classMethodIndex,
       );
       if (!resolution.symbol) {
         updateCallRefResolution(call.id, 'unresolved');
@@ -1244,20 +1302,6 @@ export class IndexManager {
       if (containing) return containing;
     }
     return candidates[0];
-  }
-
-  private findCallableSymbol(
-    localSymbols: SymbolRecord[],
-    importedSymbolsByName: Map<string, SymbolRecord[]>,
-    calleeName: string,
-  ): SymbolRecord | null {
-    const local = localSymbols.find((symbol) => symbol.name === calleeName);
-    if (local) return local;
-
-    const imported = importedSymbolsByName.get(calleeName);
-    if (imported && imported.length > 0) return imported[0];
-
-    return null;
   }
 
   private resolveImportTarget(
