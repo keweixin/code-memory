@@ -61,6 +61,13 @@ interface FileEntry {
   language: string;
   size: number;
   exports: string;
+  symbols: SymbolEntry[];
+}
+
+interface SymbolEntry {
+  name: string;
+  kind: string;
+  startLine: number;
 }
 
 interface DirNode {
@@ -85,6 +92,7 @@ function buildRepoMap(db: SqlJsDatabase, tokenBudget: number, directory: string)
   if (!results.length || !results[0].values.length) {
     return "=== Repository Map ===\n\n(no files indexed)\n\nTip: Run 'code-memory index' to scan and index your codebase.";
   }
+  const symbolsByPath = getSymbolsByPath(db, directory);
 
   // Build directory tree
   const root: DirNode = { name: directory || "/", files: [], children: new Map() };
@@ -97,6 +105,7 @@ function buildRepoMap(db: SqlJsDatabase, tokenBudget: number, directory: string)
       language: String(row[2]),
       size: Number(row[3]),
       exports: String(row[4]),
+      symbols: symbolsByPath.get(path) || [],
     };
 
     insertIntoTree(root, entry, directory);
@@ -149,8 +158,8 @@ function formatTree(node: DirNode, maxTokens: number, depth: number = 0): string
   for (const file of sortedFiles) {
     const fileName = file.path.split("/").pop() || file.path;
 
-    // Parse exports to show top-level symbols
-    const exportStr = formatExports(file.exports);
+    const symbolStr = formatSymbols(file.symbols);
+    const exportStr = symbolStr || formatExports(file.exports);
 
     const fileLine = `${indent}  ${fileName} [${file.role}] [${file.language}]${exportStr}`;
     const lineTokens = estimateTokens(fileLine + "\n");
@@ -179,6 +188,45 @@ function formatTree(node: DirNode, maxTokens: number, depth: number = 0): string
   }
 
   return lines.join("\n");
+}
+
+function getSymbolsByPath(db: SqlJsDatabase, directory: string): Map<string, SymbolEntry[]> {
+  const params: string[] = [];
+  let sql = `
+    SELECT f.path, s.name, s.kind, s.start_line
+    FROM symbols s
+    JOIN files f ON f.id = s.file_id
+    WHERE f.is_ignored = 0`;
+
+  if (directory) {
+    sql += " AND f.path LIKE ?";
+    params.push(`${directory.replace(/\/$/, "")}/%`);
+  }
+
+  sql += " ORDER BY f.path, s.start_line, s.start_column";
+
+  const results = db.exec(sql, params);
+  const byPath = new Map<string, SymbolEntry[]>();
+  if (!results.length) return byPath;
+
+  for (const row of results[0].values) {
+    const path = String(row[0]);
+    const current = byPath.get(path) || [];
+    current.push({
+      name: String(row[1]),
+      kind: String(row[2]),
+      startLine: Number(row[3]),
+    });
+    byPath.set(path, current);
+  }
+  return byPath;
+}
+
+function formatSymbols(symbols: SymbolEntry[]): string {
+  if (symbols.length === 0) return "";
+  const display = symbols.slice(0, 8).map((symbol) => `${symbol.name}:${symbol.kind}`);
+  const suffix = symbols.length > 8 ? ", ..." : "";
+  return ` symbols: {${display.join(", ")}${suffix}}`;
 }
 
 function formatExports(exportsJson: string): string {
