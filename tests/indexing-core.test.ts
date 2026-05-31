@@ -265,6 +265,156 @@ describe('core indexing pipeline', () => {
     expect(results.every((result) => !result.sources.includes('keyword'))).toBe(true);
   });
 
+  it('resolves aliased named imports when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/alias-login.ts'),
+      [
+        "import { findUserByEmail as lookupUser } from '../repositories/user-repository.js';",
+        '',
+        'export async function aliasLookup(email: string) {',
+        '  return lookupUser(email);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const aliasCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'aliasLookup'
+         AND caller_file.path = 'src/services/alias-login.ts'
+         AND callee_file.path = 'src/repositories/user-repository.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(aliasCalls).toEqual(['findUserByEmail']);
+  });
+
+  it('resolves default imports to exported callees when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/default-token.ts'),
+      [
+        'export default function issueDefaultToken(userId: string) {',
+        "  return `default_${userId}`;",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/default-login.ts'),
+      [
+        "import makeToken from './default-token.js';",
+        '',
+        'export function defaultLogin(userId: string) {',
+        '  return makeToken(userId);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const defaultCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'defaultLogin'
+         AND caller_file.path = 'src/services/default-login.ts'
+         AND callee_file.path = 'src/services/default-token.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(defaultCalls).toEqual(['issueDefaultToken']);
+  });
+
+  it('resolves namespace imports when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/namespace-login.ts'),
+      [
+        "import * as users from '../repositories/user-repository.js';",
+        '',
+        'export async function namespaceLookup(email: string) {',
+        '  return users.findUserByEmail(email);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const namespaceCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'namespaceLookup'
+         AND caller_file.path = 'src/services/namespace-login.ts'
+         AND callee_file.path = 'src/repositories/user-repository.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(namespaceCalls).toEqual(['findUserByEmail']);
+  });
+
+  it('resolves named imports through barrel re-exports when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/user-barrel.ts'),
+      [
+        "export { findUserByEmail } from '../repositories/user-repository.js';",
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/barrel-login.ts'),
+      [
+        "import { findUserByEmail } from './user-barrel.js';",
+        '',
+        'export async function barrelLookup(email: string) {',
+        '  return findUserByEmail(email);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const barrelCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'barrelLookup'
+         AND caller_file.path = 'src/services/barrel-login.ts'
+         AND callee_file.path = 'src/repositories/user-repository.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(barrelCalls).toEqual(['findUserByEmail']);
+  });
+
   it('rejects vector-only search while embeddings are not wired', async () => {
     await indexFixture(tempRoot);
 

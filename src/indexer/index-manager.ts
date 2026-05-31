@@ -387,28 +387,112 @@ export class IndexManager {
         edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'TESTS', 0.8, imp.source);
       }
 
-      const targetSymbols = symbolsByFile.get(importedFile.id) || [];
-      const importedNames = imp.names.length > 0
-        ? imp.names
-        : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+      const importedSymbols = this.resolveImportedSymbols(imp, importedFile, filesByPath, symbolsByFile);
 
-      for (const importedName of importedNames) {
-        const matches = targetSymbols.filter((symbol) => symbol.name === importedName);
-        for (const symbol of matches) {
-          const current = symbolsByName.get(importedName) || [];
+      for (const symbol of importedSymbols) {
+        const resolutionNames = this.getImportResolutionNames(imp, symbol.name);
+        for (const resolutionName of resolutionNames) {
+          const current = symbolsByName.get(resolutionName) || [];
           current.push(symbol);
-          symbolsByName.set(importedName, current);
-          edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
-          if (localTestSymbols.length > 0) {
-            for (const testSymbol of localTestSymbols) {
-              edgeCount += this.upsertGraphEdge(testSymbol.id, symbol.id, 'TESTS', 0.82, imp.source);
-            }
+          symbolsByName.set(resolutionName, current);
+        }
+        edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
+        if (localTestSymbols.length > 0) {
+          for (const testSymbol of localTestSymbols) {
+            edgeCount += this.upsertGraphEdge(testSymbol.id, symbol.id, 'TESTS', 0.82, imp.source);
           }
         }
       }
     }
 
     return { edgeCount, symbolsByName };
+  }
+
+  private resolveImportedSymbols(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    seenFileIds: Set<string> = new Set(),
+  ): SymbolRecord[] {
+    if (seenFileIds.has(importedFile.id)) return [];
+    seenFileIds.add(importedFile.id);
+
+    const directSymbols = symbolsByFile.get(importedFile.id) || [];
+    const directNames = this.getImportedSymbolNames(imp, importedFile, directSymbols);
+    const directMatches = this.matchSymbolsByName(directSymbols, directNames);
+    if (directMatches.length > 0) return directMatches;
+
+    const reexportSources = importedFile.exports
+      .filter((exportName) => exportName.startsWith('reexport:'))
+      .map((exportName) => exportName.slice('reexport:'.length));
+
+    const reexportedMatches: SymbolRecord[] = [];
+    for (const source of reexportSources) {
+      const reexportFile = this.resolveImportTarget(importedFile, source, filesByPath);
+      if (!reexportFile) continue;
+
+      const targetSymbols = symbolsByFile.get(reexportFile.id) || [];
+      const requestedNames = imp.names.length > 0
+        ? imp.names
+        : importedFile.exports.filter((exportName) => !exportName.startsWith('reexport:'));
+      const names = requestedNames.length > 0
+        ? requestedNames
+        : targetSymbols.map((symbol) => symbol.name);
+      const matches = this.matchSymbolsByName(targetSymbols, names);
+      if (matches.length > 0) {
+        reexportedMatches.push(...matches);
+        continue;
+      }
+
+      reexportedMatches.push(
+        ...this.resolveImportedSymbols(imp, reexportFile, filesByPath, symbolsByFile, seenFileIds),
+      );
+    }
+
+    return reexportedMatches;
+  }
+
+  private matchSymbolsByName(symbols: SymbolRecord[], names: string[]): SymbolRecord[] {
+    const nameSet = new Set(names);
+    return symbols.filter((symbol) => nameSet.has(symbol.name));
+  }
+
+  private getImportedSymbolNames(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    targetSymbols: SymbolRecord[],
+  ): string[] {
+    if (imp.isNamespace) {
+      const exported = targetSymbols
+        .filter((symbol) => importedFile.exports.includes(symbol.name))
+        .map((symbol) => symbol.name);
+      return exported.length > 0
+        ? exported
+        : targetSymbols.map((symbol) => symbol.name);
+    }
+
+    if (imp.isDefault && imp.names.length > 0) {
+      const exportedSymbol = targetSymbols.find((symbol) => importedFile.exports.includes(symbol.name));
+      return exportedSymbol
+        ? [exportedSymbol.name]
+        : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+    }
+
+    return imp.names.length > 0
+      ? imp.names
+      : targetSymbols.slice(0, 1).map((symbol) => symbol.name);
+  }
+
+  private getImportResolutionNames(imp: ImportInfo, importedName: string): string[] {
+    const names = new Set([importedName]);
+    if (imp.isDefault && imp.names.length > 0) {
+      names.add(imp.names[0]);
+    }
+    for (const [localName, exportedName] of Object.entries(imp.aliases || {})) {
+      if (exportedName === importedName) names.add(localName);
+    }
+    return [...names];
   }
 
   private createCallEdges(

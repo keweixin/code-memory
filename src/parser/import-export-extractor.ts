@@ -96,15 +96,15 @@ export function extractImports(
     if (!src || seen.has(src)) continue;
     seen.add(src);
 
-    // Extract imported names from identifier children
-    const names = extractIdentifierNames(node)
-      .filter(n => n !== 'import' && n !== 'from' && n !== 'type');
+    const bindings = extractImportBindings(node.text);
 
     result.push({
       source: src,
-      names,
+      names: bindings.names,
+      aliases: bindings.aliases,
       isTypeOnly: node.text.startsWith('import type'),
-      isDefault: names.length > 0 && !node.text.includes('{'),
+      isDefault: bindings.isDefault,
+      isNamespace: bindings.isNamespace,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       startColumn: node.startPosition.column,
@@ -113,6 +113,61 @@ export function extractImports(
   }
   log.debug('Extracted ' + result.length + ' imports');
   return result;
+}
+
+function extractImportBindings(importText: string): {
+  names: string[];
+  aliases: Record<string, string>;
+  isDefault: boolean;
+  isNamespace: boolean;
+} {
+  const aliases: Record<string, string> = {};
+  const names: string[] = [];
+  const add = (importedName: string, localName: string = importedName) => {
+    if (!importedName || importedName === 'type') return;
+    if (!names.includes(importedName)) names.push(importedName);
+    aliases[localName] = importedName;
+  };
+
+  const namedBlock = importText.match(/\{([\s\S]*?)\}/);
+  if (namedBlock) {
+    for (const rawPart of namedBlock[1].split(',')) {
+      const cleaned = rawPart.trim().replace(/^type\s+/, '');
+      if (!cleaned) continue;
+      const aliasMatch = cleaned.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+      if (aliasMatch) {
+        add(aliasMatch[1], aliasMatch[2]);
+        continue;
+      }
+      const nameMatch = cleaned.match(/^([A-Za-z_$][\w$]*)$/);
+      if (nameMatch) add(nameMatch[1]);
+    }
+  }
+
+  const namespaceMatch = importText.match(/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+/);
+  const isNamespace = Boolean(namespaceMatch);
+  if (namespaceMatch) {
+    add(namespaceMatch[1]);
+  }
+
+  const defaultMatch = importText.match(/^import\s+([A-Za-z_$][\w$]*)\s*(?:,|\s+from\s+)/);
+  const hasDefault = Boolean(defaultMatch) && !importText.startsWith('import type');
+  if (defaultMatch && !namedBlock && !namespaceMatch) {
+    add(defaultMatch[1]);
+  }
+
+  if (names.length === 0) {
+    for (const n of extractImportIdentifiersFallback(importText)) add(n);
+  }
+
+  return { names, aliases, isDefault: hasDefault && !namedBlock && !namespaceMatch, isNamespace };
+}
+
+function extractImportIdentifiersFallback(importText: string): string[] {
+  return importText
+    .replace(/(['"]).*?\1/g, '')
+    .split(/[^A-Za-z_$\w]+/)
+    .filter((n) => n && !['import', 'from', 'type', 'as'].includes(n));
 }
 
 export function extractExports(

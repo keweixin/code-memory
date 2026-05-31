@@ -118,6 +118,7 @@ describe('MCP context pack ledger integration', () => {
 
     expect(text).toContain('=== Symbols ===');
     expect(text).not.toContain('=== Code ===');
+    expect(text).not.toContain('const user = await findUserByEmail(request.email);');
     expect(text).toContain('[Context: level=L2,');
   });
 });

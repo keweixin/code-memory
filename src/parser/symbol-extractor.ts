@@ -205,8 +205,9 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
   if (!nameCapture) return null;
   const name = nameCapture.node.text.trim();
   if (!name) return null;
-  const signature = sourceCode.slice(declNode.startIndex, declNode.endIndex);
-  const hash = contentHash(signature);
+  const symbolSource = sourceCode.slice(declNode.startIndex, declNode.endIndex);
+  const signature = buildSignature(symbolSource);
+  const hash = contentHash(symbolSource);
   const accessLevel = determineAccessLevel(match.captures);
   const startLine = declNode.startPosition.row + 1;
   const endLine = declNode.endPosition.row + 1;
@@ -231,6 +232,17 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
     hash,
     accessLevel,
   };
+}
+
+function buildSignature(symbolSource: string): string {
+  const trimmed = symbolSource.trim();
+  const bodyStart = trimmed.indexOf("{");
+  if (bodyStart >= 0) {
+    return trimmed.slice(0, bodyStart).trim();
+  }
+
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim();
+  return firstLine || trimmed;
 }
 
 function findKindCapture(captures: QueryCapture[]): QueryCapture | null {

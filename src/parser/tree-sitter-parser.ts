@@ -73,7 +73,7 @@ export async function parseFile(
   try { calls = extractCallReferences(rootNode, sourceCode, parserLang, tsLang); }
   catch (err) { log.error('Call extraction failed', err); }
 
-  const chunks = createSymbolChunks(fileId, symbols);
+  const chunks = createSymbolChunks(fileId, sourceCode, symbols);
 
   try { tree.delete(); } catch {}
 
@@ -112,11 +112,11 @@ function createEmptyResult(
   };
 }
 
-function createSymbolChunks(fileId: string, symbols: SymbolRecord[]): ChunkRecord[] {
+function createSymbolChunks(fileId: string, sourceCode: string, symbols: SymbolRecord[]): ChunkRecord[] {
   return symbols
-    .filter((symbol) => symbol.signature && symbol.signature.trim().length > 0)
+    .filter((symbol) => symbol.startByte < symbol.endByte)
     .map((symbol) => {
-      const content = symbol.signature || '';
+      const content = sourceCode.slice(symbol.startByte, symbol.endByte);
       const hash = contentHash(content);
       return {
         id: generateId('chunk', symbol.id, hash),

@@ -107,8 +107,10 @@ export interface FileRecord {
 export interface ImportInfo {
   source: string;           // Module path or package name
   names: string[];          // Imported symbol names
+  aliases?: Record<string, string>; // Local imported name -> exported symbol name
   isTypeOnly: boolean;      // TypeScript type-only imports
   isDefault: boolean;       // Default import
+  isNamespace?: boolean;    // import * as ns from '...'
   startLine?: number;
   endLine?: number;
   startColumn?: number;
