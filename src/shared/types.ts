@@ -116,6 +116,12 @@ export interface SymbolRecord {
   fileId: string;
   name: string;
   kind: SymbolKind;
+  startByte: number;
+  endByte: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
   rangeStart: number;
   rangeEnd: number;
   signature: string | null;
@@ -137,6 +143,12 @@ export interface ChunkRecord {
   id: string;
   fileId: string;
   symbolId: string | null;
+  startByte: number;
+  endByte: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
   contentHash: string;
   content: string;
   tokenCount: number;
@@ -276,6 +288,7 @@ export interface ContextSymbol {
   signature: string | null;
   summary: string | null;
   lineRange: [number, number];
+  columnRange: [number, number];
   reason: string;
 }
 
@@ -284,6 +297,7 @@ export interface ContextSnippet {
   symbolName: string | null;
   content: string;
   lineRange: [number, number];
+  columnRange: [number, number];
   tokenCount: number;
   reason: string;
 }

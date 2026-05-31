@@ -210,8 +210,27 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
   const accessLevel = determineAccessLevel(match.captures);
   const startLine = declNode.startPosition.row + 1;
   const endLine = declNode.endPosition.row + 1;
+  const startColumn = declNode.startPosition.column;
+  const endColumn = declNode.endPosition.column;
   const symbolId = generateId(fileId, kind, name, String(startLine));
-  return { id: symbolId, fileId, name, kind, rangeStart: startLine, rangeEnd: endLine, signature, summary: null, hash, accessLevel };
+  return {
+    id: symbolId,
+    fileId,
+    name,
+    kind,
+    startByte: declNode.startIndex,
+    endByte: declNode.endIndex,
+    startLine,
+    endLine,
+    startColumn,
+    endColumn,
+    rangeStart: startLine,
+    rangeEnd: endLine,
+    signature,
+    summary: null,
+    hash,
+    accessLevel,
+  };
 }
 
 function findKindCapture(captures: QueryCapture[]): QueryCapture | null {

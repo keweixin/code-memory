@@ -24,6 +24,12 @@ function serializeSymbol(record: Partial<SymbolRecord>): Record<string, unknown>
     $fileId: record.fileId,
     $name: record.name,
     $kind: record.kind,
+    $startByte: record.startByte,
+    $endByte: record.endByte,
+    $startLine: record.startLine,
+    $endLine: record.endLine,
+    $startColumn: record.startColumn,
+    $endColumn: record.endColumn,
     $rangeStart: record.rangeStart,
     $rangeEnd: record.rangeEnd,
     $signature: record.signature ?? null,
@@ -39,6 +45,12 @@ function deserializeSymbol(row: Record<string, unknown>): SymbolRecord {
     fileId: row.file_id as string,
     name: row.name as string,
     kind: row.kind as SymbolKind,
+    startByte: row.start_byte as number,
+    endByte: row.end_byte as number,
+    startLine: row.start_line as number,
+    endLine: row.end_line as number,
+    startColumn: row.start_column as number,
+    endColumn: row.end_column as number,
     rangeStart: row.range_start as number,
     rangeEnd: row.range_end as number,
     signature: (row.signature as string) ?? null,
@@ -56,12 +68,16 @@ export function upsertSymbol(symbol: SymbolRecord): void {
 
   db.run(
     `INSERT OR REPLACE INTO symbols
-       (id, file_id, name, kind, range_start, range_end,
+       (id, file_id, name, kind, start_byte, end_byte, start_line, end_line,
+        start_column, end_column, range_start, range_end,
         signature, summary, hash, access_level)
-     VALUES ($id, $fileId, $name, $kind, $rangeStart, $rangeEnd,
+     VALUES ($id, $fileId, $name, $kind, $startByte, $endByte, $startLine, $endLine,
+             $startColumn, $endColumn, $rangeStart, $rangeEnd,
              $signature, $summary, $hash, $accessLevel)`,
     [
-      p.$id, p.$fileId, p.$name, p.$kind, p.$rangeStart, p.$rangeEnd,
+      p.$id, p.$fileId, p.$name, p.$kind,
+      p.$startByte, p.$endByte, p.$startLine, p.$endLine,
+      p.$startColumn, p.$endColumn, p.$rangeStart, p.$rangeEnd,
       p.$signature, p.$summary, p.$hash, p.$accessLevel,
     ],
   );

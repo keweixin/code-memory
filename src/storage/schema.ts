@@ -11,7 +11,7 @@
  * repository query layer.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /**
  * Core tables DDL — executed in order.
@@ -41,6 +41,12 @@ export const CORE_TABLES: string[] = [
     file_id         TEXT NOT NULL,
     name            TEXT NOT NULL,
     kind            TEXT NOT NULL DEFAULT 'function',
+    start_byte      INTEGER NOT NULL DEFAULT 0,
+    end_byte        INTEGER NOT NULL DEFAULT 0,
+    start_line      INTEGER NOT NULL DEFAULT 0,
+    end_line        INTEGER NOT NULL DEFAULT 0,
+    start_column    INTEGER NOT NULL DEFAULT 0,
+    end_column      INTEGER NOT NULL DEFAULT 0,
     range_start     INTEGER NOT NULL DEFAULT 0,
     range_end       INTEGER NOT NULL DEFAULT 0,
     signature       TEXT,
@@ -65,6 +71,12 @@ export const CORE_TABLES: string[] = [
     id              TEXT PRIMARY KEY,
     file_id         TEXT NOT NULL,
     symbol_id       TEXT,
+    start_byte      INTEGER NOT NULL DEFAULT 0,
+    end_byte        INTEGER NOT NULL DEFAULT 0,
+    start_line      INTEGER NOT NULL DEFAULT 0,
+    end_line        INTEGER NOT NULL DEFAULT 0,
+    start_column    INTEGER NOT NULL DEFAULT 0,
+    end_column      INTEGER NOT NULL DEFAULT 0,
     content_hash    TEXT NOT NULL DEFAULT '',
     content         TEXT NOT NULL DEFAULT '',
     token_count     INTEGER NOT NULL DEFAULT 0,
@@ -223,6 +235,7 @@ export const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)`,
   `CREATE INDEX IF NOT EXISTS idx_symbols_kind ON symbols(kind)`,
   `CREATE INDEX IF NOT EXISTS idx_symbols_hash ON symbols(hash)`,
+  `CREATE INDEX IF NOT EXISTS idx_symbols_location ON symbols(file_id, start_line, start_column)`,
 
   // edges
   `CREATE INDEX IF NOT EXISTS idx_edges_from_id ON edges(from_id)`,
@@ -236,6 +249,7 @@ export const INDEXES: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id)`,
   `CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash)`,
   `CREATE INDEX IF NOT EXISTS idx_chunks_symbol_id ON chunks(symbol_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_chunks_location ON chunks(file_id, start_line, start_column)`,
 
   // memories
   `CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)`,

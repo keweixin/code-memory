@@ -273,7 +273,9 @@ export class ContextPacker {
 
       try {
         const symResult = this.db.exec(
-          'SELECT name, kind, file_id, range_start, range_end, signature, summary FROM symbols WHERE id = ?',
+          `SELECT name, kind, file_id, start_line, end_line, start_column,
+                  end_column, signature, summary
+           FROM symbols WHERE id = ?`,
           [r.id],
         );
 
@@ -298,9 +300,10 @@ export class ContextPacker {
             name: String(row[0]),
             kind: String(row[1]) as SymbolKind,
             filePath,
-            signature: row[5] ? String(row[5]) : null,
-            summary: row[6] ? String(row[6]) : null,
+            signature: row[7] ? String(row[7]) : null,
+            summary: row[8] ? String(row[8]) : null,
             lineRange: [Number(row[3]), Number(row[4])],
+            columnRange: [Number(row[5]), Number(row[6])],
             reason: `Matched by ${r.sources.join('+')}`,
           });
         }
@@ -322,13 +325,19 @@ export class ContextPacker {
       try {
         const chunkResult = r.kind === 'file'
           ? this.db.exec(
-              'SELECT content, token_count, symbol_id FROM chunks WHERE file_id = (SELECT id FROM files WHERE path = ?) LIMIT 5',
+              `SELECT content, token_count, symbol_id, start_line, end_line,
+                      start_column, end_column
+               FROM chunks WHERE file_id = (SELECT id FROM files WHERE path = ?) LIMIT 5`,
               [r.filePath],
             )
           : this.db.exec(
-              `SELECT content, token_count, symbol_id FROM chunks WHERE symbol_id = ?
+              `SELECT content, token_count, symbol_id, start_line, end_line,
+                      start_column, end_column
+               FROM chunks WHERE symbol_id = ?
                UNION ALL
-               SELECT content, token_count, symbol_id FROM chunks
+               SELECT content, token_count, symbol_id, start_line, end_line,
+                      start_column, end_column
+               FROM chunks
                WHERE file_id = (SELECT id FROM files WHERE path = ?) AND symbol_id != ?
                LIMIT 5`,
               [r.id, r.filePath, r.id],
@@ -356,15 +365,23 @@ export class ContextPacker {
               }
             }
 
-            // Estimate line range from content
+            // Prefer persisted chunk coordinates; fall back to search result lines.
             const lines = content.split('\n');
-            const lineRange: [number, number] = [r.lineRange?.[0] || 1, r.lineRange?.[1] || lines.length];
+            const lineRange: [number, number] = [
+              Number(row[3]) || r.lineRange?.[0] || 1,
+              Number(row[4]) || r.lineRange?.[1] || lines.length,
+            ];
+            const columnRange: [number, number] = [
+              Number(row[5]) || 0,
+              Number(row[6]) || 0,
+            ];
 
             snippets.push({
               filePath: r.filePath,
               symbolName,
               content,
               lineRange,
+              columnRange,
               tokenCount,
               reason: `Code from ${r.filePath} (score: ${r.score.toFixed(3)})`,
             });
@@ -486,7 +503,9 @@ export class ContextPacker {
       for (const sym of pack.symbols) {
         const sig = sym.signature ? `: ${sym.signature}` : '';
         const sum = sym.summary ? ` — ${sym.summary}` : '';
-        sections.push(`- ${sym.name} (${sym.kind}) at ${sym.filePath}:${sym.lineRange[0]}${sig}${sum}`);
+        sections.push(
+          `- ${sym.name} (${sym.kind}) at ${formatLocation(sym.filePath, sym.lineRange, sym.columnRange)}${sig}${sum}`,
+        );
       }
       sections.push('');
     }
@@ -496,8 +515,8 @@ export class ContextPacker {
       sections.push('=== Code ===');
       for (const snippet of pack.codeSnippets) {
         const header = snippet.symbolName
-          ? `// ${snippet.symbolName} (${snippet.filePath}:${snippet.lineRange[0]}-${snippet.lineRange[1]})`
-          : `// ${snippet.filePath}:${snippet.lineRange[0]}-${snippet.lineRange[1]}`;
+          ? `// ${snippet.symbolName} (${formatLocation(snippet.filePath, snippet.lineRange, snippet.columnRange)})`
+          : `// ${formatLocation(snippet.filePath, snippet.lineRange, snippet.columnRange)}`;
         sections.push(header);
         sections.push(snippet.content);
         sections.push('');
@@ -527,4 +546,12 @@ export class ContextPacker {
 
     return sections.join('\n');
   }
+}
+
+function formatLocation(
+  filePath: string,
+  lineRange: [number, number],
+  columnRange: [number, number],
+): string {
+  return `${filePath}:${lineRange[0]}:${columnRange[0]}-${lineRange[1]}:${columnRange[1]}`;
 }

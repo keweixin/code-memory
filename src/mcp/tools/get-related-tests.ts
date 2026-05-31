@@ -91,6 +91,21 @@ function findRelatedTests(
     }
   }
 
+  if (fileId) {
+    const testEdges = graphEngine.getIncomingNeighbors(fileId, "TESTS");
+    for (const edge of testEdges) {
+      const testPath = resolveTestPathFromNode(db, edge.from);
+      if (testPath && !seen.has(testPath)) {
+        seen.add(testPath);
+        tests.push({
+          filePath: testPath,
+          method: "graph (TESTS edge)",
+          details: "Test file covers this module",
+        });
+      }
+    }
+  }
+
   // Naming conventions
   const searchPath = isFilePath ? target : (symbolId ? findSymbolFilePath(db, symbolId) : target);
   if (searchPath) {
@@ -176,6 +191,27 @@ function getSymbolInfo(db: SqlJsDatabase, symbolId: string): { name: string; fil
         name: String(results[0].values[0][0]),
         filePath: String(results[0].values[0][1]),
       };
+    }
+  } catch { /* not found */ }
+  return null;
+}
+
+function resolveTestPathFromNode(db: SqlJsDatabase, nodeId: string): string | null {
+  try {
+    const fileResults = db.exec(
+      "SELECT path FROM files WHERE id = ? AND role = 'test'",
+      [nodeId],
+    );
+    if (fileResults.length > 0 && fileResults[0].values.length > 0) {
+      return String(fileResults[0].values[0][0]);
+    }
+
+    const symbolResults = db.exec(
+      "SELECT f.path FROM symbols s JOIN files f ON f.id = s.file_id WHERE s.id = ? AND f.role = 'test'",
+      [nodeId],
+    );
+    if (symbolResults.length > 0 && symbolResults[0].values.length > 0) {
+      return String(symbolResults[0].values[0][0]);
     }
   } catch { /* not found */ }
   return null;

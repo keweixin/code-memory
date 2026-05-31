@@ -63,8 +63,10 @@ interface DefinitionInfo {
   name: string;
   kind: string;
   filePath: string;
-  rangeStart: number;
-  rangeEnd: number;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
   signature: string | null;
   summary: string | null;
   accessLevel: string | null;
@@ -79,7 +81,8 @@ function findDefinitions(db: SqlJsDatabase, symbolName: string, filePath: string
   // Build query - try exact match first, then partial
   let sql = `
     SELECT s.id, s.name, s.kind, f.path AS file_path,
-           s.range_start, s.range_end, s.signature, s.summary,
+           s.start_line, s.end_line, s.start_column, s.end_column,
+           s.signature, s.summary,
            s.access_level, f.exports, f.imports, f.language
     FROM symbols s
     JOIN files f ON s.file_id = f.id
@@ -108,14 +111,16 @@ function findDefinitions(db: SqlJsDatabase, symbolName: string, filePath: string
         name: String(row[1]),
         kind: String(row[2]),
         filePath: String(row[3]),
-        rangeStart: Number(row[4]),
-        rangeEnd: Number(row[5]),
-        signature: row[6] ? String(row[6]) : null,
-        summary: row[7] ? String(row[7]) : null,
-        accessLevel: row[8] ? String(row[8]) : null,
-        exports: safeJsonParseArray(String(row[9])),
-        imports: safeJsonParseImportSources(String(row[10])),
-        language: String(row[11]),
+        startLine: Number(row[4]),
+        endLine: Number(row[5]),
+        startColumn: Number(row[6]),
+        endColumn: Number(row[7]),
+        signature: row[8] ? String(row[8]) : null,
+        summary: row[9] ? String(row[9]) : null,
+        accessLevel: row[10] ? String(row[10]) : null,
+        exports: safeJsonParseArray(String(row[11])),
+        imports: safeJsonParseImportSources(String(row[12])),
+        language: String(row[13]),
       });
     }
   } catch {
@@ -162,8 +167,7 @@ function formatDefinitions(symbolName: string, defs: DefinitionInfo[]): string {
     const matchLabel = isExact ? " [EXACT MATCH]" : "";
 
     lines.push(`${rank}${matchLabel} ${d.name} (${d.kind})${d.accessLevel ? ` [${d.accessLevel}]` : ""}`);
-    lines.push(`   File: ${d.filePath}`);
-    lines.push(`   Lines: ${d.rangeStart}-${d.rangeEnd}`);
+    lines.push(`   Location: ${formatLocation(d)}`);
     if (d.signature) {
       lines.push(`   Signature: ${d.signature}`);
     }
@@ -184,4 +188,8 @@ function formatDefinitions(symbolName: string, defs: DefinitionInfo[]): string {
   }
 
   return lines.join("\n");
+}
+
+function formatLocation(d: DefinitionInfo): string {
+  return `${d.filePath}:${d.startLine}:${d.startColumn}-${d.endLine}:${d.endColumn}`;
 }

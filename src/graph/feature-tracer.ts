@@ -16,6 +16,10 @@ import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('feature-tracer');
 
+const SYMBOL_SELECT =
+  'SELECT id, file_id, name, kind, start_byte, end_byte, start_line, end_line, ' +
+  'start_column, end_column, range_start, range_end, signature, summary, hash, access_level FROM symbols';
+
 export interface FeatureTrace {
   entryPoint: FeatureNode;
   path: FeatureNode[];
@@ -83,7 +87,7 @@ export class FeatureTracer {
     for (const kind of entryKinds) {
       try {
         const result = this.db.exec(
-          "SELECT * FROM symbols WHERE kind = ? OR name LIKE '%route%' OR name LIKE '%handler%' OR name LIKE '%controller%'",
+          SYMBOL_SELECT + " WHERE kind = ? OR name LIKE '%route%' OR name LIKE '%handler%' OR name LIKE '%controller%'",
           [kind],
         );
         if (result.length > 0) {
@@ -102,7 +106,7 @@ export class FeatureTracer {
       if (fileResult.length > 0) {
         for (const row of fileResult[0].values) {
           const symbolResult = this.db.exec(
-            'SELECT * FROM symbols WHERE file_id = ? AND kind = ?',
+            SYMBOL_SELECT + ' WHERE file_id = ? AND kind = ?',
             [String(row[0]), 'function'],
           );
           if (symbolResult.length > 0) {
@@ -135,7 +139,7 @@ export class FeatureTracer {
     for (const term of searchTerms) {
       try {
         const result = this.db.exec(
-          "SELECT * FROM symbols WHERE LOWER(name) LIKE ? OR LOWER(signature) LIKE ?",
+          SYMBOL_SELECT + " WHERE LOWER(name) LIKE ? OR LOWER(signature) LIKE ?",
           [`%${term}%`, `%${term}%`],
         );
         if (result.length > 0) {
@@ -227,7 +231,7 @@ export class FeatureTracer {
   private findSymbol(name: string): SymbolRecord | null {
     try {
       const result = this.db.exec(
-        'SELECT * FROM symbols WHERE name = ? LIMIT 1',
+        SYMBOL_SELECT + ' WHERE name = ? LIMIT 1',
         [name],
       );
       if (result.length > 0 && result[0].values.length > 0) {
@@ -239,7 +243,7 @@ export class FeatureTracer {
 
   private findSymbolById(id: string): SymbolRecord | null {
     try {
-      const result = this.db.exec('SELECT * FROM symbols WHERE id = ?', [id]);
+      const result = this.db.exec(SYMBOL_SELECT + ' WHERE id = ?', [id]);
       if (result.length > 0 && result[0].values.length > 0) {
         return this.desymbolize(result[0].values[0] as any);
       }
@@ -296,12 +300,18 @@ export class FeatureTracer {
       fileId: String(row[1]),
       name: String(row[2]),
       kind: String(row[3]) as SymbolKind,
-      rangeStart: Number(row[4]),
-      rangeEnd: Number(row[5]),
-      signature: row[6] ? String(row[6]) : null,
-      summary: row[7] ? String(row[7]) : null,
-      hash: String(row[8]),
-      accessLevel: row[9] ? String(row[9]) as any : null,
+      startByte: Number(row[4]),
+      endByte: Number(row[5]),
+      startLine: Number(row[6]),
+      endLine: Number(row[7]),
+      startColumn: Number(row[8]),
+      endColumn: Number(row[9]),
+      rangeStart: Number(row[10]),
+      rangeEnd: Number(row[11]),
+      signature: row[12] ? String(row[12]) : null,
+      summary: row[13] ? String(row[13]) : null,
+      hash: String(row[14]),
+      accessLevel: row[15] ? String(row[15]) as any : null,
     };
   }
 }

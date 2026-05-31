@@ -289,7 +289,7 @@ export class IndexManager {
 
   private async rebuildGraphEdges(files: DiscoveredFile[]): Promise<number> {
     const db = getDatabaseSync();
-    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES')");
+    db.run("DELETE FROM edges WHERE type IN ('IMPORTS', 'CALLS', 'REFERENCES', 'TESTS')");
 
     const indexedFiles = this.safeGetAllFiles();
     const filesByPath = new Map<string, FileRecord>();
@@ -331,12 +331,18 @@ export class IndexManager {
   ): { edgeCount: number; symbolsByName: Map<string, SymbolRecord[]> } {
     let edgeCount = 0;
     const symbolsByName = new Map<string, SymbolRecord[]>();
+    const localTestSymbols = importer.role === 'test'
+      ? symbolsByFile.get(importer.id) || []
+      : [];
 
     for (const imp of imports) {
       const importedFile = this.resolveImportTarget(importer, imp.source, filesByPath);
       if (!importedFile) continue;
 
       edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'IMPORTS', 0.95, imp.source);
+      if (importer.role === 'test' && importedFile.role !== 'test') {
+        edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'TESTS', 0.8, imp.source);
+      }
 
       const targetSymbols = symbolsByFile.get(importedFile.id) || [];
       const importedNames = imp.names.length > 0
@@ -350,6 +356,11 @@ export class IndexManager {
           current.push(symbol);
           symbolsByName.set(importedName, current);
           edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
+          if (localTestSymbols.length > 0) {
+            for (const testSymbol of localTestSymbols) {
+              edgeCount += this.upsertGraphEdge(testSymbol.id, symbol.id, 'TESTS', 0.82, imp.source);
+            }
+          }
         }
       }
     }
@@ -461,7 +472,7 @@ export class IndexManager {
     const ext = posixPath.extname(rawPath);
     if (ext) {
       const withoutExt = rawPath.slice(0, -ext.length);
-      if (preferTypeScript && ['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
+      if (['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
         add(withoutExt + '.ts');
         add(withoutExt + '.tsx');
       }
@@ -480,19 +491,30 @@ export class IndexManager {
   private getAllIndexedSymbols(): SymbolRecord[] {
     try {
       const db = getDatabaseSync();
-      const rows = db.exec('SELECT id, file_id, name, kind, range_start, range_end, signature, summary, hash, access_level FROM symbols');
+      const rows = db.exec(
+        `SELECT id, file_id, name, kind, start_byte, end_byte, start_line, end_line,
+                start_column, end_column, range_start, range_end, signature, summary,
+                hash, access_level
+         FROM symbols`,
+      );
       if (rows.length === 0) return [];
       return rows[0].values.map((row) => ({
         id: String(row[0]),
         fileId: String(row[1]),
         name: String(row[2]),
         kind: String(row[3]) as SymbolRecord['kind'],
-        rangeStart: Number(row[4]),
-        rangeEnd: Number(row[5]),
-        signature: row[6] ? String(row[6]) : null,
-        summary: row[7] ? String(row[7]) : null,
-        hash: String(row[8]),
-        accessLevel: row[9] ? String(row[9]) as SymbolRecord['accessLevel'] : null,
+        startByte: Number(row[4]),
+        endByte: Number(row[5]),
+        startLine: Number(row[6]),
+        endLine: Number(row[7]),
+        startColumn: Number(row[8]),
+        endColumn: Number(row[9]),
+        rangeStart: Number(row[10]),
+        rangeEnd: Number(row[11]),
+        signature: row[12] ? String(row[12]) : null,
+        summary: row[13] ? String(row[13]) : null,
+        hash: String(row[14]),
+        accessLevel: row[15] ? String(row[15]) as SymbolRecord['accessLevel'] : null,
       }));
     } catch {
       return [];

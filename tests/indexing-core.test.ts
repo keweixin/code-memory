@@ -78,21 +78,46 @@ describe('core indexing pipeline', () => {
     expect(Number(metadata.get('total_chunks'))).toBeGreaterThan(0);
 
     const loginRows = queryRows(
-      `SELECT s.id, s.range_start, s.range_end
+      `SELECT s.id, s.range_start, s.range_end,
+              s.start_byte, s.end_byte, s.start_line, s.end_line,
+              s.start_column, s.end_column
        FROM symbols s
        JOIN files f ON f.id = s.file_id
        WHERE s.name = 'login' AND f.path = 'src/services/AuthService.ts'`,
     );
     expect(loginRows).toHaveLength(1);
-    const [loginId, loginStart, loginEnd] = loginRows[0];
+    const [
+      loginId,
+      loginStart,
+      loginEnd,
+      loginStartByte,
+      loginEndByte,
+      loginStartLine,
+      loginEndLine,
+      loginStartColumn,
+      loginEndColumn,
+    ] = loginRows[0];
     expect(loginStart).toBe(24);
     expect(loginEnd).toBe(45);
+    expect(loginStartLine).toBe(24);
+    expect(loginEndLine).toBe(45);
+    expect(Number(loginStartByte)).toBeGreaterThan(0);
+    expect(Number(loginEndByte)).toBeGreaterThan(Number(loginStartByte));
+    expect(Number(loginStartColumn)).toBeGreaterThanOrEqual(0);
+    expect(Number(loginEndColumn)).toBeGreaterThanOrEqual(0);
 
     const chunksForLogin = queryRows(
-      'SELECT content FROM chunks WHERE symbol_id = ?',
+      `SELECT content, start_byte, end_byte, start_line, end_line, start_column, end_column
+       FROM chunks WHERE symbol_id = ?`,
       [String(loginId)],
-    ).map(([content]) => String(content));
-    expect(chunksForLogin.join('\n')).toContain('async login(request: LoginRequest)');
+    );
+    expect(chunksForLogin.map(([content]) => String(content)).join('\n'))
+      .toContain('async login(request: LoginRequest)');
+    const loginChunk = chunksForLogin[0];
+    expect(loginChunk[3]).toBe(24);
+    expect(loginChunk[4]).toBe(45);
+    expect(Number(loginChunk[1])).toBe(Number(loginStartByte));
+    expect(Number(loginChunk[2])).toBe(Number(loginEndByte));
 
     const danglingEdges = queryRows(
       `SELECT e.id
@@ -137,6 +162,31 @@ describe('core indexing pipeline', () => {
         'src/services/token-service.ts',
       ]),
     );
+
+    const testEdges = queryRows(
+      `SELECT test_file.path, target_file.path
+       FROM edges e
+       JOIN files test_file ON test_file.id = e.from_id
+       JOIN files target_file ON target_file.id = e.to_id
+       WHERE e.type = 'TESTS'
+         AND test_file.path = 'tests/auth.test.js'
+         AND target_file.path = 'src/services/AuthService.ts'`,
+    );
+    expect(testEdges).toHaveLength(1);
+
+    const testSymbolEdges = queryRows(
+      `SELECT test_symbol.name, target_symbol.name
+       FROM edges e
+       JOIN symbols test_symbol ON test_symbol.id = e.from_id
+       JOIN files test_file ON test_file.id = test_symbol.file_id
+       JOIN symbols target_symbol ON target_symbol.id = e.to_id
+       JOIN files target_file ON target_file.id = target_symbol.file_id
+       WHERE e.type = 'TESTS'
+         AND test_file.path = 'tests/auth.test.js'
+         AND target_file.path = 'src/services/AuthService.ts'
+         AND target_symbol.name = 'AuthService'`,
+    );
+    expect(testSymbolEdges.length).toBeGreaterThan(0);
   });
 
   it('packs real code snippets for high-detail context requests', async () => {
@@ -158,6 +208,70 @@ describe('core indexing pipeline', () => {
 
     expect(pack.projectCard?.name).toBe('sample-ts-project');
     expect(pack.codeSnippets.length).toBeGreaterThan(0);
-    expect(packer.formatAsText(pack)).toContain('async login(request: LoginRequest)');
+    const formatted = packer.formatAsText(pack);
+    expect(formatted).toContain('async login(request: LoginRequest)');
+    expect(formatted).toMatch(/AuthService\.ts:24:\d+-45:\d+/);
+  });
+
+  it('uses keyword seeds but returns graph-sourced results in graph search mode', async () => {
+    await indexFixture(tempRoot);
+
+    const db = getDatabaseSync();
+    const search = new HybridSearchEngine(db);
+    const results = await search.searchCode('login', {
+      limit: 10,
+      searchMode: 'graph',
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.some((result) => result.sources.includes('graph'))).toBe(true);
+    expect(results.every((result) => !result.sources.includes('keyword'))).toBe(true);
+  });
+
+  it('indexes TSX components with real symbols and chunks', async () => {
+    const componentDir = join(tempRoot, 'src/components');
+    mkdirSync(componentDir, { recursive: true });
+    writeFileSync(
+      join(componentDir, 'LoginPanel.tsx'),
+      [
+        'import { AuthService } from "../services/AuthService.js";',
+        '',
+        'export interface LoginPanelProps {',
+        '  title: string;',
+        '}',
+        '',
+        'export function LoginPanel(props: LoginPanelProps) {',
+        '  const service = new AuthService();',
+        '  return <section><h1>{props.title}</h1><button>Login</button></section>;',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const tsxSymbols = queryRows(
+      `SELECT s.id, s.name, s.start_line, s.end_line
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE f.path = 'src/components/LoginPanel.tsx'
+       ORDER BY s.name`,
+    );
+    expect(tsxSymbols.map(([, name]) => String(name))).toEqual(
+      expect.arrayContaining(['LoginPanel', 'LoginPanelProps']),
+    );
+
+    const loginPanel = tsxSymbols.find(([, name]) => String(name) === 'LoginPanel');
+    expect(loginPanel).toBeDefined();
+    expect(loginPanel?.[2]).toBe(7);
+
+    const chunks = queryRows(
+      'SELECT content, start_line, end_line FROM chunks WHERE symbol_id = ?',
+      [String(loginPanel?.[0])],
+    );
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(String(chunks[0][0])).toContain('return <section>');
+    expect(chunks[0][1]).toBe(7);
   });
 });

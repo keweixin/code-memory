@@ -62,9 +62,10 @@ export class HybridSearchEngine {
     let keywordResults: Array<{ id: string; rank: number }> = [];
     let vectorResults: Array<{ id: string; rank: number }> = [];
     let graphResults: Array<{ id: string; rank: number }> = [];
+    let graphSeedResults: Array<{ id: string; rank: number }> = [];
 
     // Keyword search (FTS3)
-    if (searchMode === 'hybrid' || searchMode === 'keyword') {
+    if (searchMode === 'hybrid' || searchMode === 'keyword' || searchMode === 'graph') {
       const ftsResults = normalizeFts3Scores(
         searchSymbolsFts(this.db, {
           query,
@@ -73,8 +74,14 @@ export class HybridSearchEngine {
           fileFilter,
         }),
       );
-      keywordResults = ftsResults.map((r, i) => ({ id: r.id, rank: i + 1 }));
-      log.info(`Keyword search returned ${keywordResults.length} results`);
+      const ranked = ftsResults.map((r, i) => ({ id: r.id, rank: i + 1 }));
+      if (searchMode === 'graph') {
+        graphSeedResults = ranked;
+        log.info(`Graph seed search returned ${graphSeedResults.length} results`);
+      } else {
+        keywordResults = ranked;
+        log.info(`Keyword search returned ${keywordResults.length} results`);
+      }
     }
 
     // Vector search (LanceDB) — only if embeddings are available
@@ -94,7 +101,7 @@ export class HybridSearchEngine {
     // Graph expansion from top keyword/vector results
     if (searchMode === 'hybrid' || searchMode === 'graph') {
       const topIds = [
-        ...keywordResults.slice(0, 5).map((r) => r.id),
+        ...(searchMode === 'graph' ? graphSeedResults : keywordResults).slice(0, 5).map((r) => r.id),
         ...vectorResults.slice(0, 5).map((r) => r.id),
       ];
 
