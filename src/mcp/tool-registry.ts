@@ -23,6 +23,7 @@ import { registerGetContextPackTool } from "./tools/get-context-pack.js";
 import { registerRememberProjectFactTool } from "./tools/remember-project-fact.js";
 import { registerInvalidateMemoryTool } from "./tools/invalidate-memory.js";
 import { registerExplainModuleTool } from "./tools/explain-module.js";
+import { registerContextLedgerTools } from "./tools/context-ledger.js";
 
 const log = createLogger("mcp:tool-registry");
 
@@ -61,9 +62,10 @@ export function registerAllTools(server: McpServer, db: SqlJsDatabase): void {
   // ---- Memory ----
   registerRememberProjectFactTool(server, db);
   registerInvalidateMemoryTool(server, db);
+  registerContextLedgerTools(server);
 
   // ---- Understanding ----
   registerExplainModuleTool(server, db);
 
-  log.info("All 14 MCP tools registered");
+  log.info("All 18 MCP tools registered");
 }

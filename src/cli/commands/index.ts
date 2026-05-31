@@ -47,11 +47,6 @@ async function indexProject(projectPath: string, options: IndexOptions): Promise
     process.exit(1);
   }
 
-  // Set env for grammar path (use project-level grammars/ or code-memory package grammars/)
-  const pkgGrammars = '/c/Users/ASUS/code-memory/grammars';
-  const projectGrammars = join(projectPath, 'grammars');
-  process.env.CODE_MEMORY_GRAMMARS = process.env.CODE_MEMORY_GRAMMARS || pkgGrammars;
-
   // Dynamically import IndexManager (heavy deps: tree-sitter, sql.js)
   const { IndexManager } = await import('../../indexer/index-manager.js');
   const manager = new IndexManager(projectPath, config);

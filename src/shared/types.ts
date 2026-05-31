@@ -158,6 +158,32 @@ export interface MemoryRecord {
   updatedAt: string;
 }
 
+export type ContextFeedback = 'useful' | 'irrelevant' | 'stale';
+
+export interface ContextLedgerEntry {
+  id: string;
+  sessionId: string;
+  query: string;
+  returnedFiles: string[];
+  returnedSymbols: string[];
+  returnedChunks: string[];
+  tokenEstimate: number;
+  evidenceIds: string[];
+  agentFeedback: ContextFeedback | null;
+  createdAt: string;
+}
+
+export interface ContextDelta {
+  newFiles: string[];
+  repeatedFiles: string[];
+  newSymbols: string[];
+  repeatedSymbols: string[];
+  newChunks: string[];
+  repeatedChunks: string[];
+  totalPriorTokens: number;
+  evidenceIds: string[];
+}
+
 // ============================================================
 // Invalidation
 // ============================================================
@@ -381,6 +407,7 @@ export interface ParseResult {
   imports: ImportInfo[];
   exports: string[];
   edges: EdgeRecord[];
+  calls: CallReference[];
   chunks: ChunkRecord[];
   errors: ParseError[];
 }
@@ -390,6 +417,15 @@ export interface ParseError {
   line: number | null;
   message: string;
   severity: 'error' | 'warning';
+}
+
+export interface CallReference {
+  callerName: string | null;
+  callerStartLine: number | null;
+  calleeName: string;
+  rangeStart: number;
+  rangeEnd: number;
+  evidence: string;
 }
 
 // ============================================================

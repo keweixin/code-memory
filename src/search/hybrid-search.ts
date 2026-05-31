@@ -149,18 +149,20 @@ export class HybridSearchEngine {
    */
   async searchCode(
     query: string,
-    options: { limit?: number; fileFilter?: string } = {},
+    options: { limit?: number; fileFilter?: string; searchMode?: 'hybrid' | 'keyword' | 'graph' } = {},
   ): Promise<SearchResult[]> {
     // First search symbols
     const symbolResults = await this.search({
       query,
       limit: options.limit || DEFAULT_SEARCH_LIMIT,
       fileFilter: options.fileFilter,
-      searchMode: 'hybrid',
+      searchMode: options.searchMode || 'hybrid',
     });
 
     // Also search file contents via FTS5
-    const fileResults = searchFilesFts(this.db, query, options.limit || DEFAULT_SEARCH_LIMIT);
+    const fileResults = options.searchMode === 'graph'
+      ? []
+      : searchFilesFts(this.db, query, options.limit || DEFAULT_SEARCH_LIMIT);
 
     // Merge and deduplicate
     const seen = new Set(symbolResults.map((r) => r.id));

@@ -41,9 +41,6 @@ async function startServer(_options: ServeOptions): Promise<void> {
     process.exit(1);
   }
 
-  // Set grammar path
-  process.env.CODE_MEMORY_GRAMMARS = process.env.CODE_MEMORY_GRAMMARS || '/c/Users/ASUS/code-memory/grammars';
-
   log.info('Starting MCP server...');
 
   const { startServer: startMcp } = await import('../../mcp/server.js');

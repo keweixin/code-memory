@@ -208,8 +208,10 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
   const signature = sourceCode.slice(declNode.startIndex, declNode.endIndex);
   const hash = contentHash(signature);
   const accessLevel = determineAccessLevel(match.captures);
-  const symbolId = generateId(fileId, name, String(declNode.startIndex));
-  return { id: symbolId, fileId, name, kind, rangeStart: declNode.startIndex, rangeEnd: declNode.endIndex, signature, summary: null, hash, accessLevel };
+  const startLine = declNode.startPosition.row + 1;
+  const endLine = declNode.endPosition.row + 1;
+  const symbolId = generateId(fileId, kind, name, String(startLine));
+  return { id: symbolId, fileId, name, kind, rangeStart: startLine, rangeEnd: endLine, signature, summary: null, hash, accessLevel };
 }
 
 function findKindCapture(captures: QueryCapture[]): QueryCapture | null {

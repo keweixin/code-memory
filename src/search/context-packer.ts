@@ -320,11 +320,19 @@ export class ContextPacker {
 
     for (const r of results) {
       try {
-        // Get chunk content
-        const chunkResult = this.db.exec(
-          'SELECT content, token_count, symbol_id FROM chunks WHERE file_id = (SELECT id FROM files WHERE path = ?) LIMIT 5',
-          [r.filePath],
-        );
+        const chunkResult = r.kind === 'file'
+          ? this.db.exec(
+              'SELECT content, token_count, symbol_id FROM chunks WHERE file_id = (SELECT id FROM files WHERE path = ?) LIMIT 5',
+              [r.filePath],
+            )
+          : this.db.exec(
+              `SELECT content, token_count, symbol_id FROM chunks WHERE symbol_id = ?
+               UNION ALL
+               SELECT content, token_count, symbol_id FROM chunks
+               WHERE file_id = (SELECT id FROM files WHERE path = ?) AND symbol_id != ?
+               LIMIT 5`,
+              [r.id, r.filePath, r.id],
+            );
 
         if (chunkResult.length > 0) {
           for (const row of chunkResult[0].values) {

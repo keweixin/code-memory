@@ -7,6 +7,11 @@
   "bin": {
     "code-memory": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "grammars",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

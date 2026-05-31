@@ -48,7 +48,7 @@ export function searchSymbolsFts(
 ): FtsSearchResult[] {
   const { query, limit = 20, kindFilter, fileFilter } = options;
 
-  const escapedQuery = escapeFts3Query(query);
+  const escapedQuery = escapeFts3Query(query, ['name', 'kind', 'signature']);
   if (!escapedQuery) return [];
 
   try {
@@ -118,21 +118,22 @@ export function searchFilesFts(
   query: string,
   limit: number = 20,
 ): FtsSearchResult[] {
-  const escapedQuery = escapeFts3Query(query);
+  const escapedQuery = escapeFts3Query(query, ['path', 'summary', 'language', 'role']);
   if (!escapedQuery) return [];
 
   try {
     const sql = `SELECT
-      fts.docid, fts.path, fts.summary, fts.language, fts.role
-    FROM files_fts fts
-    WHERE fts MATCH ?
+      f.id, f.path, f.summary, f.language, f.role
+    FROM files_fts
+    JOIN files f ON f.rowid = files_fts.docid
+    WHERE files_fts MATCH ?
     LIMIT ${limit}`;
 
     const results = db.exec(sql, [escapedQuery]);
     if (!results.length || !results[0].values.length) return [];
 
     return results[0].values.map((row, i) => ({
-      id: `file:${String(row[1])}`,
+      id: String(row[0]),
       name: String(row[1]).split('/').pop() || String(row[1]),
       kind: 'file',
       filePath: String(row[1]),
@@ -157,7 +158,7 @@ export function searchFilesFts(
  * For simple word queries, wraps each word with * suffix and joins with AND.
  * Adds column-qualified search targeting name, kind, and signature columns.
  */
-function escapeFts3Query(query: string): string {
+function escapeFts3Query(query: string, columns: string[]): string {
   const cleaned = query
     .replace(/["*()[]:.{}<>~^-]/g, ' ')
     .trim()
@@ -169,7 +170,7 @@ function escapeFts3Query(query: string): string {
   // Column-qualified search: search name and signature with higher priority
   // Note: FTS3 with porter stemmer automatically handles word variants
   return cleaned
-    .map((w) => `(name:${w}* OR kind:${w}* OR signature:${w}*)`)
+    .map((w) => '(' + columns.map((column) => `${column}:${w}*`).join(' OR ') + ')')
     .join(' AND ');
 }
 

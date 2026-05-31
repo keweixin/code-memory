@@ -88,6 +88,20 @@ export const CORE_TABLES: string[] = [
     updated_at              TEXT NOT NULL DEFAULT ''
   )`,
 
+  // ── context_ledger ────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS context_ledger (
+    id                      TEXT PRIMARY KEY,
+    session_id              TEXT NOT NULL,
+    query                   TEXT NOT NULL DEFAULT '',
+    returned_files          TEXT NOT NULL DEFAULT '[]',
+    returned_symbols        TEXT NOT NULL DEFAULT '[]',
+    returned_chunks         TEXT NOT NULL DEFAULT '[]',
+    token_estimate          INTEGER NOT NULL DEFAULT 0,
+    evidence_ids            TEXT NOT NULL DEFAULT '[]',
+    agent_feedback          TEXT,
+    created_at              TEXT NOT NULL DEFAULT ''
+  )`,
+
   // ── index_metadata ─────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS index_metadata (
     key             TEXT PRIMARY KEY,
@@ -158,6 +172,40 @@ export const FTS_TRIGGERS: string[] = [
     BEGIN
       DELETE FROM symbols_fts WHERE docid = old.rowid;
     END`,
+
+  // files INSERT trigger
+  `CREATE TRIGGER IF NOT EXISTS files_fts_insert
+    AFTER INSERT ON files
+    BEGIN
+      INSERT INTO files_fts(docid, path, summary, language, role)
+        VALUES (
+          new.rowid, new.path,
+          COALESCE(new.summary, ''),
+          new.language,
+          new.role
+        );
+    END`,
+
+  // files UPDATE trigger
+  `CREATE TRIGGER IF NOT EXISTS files_fts_update
+    AFTER UPDATE ON files
+    BEGIN
+      DELETE FROM files_fts WHERE docid = old.rowid;
+      INSERT INTO files_fts(docid, path, summary, language, role)
+        VALUES (
+          new.rowid, new.path,
+          COALESCE(new.summary, ''),
+          new.language,
+          new.role
+        );
+    END`,
+
+  // files DELETE trigger
+  `CREATE TRIGGER IF NOT EXISTS files_fts_delete
+    AFTER DELETE ON files
+    BEGIN
+      DELETE FROM files_fts WHERE docid = old.rowid;
+    END`,
 ];
 
 /**
@@ -192,6 +240,10 @@ export const INDEXES: string[] = [
   // memories
   `CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)`,
   `CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)`,
+
+  // context ledger
+  `CREATE INDEX IF NOT EXISTS idx_context_ledger_session ON context_ledger(session_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_context_ledger_created_at ON context_ledger(created_at)`,
 ];
 
 /**
