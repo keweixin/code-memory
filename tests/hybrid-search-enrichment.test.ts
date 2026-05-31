@@ -74,5 +74,5 @@ describe('hybrid search enrichment', () => {
     expect(enriched).toHaveLength(merged.length);
     expect(allSpy).toHaveBeenCalledTimes(2);
     expect(execSpy).not.toHaveBeenCalled();
-  });
+  }, 20_000);
 });

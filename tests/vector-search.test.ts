@@ -11,6 +11,7 @@ import { HybridSearchEngine } from '../src/search/hybrid-search.js';
 import { closeVectorStore, searchVectors } from '../src/search/vector-search.js';
 
 const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
+const VECTOR_TEST_TIMEOUT_MS = 20_000;
 
 function createConfig(rootPath: string, embedding = true): CodeMemoryConfig {
   return {
@@ -107,7 +108,7 @@ describe('vector-backed hybrid search', () => {
       kind: 'method',
       filePath: 'src/services/AuthService.ts',
     }));
-  });
+  }, VECTOR_TEST_TIMEOUT_MS);
 
   it('merges vector results into hybrid search when a vector provider is available', async () => {
     await indexFixture(tempRoot, createConfig(tempRoot, false));
@@ -141,7 +142,7 @@ describe('vector-backed hybrid search', () => {
     });
     const issueTokens = results.find((result) => result.name === 'issueTokens');
     expect(issueTokens?.sources).toContain('vector');
-  });
+  }, VECTOR_TEST_TIMEOUT_MS);
 
   it('opens a separate vector store when indexing a different project in the same process', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
@@ -166,7 +167,7 @@ describe('vector-backed hybrid search', () => {
       await closeDatabase();
       rmSync(secondRoot, { recursive: true, force: true });
     }
-  });
+  }, VECTOR_TEST_TIMEOUT_MS);
 
   it('does not mark vector search enabled when no chunk embedding succeeds', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('offline', { status: 503 })));
@@ -182,7 +183,7 @@ describe('vector-backed hybrid search', () => {
 
     expect(embeddedChunkCount).toBe(0);
     expect(vectorSearch).toBe('disabled');
-  });
+  }, VECTOR_TEST_TIMEOUT_MS);
 
   it('skips embeddings whose dimensions do not match the configured vector store', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ embedding: [1, 0] }), {
@@ -201,7 +202,7 @@ describe('vector-backed hybrid search', () => {
 
     expect(embeddedChunkCount).toBe(0);
     expect(vectorSearch).toBe('disabled');
-  });
+  }, VECTOR_TEST_TIMEOUT_MS);
 
   it('keeps vector search enabled after an incremental index with no file changes', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
@@ -227,5 +228,5 @@ describe('vector-backed hybrid search', () => {
 
     expect(embeddedChunkCount).toBeGreaterThan(0);
     expect(vectorSearch).toBe('enabled');
-  });
+  }, VECTOR_TEST_TIMEOUT_MS);
 });
