@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
 import { GraphEngine } from "../../graph/graph-engine.js";
+import { resolveTargetId } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 
 const log = createLogger("mcp:get-call-graph");
@@ -27,7 +28,7 @@ export function registerGetCallGraphTool(server: McpServer, db: SqlJsDatabase): 
     },
     async ({ symbolName, depth }) => {
       try {
-        const symbolId = findSymbolId(db, symbolName);
+        const symbolId = resolveTargetId(db, symbolName);
         if (!symbolId) {
           return {
             content: [{
@@ -68,21 +69,6 @@ export function registerGetCallGraphTool(server: McpServer, db: SqlJsDatabase): 
 }
 
 // ---- Helpers ----
-
-function findSymbolId(db: SqlJsDatabase, name: string): string | null {
-  try {
-    const results = db.exec(
-      "SELECT id FROM symbols WHERE name = ? LIMIT 1",
-      [name],
-    );
-    if (results.length > 0 && results[0].values.length > 0) {
-      return String(results[0].values[0][0]);
-    }
-  } catch {
-    // fall through
-  }
-  return null;
-}
 
 function formatCallGraph(
   symbolName: string,

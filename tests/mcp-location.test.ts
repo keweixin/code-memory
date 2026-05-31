@@ -212,4 +212,22 @@ describe('MCP location output', () => {
     expect(text).toMatch(/login \[method\] \(src\/services\/AuthService\.[jt]s:\d+:\d+-\d+:\d+\)/);
     expect(text).not.toMatch(/login \[method\] \(src\/services\/AuthService\.[jt]s\)/);
   });
+
+  it('resolves qualified class method names in get_call_graph', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerGetCallGraphTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('get_call_graph')!({
+      symbolName: 'AuthService.login',
+      depth: 1,
+    });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('No symbol found');
+    expect(text).toMatch(/login \[method\] \(src\/services\/AuthService\.ts:24:\d+-45:\d+\)/);
+    expect(text).toContain('findUserByEmail [function]');
+    expect(text).toContain('verifyPassword [function]');
+    expect(text).toContain('issueTokens [function]');
+  });
 });
