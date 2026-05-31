@@ -94,3 +94,7 @@ code-memory doctor
 ```
 
 to check config, index presence, and grammar availability.
+
+## License
+
+MIT
