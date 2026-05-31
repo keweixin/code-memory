@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { DEFAULT_TOKEN_BUDGETS } from '../src/shared/types.js';
 import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
 import { IndexManager } from '../src/indexer/index-manager.js';
 import { closeDatabase, getDatabaseSync } from '../src/storage/database.js';
-import { registerGetProjectCardTool } from '../src/mcp/tools/get-project-card.js';
+import { registerSearchCodeTool } from '../src/mcp/tools/search-code.js';
 
 const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
@@ -46,6 +46,11 @@ function createConfig(rootPath: string): CodeMemoryConfig {
   };
 }
 
+function queryRows(sql: string, params: unknown[] = []): unknown[][] {
+  const rows = getDatabaseSync().exec(sql, params);
+  return rows[0]?.values ?? [];
+}
+
 async function indexFixture(rootPath: string): Promise<void> {
   const config = createConfig(rootPath);
   mkdirSync(join(rootPath, '.code-memory'), { recursive: true });
@@ -59,62 +64,45 @@ async function indexFixture(rootPath: string): Promise<void> {
   await manager.fullIndex();
 }
 
-describe('MCP project card', () => {
+describe('MCP vector search', () => {
   let tempRoot: string;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-project-card-'));
+    tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-mcp-vector-'));
     cpSync(fixtureRoot, tempRoot, { recursive: true });
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await closeDatabase();
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('reports index evidence and vector availability honestly', async () => {
+  it('passes vector mode through search_code when a vector provider is available', async () => {
     await indexFixture(tempRoot);
-    const db = getDatabaseSync();
-    db.run(
-      `INSERT OR REPLACE INTO index_metadata (key, value) VALUES
-        ('current_commit', 'abc123def456'),
-        ('current_branch', 'feature/context-evidence'),
-        ('index_completed', '2026-05-31T09:00:00.000Z'),
-        ('embedding_provider', 'none'),
-        ('embedding_model', 'none')`,
-    );
-
+    const issueTokensId = String(queryRows(
+      `SELECT s.id
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE s.name = 'issueTokens'
+         AND f.path = 'src/services/token-service.ts'`,
+    )[0][0]);
+    const vectorProvider = {
+      isAvailable: () => true,
+      search: vi.fn(async () => [{ id: issueTokensId, rank: 1 }]),
+    };
     const server = new FakeMcpServer();
-    registerGetProjectCardTool(server as never, db);
+    registerSearchCodeTool(server as never, getDatabaseSync(), vectorProvider as never);
 
-    const result = await server.handlers.get('get_project_card')!({});
+    const result = await server.handlers.get('search_code')!({
+      query: 'semantic token minting',
+      limit: 5,
+      searchMode: 'vector',
+    });
     const text = result.content[0].text;
 
-    expect(text).toContain('Name:       sample-ts-project');
-    expect(text).toContain('Branch:     feature/context-evidence');
-    expect(text).toContain('Commit:     abc123def456');
-    expect(text).toContain('Index Completed: 2026-05-31T09:00:00.000Z');
-    expect(text).toContain('Embedding:  none (none)');
-    expect(text).toContain('Vector:     disabled');
-  });
-
-  it('reports vector search as enabled when index metadata proves it', async () => {
-    await indexFixture(tempRoot);
-    const db = getDatabaseSync();
-    db.run(
-      `INSERT OR REPLACE INTO index_metadata (key, value) VALUES
-        ('embedding_provider', 'ollama'),
-        ('embedding_model', 'test-embed'),
-        ('vector_search', 'enabled')`,
-    );
-
-    const server = new FakeMcpServer();
-    registerGetProjectCardTool(server as never, db);
-
-    const result = await server.handlers.get('get_project_card')!({});
-    const text = result.content[0].text;
-
-    expect(text).toContain('Embedding:  ollama (test-embed)');
-    expect(text).toContain('Vector:     enabled');
+    expect(vectorProvider.search).toHaveBeenCalled();
+    expect(text).toContain('issueTokens (function)');
+    expect(text).toContain('Sources: vector');
   });
 });

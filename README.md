@@ -8,11 +8,11 @@ Code Memory is a local MCP-first code intelligence engine for coding agents. It 
 - MCP tools for repo maps, search, definitions, references, call/dependency graphs, impact, related tests, context packs, project facts, and context ledger tracking
 - TypeScript/JavaScript-first graph indexing with symbol chunks and line-based locations
 - ContextLedger tracking for returned files/symbols/chunks, including `get_context_pack` session deltas
-- SQLite/FTS keyword retrieval plus graph expansion
+- SQLite/FTS keyword retrieval, graph expansion, and optional LanceDB vector retrieval when embeddings are configured
 
 ## Current Limits
 
-- Vector search is not enabled yet. `hybrid` currently means keyword retrieval plus graph expansion; LanceDB/embedding code is experimental and not wired into indexing or querying.
+- Vector search is opt-in. With `--embedding none`, `hybrid` means keyword retrieval plus graph expansion. With `--embedding ollama` or `--embedding openai`, `index --full` generates symbol chunk embeddings and `hybrid` uses keyword + vector + graph. Query-time embeddings require the configured provider to be reachable.
 - TS/JS are the reliable first-stage languages. Python and Go symbol indexing are present, but their call/dependency graph quality is not first-stage acceptance scope.
 - TSX parsing uses the bundled `tree-sitter-tsx.wasm`. Run `code-memory doctor` to verify grammar availability in custom installs.
 - Existing v0.1 indexes should be rebuilt with `code-memory index --full` after upgrading because symbol ranges now use 1-based line numbers.
@@ -46,6 +46,24 @@ code-memory doctor
 code-memory index --full
 code-memory status
 code-memory query "login flow"
+```
+
+Optional local vector search with Ollama:
+
+```bash
+code-memory init --embedding ollama --embedding-model nomic-embed-text
+code-memory doctor
+code-memory index --full
+code-memory query "token creation" --mode hybrid
+code-memory query "token creation" --mode vector
+```
+
+Optional OpenAI embeddings:
+
+```bash
+code-memory init --embedding openai --embedding-model text-embedding-3-small
+# Set the apiKey field in .code-memory/config.json or use an OpenAI-compatible baseUrl before indexing.
+code-memory index --full
 ```
 
 Start the MCP server from the indexed project root:

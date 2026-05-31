@@ -1,13 +1,8 @@
 /**
  * Code Memory Graph — Hybrid Search
  *
- * Combines keyword search (FTS3) and graph expansion (SQLite edges)
- * using Reciprocal Rank Fusion (RRF).
- *
- * Vector search is intentionally not part of the active retrieval path yet:
- * embeddings are not generated during indexing, and query embeddings are not
- * generated at search time. Keep this honest until the full vector pipeline is
- * wired end to end.
+ * Combines keyword search (FTS), optional LanceDB vector search, and graph
+ * expansion using Reciprocal Rank Fusion (RRF).
  *
  * RRF formula: score(d) = Σ_i  w_i / (k + rank_i(d))
  * where k=60 (standard), w_i is the weight for each retrieval system.
@@ -25,6 +20,7 @@ import { DEFAULT_SEARCH_WEIGHTS } from '../shared/types.js';
 import { RRF_K, DEFAULT_SEARCH_LIMIT } from '../shared/constants.js';
 import { searchSymbolsFts, searchFilesFts, normalizeFts3Scores } from './fts-search.js';
 import { bfsExpand } from './graph-search.js';
+import type { VectorSearchProvider } from './vector-search.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('hybrid-search');
@@ -32,16 +28,16 @@ const log = createLogger('hybrid-search');
 export class HybridSearchEngine {
   private db: SqlJsDatabase;
   private weights: SearchWeights;
-  private vectorSearchAvailable: boolean;
+  private vectorSearchProvider: VectorSearchProvider | null;
 
   constructor(
     db: SqlJsDatabase,
     weights?: SearchWeights,
-    vectorSearchAvailable: boolean = false,
+    vectorSearch?: boolean | VectorSearchProvider,
   ) {
     this.db = db;
     this.weights = weights || DEFAULT_SEARCH_WEIGHTS;
-    this.vectorSearchAvailable = vectorSearchAvailable;
+    this.vectorSearchProvider = typeof vectorSearch === 'object' ? vectorSearch : null;
   }
 
   /**
@@ -62,9 +58,11 @@ export class HybridSearchEngine {
 
     log.info(`Hybrid search: "${query}" (mode: ${searchMode}, limit: ${limit})`);
 
-    if (searchMode === 'vector') {
+    const vectorSearchAvailable = this.vectorSearchProvider?.isAvailable() === true;
+
+    if (searchMode === 'vector' && !vectorSearchAvailable) {
       throw new Error(
-        'Vector search is not available: chunk embeddings and query embeddings are not wired yet. Use keyword, graph, or hybrid mode.',
+        'Vector search is not available: configure an embedding provider, run code-memory index --full, and ensure the provider is reachable. Use keyword, graph, or hybrid mode without vectors.',
       );
     }
 
@@ -94,9 +92,17 @@ export class HybridSearchEngine {
       }
     }
 
-    // Vector search (LanceDB) — disabled until embeddings are generated end to end.
-    if (searchMode === 'hybrid' && this.vectorSearchAvailable) {
-      log.warn('Vector search requested but not wired: index chunk embeddings and query embeddings are not available yet');
+    // Vector search (LanceDB) is active only when an embedding-backed provider
+    // is available for the current indexed project.
+    if ((searchMode === 'hybrid' || searchMode === 'vector') && vectorSearchAvailable) {
+      vectorResults = await this.vectorSearchProvider!.search(query, {
+        limit: limit * 2,
+        kindFilter,
+        fileFilter,
+      });
+      log.info(`Vector search returned ${vectorResults.length} results`);
+    } else if (searchMode === 'hybrid') {
+      log.debug('Vector search skipped: no vector provider is available');
     }
 
     // Graph expansion from top keyword/vector results
@@ -157,7 +163,7 @@ export class HybridSearchEngine {
    */
   async searchCode(
     query: string,
-    options: { limit?: number; fileFilter?: string; searchMode?: 'hybrid' | 'keyword' | 'graph' } = {},
+    options: { limit?: number; fileFilter?: string; searchMode?: 'hybrid' | 'keyword' | 'vector' | 'graph' } = {},
   ): Promise<SearchResult[]> {
     // First search symbols
     const symbolResults = await this.search({
@@ -168,7 +174,7 @@ export class HybridSearchEngine {
     });
 
     // Also search file contents via FTS5
-    const fileResults = options.searchMode === 'graph'
+    const fileResults = options.searchMode === 'graph' || options.searchMode === 'vector'
       ? []
       : searchFilesFts(this.db, query, options.limit || DEFAULT_SEARCH_LIMIT, options.fileFilter);
 

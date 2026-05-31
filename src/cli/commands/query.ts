@@ -5,8 +5,10 @@
 import type { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_DIR, CONFIG_FILE } from '../../shared/constants.js';
+import { CONFIG_DIR, CONFIG_FILE, VECTORS_DIR } from '../../shared/constants.js';
+import type { CodeMemoryConfig } from '../../shared/types.js';
 import { createLogger } from '../../shared/logger.js';
+import { safeJsonParse } from '../../shared/utils.js';
 
 const log = createLogger('query');
 
@@ -15,7 +17,7 @@ export function registerQueryCommand(program: Command): void {
     .command('query <question>')
     .description('Query the project index')
     .option('-l, --limit <number>', 'Max results', '10')
-    .option('-m, --mode <mode>', 'Search mode: hybrid | keyword | graph', 'keyword')
+    .option('-m, --mode <mode>', 'Search mode: hybrid | keyword | vector | graph', 'hybrid')
     .option('--json', 'Output as JSON')
     .action(async (question, options) => {
       try {
@@ -37,11 +39,20 @@ export async function queryIndex(question: string, options: QueryOptions): Promi
   const projectPath = process.cwd();
   const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
 
-  try { readFileSync(configPath, 'utf-8'); }
-  catch { console.error('No config found. Run "code-memory init" first.'); process.exit(1); }
+  let config: CodeMemoryConfig;
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const parsed = safeJsonParse<CodeMemoryConfig>(raw);
+    if (!parsed) throw new Error('Invalid config JSON');
+    config = parsed;
+  } catch {
+    console.error('No config found. Run "code-memory init" first.');
+    process.exit(1);
+  }
 
   const { getDatabase } = await import('../../storage/database.js');
   const { HybridSearchEngine } = await import('../../search/hybrid-search.js');
+  const { createVectorSearchProvider } = await import('../../search/vector-search.js');
 
   await getDatabase(projectPath);
   const { getDatabaseSync } = await import('../../storage/database.js');
@@ -49,7 +60,11 @@ export async function queryIndex(question: string, options: QueryOptions): Promi
 
   const limit = parseInt(options.limit || '10', 10);
   const mode = normalizeSearchMode(options.mode);
-  const searchEngine = new HybridSearchEngine(db);
+  const vectorProvider = await createVectorSearchProvider(
+    join(projectPath, CONFIG_DIR, VECTORS_DIR),
+    config.embedding,
+  );
+  const searchEngine = new HybridSearchEngine(db, undefined, vectorProvider || undefined);
   const results = await searchEngine.searchCode(question, {
     limit,
     searchMode: mode,
@@ -68,9 +83,9 @@ export async function queryIndex(question: string, options: QueryOptions): Promi
   }
 }
 
-function normalizeSearchMode(mode: string | undefined): 'hybrid' | 'keyword' | 'graph' {
-  if (mode === 'hybrid' || mode === 'keyword' || mode === 'graph') {
+function normalizeSearchMode(mode: string | undefined): 'hybrid' | 'keyword' | 'vector' | 'graph' {
+  if (mode === 'hybrid' || mode === 'keyword' || mode === 'vector' || mode === 'graph') {
     return mode;
   }
-  return 'keyword';
+  return 'hybrid';
 }

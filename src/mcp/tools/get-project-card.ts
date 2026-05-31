@@ -68,6 +68,7 @@ interface ProjectCardRaw {
   index_completed: string | null;
   embedding_provider: string | null;
   embedding_model: string | null;
+  vector_search: string | null;
 }
 
 function getIndexMetadata(db: SqlJsDatabase): ProjectCardRaw {
@@ -89,6 +90,7 @@ function getIndexMetadata(db: SqlJsDatabase): ProjectCardRaw {
     index_completed: null,
     embedding_provider: null,
     embedding_model: null,
+    vector_search: null,
   };
 
   try {
@@ -114,6 +116,7 @@ function getIndexMetadata(db: SqlJsDatabase): ProjectCardRaw {
         case "index_completed": defaultCard.index_completed = value; break;
         case "embedding_provider": defaultCard.embedding_provider = value; break;
         case "embedding_model": defaultCard.embedding_model = value; break;
+        case "vector_search": defaultCard.vector_search = value; break;
       }
     }
   } catch {
@@ -196,7 +199,9 @@ function formatProjectCard(card: Record<string, unknown>): string {
 
   const embeddingProvider = String(card.embedding_provider || "none");
   const embeddingModel = String(card.embedding_model || "none");
-  const vectorStatus = embeddingProvider !== "none" ? "not wired" : "disabled";
+  const vectorStatus = card.vector_search === "enabled"
+    ? "enabled"
+    : embeddingProvider !== "none" ? "pending index" : "disabled";
   lines.push(`Embedding:  ${embeddingProvider} (${embeddingModel})`);
   lines.push(`Vector:     ${vectorStatus}`);
 

@@ -181,7 +181,7 @@ export class ContextPacker {
   private getProjectCard(): ProjectCard | null {
     try {
       const metaResults = this.db.exec(
-        "SELECT key, value FROM index_metadata WHERE key IN ('project_name', 'total_files', 'total_symbols', 'languages', 'architecture_style', 'framework', 'root_path', 'current_commit', 'current_branch', 'index_completed', 'embedding_provider')"
+        "SELECT key, value FROM index_metadata WHERE key IN ('project_name', 'total_files', 'total_symbols', 'languages', 'architecture_style', 'framework', 'root_path', 'current_commit', 'current_branch', 'index_completed', 'embedding_provider', 'vector_search')"
       );
 
       if (!metaResults.length || !metaResults[0].values.length) return null;
@@ -202,15 +202,23 @@ export class ContextPacker {
         currentCommit: meta.get('current_commit') || null,
         currentBranch: meta.get('current_branch') || null,
         indexCompleted: meta.get('index_completed') || null,
-        vectorSearch: this.getVectorSearchStatus(meta.get('embedding_provider')),
+        vectorSearch: this.getVectorSearchStatus(
+          meta.get('embedding_provider'),
+          meta.get('vector_search'),
+        ),
       };
     } catch {
       return null;
     }
   }
 
-  private getVectorSearchStatus(embeddingProvider: string | undefined): ProjectCard['vectorSearch'] {
-    return embeddingProvider && embeddingProvider !== 'none' ? 'not_wired' : 'disabled';
+  private getVectorSearchStatus(
+    embeddingProvider: string | undefined,
+    vectorSearch: string | undefined,
+  ): ProjectCard['vectorSearch'] {
+    if (vectorSearch === 'enabled') return 'enabled';
+    if (embeddingProvider && embeddingProvider !== 'none') return 'pending_index';
+    return 'disabled';
   }
 
   /**

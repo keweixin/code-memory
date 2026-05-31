@@ -10,6 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
 import { HybridSearchEngine } from "../../search/hybrid-search.js";
+import type { VectorSearchProvider } from "../../search/vector-search.js";
 import { ContextPacker } from "../../search/context-packer.js";
 import { getContextDelta, markContextUsed } from "../../memory/context-ledger.js";
 import type { ContextDelta, ContextPack, ContextSnippet, ContextSymbol } from "../../shared/types.js";
@@ -18,8 +19,12 @@ import { createLogger } from "../../shared/logger.js";
 
 const log = createLogger("mcp:get-context-pack");
 
-export function registerGetContextPackTool(server: McpServer, db: SqlJsDatabase): void {
-  const searchEngine = new HybridSearchEngine(db);
+export function registerGetContextPackTool(
+  server: McpServer,
+  db: SqlJsDatabase,
+  vectorSearchProvider?: VectorSearchProvider | null,
+): void {
+  const searchEngine = new HybridSearchEngine(db, undefined, vectorSearchProvider || undefined);
   const packer = new ContextPacker(db);
 
   server.tool(

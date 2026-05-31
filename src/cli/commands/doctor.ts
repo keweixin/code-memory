@@ -39,6 +39,8 @@ interface DoctorConfig {
   embedding?: {
     provider?: string;
     model?: string;
+    baseUrl?: string;
+    apiKey?: string;
   };
 }
 
@@ -79,17 +81,24 @@ function runDoctor(asJson: boolean): void {
   if (parsedConfig) {
     const provider = parsedConfig.embedding?.provider || 'none';
     const model = parsedConfig.embedding?.model || 'none';
+    const needsOpenAiKey = provider === 'openai'
+      && !parsedConfig.embedding?.apiKey
+      && !parsedConfig.embedding?.baseUrl;
     checks.push({
       name: 'embedding',
-      status: 'ok',
-      message: 'Embedding provider: ' + provider + ' (' + model + ').',
+      status: needsOpenAiKey ? 'warn' : 'ok',
+      message: needsOpenAiKey
+        ? 'Embedding provider: openai (' + model + ') but no apiKey or custom baseUrl is configured.'
+        : 'Embedding provider: ' + provider + ' (' + model + ').',
     });
     checks.push({
       name: 'vector-search',
-      status: 'warn',
+      status: provider === 'none' || needsOpenAiKey ? 'warn' : 'ok',
       message: provider === 'none'
         ? 'Vector search is disabled because embedding provider is none; hybrid search is keyword + graph only.'
-        : 'Vector search is not wired end to end yet; hybrid search is keyword + graph only.',
+        : needsOpenAiKey
+          ? 'Vector search needs an OpenAI apiKey or custom baseUrl before indexing embeddings.'
+        : 'Vector search is configured; run "code-memory index --full" to generate chunk embeddings.',
     });
   }
 

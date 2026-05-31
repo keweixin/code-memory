@@ -815,7 +815,7 @@ describe('core indexing pipeline', () => {
     expect(namespaceBarrelCalls).toEqual(['findUserByEmail']);
   });
 
-  it('rejects vector-only search while embeddings are not wired', async () => {
+  it('rejects vector-only search when no vector provider is available', async () => {
     await indexFixture(tempRoot);
 
     const db = getDatabaseSync();
@@ -824,7 +824,7 @@ describe('core indexing pipeline', () => {
     await expect(search.search({
       query: 'login',
       searchMode: 'vector',
-    })).rejects.toThrow('Vector search is not available');
+    })).rejects.toThrow('configure an embedding provider');
   });
 
   it('indexes TSX components with real symbols and chunks', async () => {

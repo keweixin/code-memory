@@ -70,6 +70,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
 
     if (options.json) {
       const embeddingProvider = meta.get('embedding_provider') || null;
+      const vectorSearch = getVectorSearchStatus(meta);
       console.log(JSON.stringify({
         project: meta.get('project_name') || 'Unknown',
         rootPath: meta.get('root_path') || null,
@@ -78,7 +79,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
         commit: meta.get('current_commit') || null,
         embeddingProvider,
         embeddingModel: meta.get('embedding_model') || null,
-        vectorSearch: embeddingProvider && embeddingProvider !== 'none' ? 'not_wired' : 'disabled',
+        vectorSearch,
         files: fileCount,
         symbols: symCount,
         edges: edgeCount,
@@ -95,7 +96,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log(`Branch:      ${meta.get('current_branch') || '(not set)'}`);
       console.log(`Commit:      ${(meta.get('current_commit') || '').slice(0, 8) || '(not set)'}`);
       console.log(`Embedding:   ${meta.get('embedding_provider') || '(not set)'} (${meta.get('embedding_model') || '(not set)'})`);
-      console.log(`Vector:      ${meta.get('embedding_provider') && meta.get('embedding_provider') !== 'none' ? 'not wired' : 'disabled'}`);
+      console.log(`Vector:      ${getVectorSearchStatus(meta).replace('_', ' ')}`);
       console.log(`Last Index:  ${meta.get('last_full_index') || '(never)'}`);
       console.log('');
       console.log(`Files:       ${fileCount}`);
@@ -112,4 +113,10 @@ async function showStatus(options: StatusOptions): Promise<void> {
 
 function parseLanguages(value: string | undefined): string[] {
   return (value || '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function getVectorSearchStatus(meta: Map<string, string>): 'disabled' | 'pending_index' | 'enabled' {
+  if (meta.get('vector_search') === 'enabled') return 'enabled';
+  const embeddingProvider = meta.get('embedding_provider');
+  return embeddingProvider && embeddingProvider !== 'none' ? 'pending_index' : 'disabled';
 }

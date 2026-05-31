@@ -11,10 +11,15 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { SqlJsDatabase } from "../storage/database.js";
 import { getDatabase, closeDatabase, isInitialized } from "../storage/database.js";
 import { createLogger, setLogLevel } from "../shared/logger.js";
-import { VERSION } from "../shared/constants.js";
+import { CONFIG_DIR, CONFIG_FILE, VECTORS_DIR, VERSION } from "../shared/constants.js";
+import type { CodeMemoryConfig } from "../shared/types.js";
+import { safeJsonParse } from "../shared/utils.js";
+import { createVectorSearchProvider, type VectorSearchProvider } from "../search/vector-search.js";
 import { registerAllTools } from "./tool-registry.js";
 
 const log = createLogger("mcp:server");
@@ -39,9 +44,12 @@ export async function createMcpServer(dbPath?: string): Promise<McpServer> {
 
   log.info("Creating MCP server v" + VERSION);
 
+  const projectRoot = dbPath || process.cwd();
+
   // Initialize database (async WASM bootstrap)
-  const db = await getDatabase(dbPath);
-  log.info("Database ready: " + dbPath || process.cwd());
+  const db = await getDatabase(projectRoot);
+  log.info("Database ready: " + projectRoot);
+  const vectorSearchProvider = await loadVectorSearchProvider(projectRoot);
 
   // Create McpServer
   const server = new McpServer({
@@ -50,10 +58,28 @@ export async function createMcpServer(dbPath?: string): Promise<McpServer> {
   });
 
   // Register all tools
-  registerAllTools(server, db);
+  registerAllTools(server, db, { vectorSearchProvider });
 
   log.info("MCP server created with all tools registered");
   return server;
+}
+
+async function loadVectorSearchProvider(projectRoot: string): Promise<VectorSearchProvider | null> {
+  const configPath = join(projectRoot, CONFIG_DIR, CONFIG_FILE);
+  if (!existsSync(configPath)) return null;
+
+  try {
+    const config = safeJsonParse<CodeMemoryConfig>(readFileSync(configPath, "utf-8"));
+    if (!config || config.embedding.provider === "none") return null;
+    return await createVectorSearchProvider(
+      join(projectRoot, CONFIG_DIR, VECTORS_DIR),
+      config.embedding,
+    );
+  } catch (err) {
+    log.warn("Vector search provider unavailable: " +
+      (err instanceof Error ? err.message : String(err)));
+    return null;
+  }
 }
 
 /**

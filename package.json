@@ -10,7 +10,8 @@
   "files": [
     "dist",
     "grammars",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",

@@ -19,7 +19,7 @@ describe('CLI init command', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('defaults embedding to none until vector indexing is wired', async () => {
+  it('defaults embedding to none unless the user enables a provider', async () => {
     await initProject({});
 
     const config = JSON.parse(
@@ -28,5 +28,16 @@ describe('CLI init command', () => {
 
     expect(config.embedding.provider).toBe('none');
     expect(config.embedding.model).toBe('none');
+  });
+
+  it('uses a provider-appropriate default embedding model', async () => {
+    await initProject({ embedding: 'openai' });
+
+    const config = JSON.parse(
+      readFileSync(join(tempRoot, '.code-memory', 'config.json'), 'utf-8'),
+    );
+
+    expect(config.embedding.provider).toBe('openai');
+    expect(config.embedding.model).toBe('text-embedding-3-small');
   });
 });

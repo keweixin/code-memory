@@ -284,7 +284,7 @@ export interface ProjectCard {
   currentCommit: string | null;
   currentBranch: string | null;
   indexCompleted: string | null;
-  vectorSearch: 'disabled' | 'not_wired';
+  vectorSearch: 'disabled' | 'pending_index' | 'enabled';
 }
 
 export interface ContextFile {

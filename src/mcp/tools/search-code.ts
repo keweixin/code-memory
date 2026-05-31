@@ -1,8 +1,8 @@
 /**
  * MCP Tool: search_code
  *
- * Hybrid search across files and symbols using keyword (FTS3)
- * and graph expansion. Vector search is experimental and not wired yet.
+ * Hybrid search across files and symbols using keyword (FTS3),
+ * optional vector search, and graph expansion.
  * Returns ranked results with snippets and metadata.
  */
 
@@ -10,24 +10,29 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
 import { HybridSearchEngine } from "../../search/hybrid-search.js";
+import type { VectorSearchProvider } from "../../search/vector-search.js";
 import { createLogger } from "../../shared/logger.js";
 
 const log = createLogger("mcp:search-code");
 
-export function registerSearchCodeTool(server: McpServer, db: SqlJsDatabase): void {
-  const searchEngine = new HybridSearchEngine(db);
+export function registerSearchCodeTool(
+  server: McpServer,
+  db: SqlJsDatabase,
+  vectorSearchProvider?: VectorSearchProvider | null,
+): void {
+  const searchEngine = new HybridSearchEngine(db, undefined, vectorSearchProvider || undefined);
 
   server.tool(
     "search_code",
-    "Search across all indexed code (files and symbols). Current hybrid mode " +
-    "combines keyword search and graph-based expansion; vector search is not wired yet. " +
+    "Search across all indexed code (files and symbols). Hybrid mode " +
+    "combines keyword, vector (when embeddings are enabled), and graph-based expansion. " +
     "Returns ranked results with snippets and location information. " +
     "Use this when you need to find relevant code for a task or question.",
     {
       query: z.string().describe("Natural language query or code snippet to search for"),
       limit: z.number().describe("Maximum number of results (default 15, max 50)").optional().default(15),
       fileFilter: z.string().describe("Optional glob pattern to filter results by file path").optional(),
-      searchMode: z.enum(["hybrid", "keyword", "graph"]).describe("Search mode: hybrid (default), keyword-only, or graph-only").optional().default("hybrid"),
+      searchMode: z.enum(["hybrid", "keyword", "vector", "graph"]).describe("Search mode: hybrid (default), keyword-only, vector-only, or graph-only").optional().default("hybrid"),
     },
     async ({ query, limit, fileFilter, searchMode }) => {
       try {
@@ -40,6 +45,8 @@ export function registerSearchCodeTool(server: McpServer, db: SqlJsDatabase): vo
         if (results.length === 0) {
           const modeHint = searchMode === 'graph'
             ? "\n\nGraph mode only expands from indexed symbols that match the query. Try 'hybrid' or 'keyword' mode first if there is no obvious seed symbol."
+            : searchMode === 'vector'
+              ? "\n\nVector mode only searches indexed chunk embeddings. Configure embeddings, run 'code-memory index --full', and use 'hybrid' or 'keyword' mode if no vectors are present."
             : "";
           return {
             content: [{ type: "text" as const, text: `No results found for "${query}".\n\nTry broadening your query, or ensure the codebase has been indexed with 'code-memory index'.${modeHint}` }],
