@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "AI Project Cognitive Engine — Code Memory Graph with MCP integration",
+  "packageManager": "npm@11.12.1",
   "main": "dist/index.js",
   "bin": {
     "code-memory": "./dist/index.js"

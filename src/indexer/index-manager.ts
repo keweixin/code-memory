@@ -8,7 +8,8 @@
  * indexing strategies.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import * as posixPath from 'node:path/posix';
 import { availableParallelism } from 'node:os';
@@ -396,7 +397,7 @@ export class IndexManager {
 
     let sourceCode: string;
     try {
-      sourceCode = readFileSync(discovered.path, 'utf-8');
+      sourceCode = await readFile(discovered.path, 'utf-8');
     } catch (err) {
       log.error('Cannot read file: ' + discovered.path, err);
       return null;
