@@ -298,6 +298,144 @@ describe('core indexing pipeline', () => {
     expect(aliasCalls).toEqual(['findUserByEmail']);
   });
 
+  it('resolves multiple import statements from the same source when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/split-import-login.ts'),
+      [
+        "import { findUserByEmail } from '../repositories/user-repository.js';",
+        "import { findUserById } from '../repositories/user-repository.js';",
+        '',
+        'export async function splitImportLookup(email: string, id: string) {',
+        '  await findUserByEmail(email);',
+        '  return findUserById(id);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const splitImportCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'splitImportLookup'
+         AND caller_file.path = 'src/services/split-import-login.ts'
+         AND callee_file.path = 'src/repositories/user-repository.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(splitImportCalls).toEqual(['findUserByEmail', 'findUserById']);
+  });
+
+  it('does not treat side-effect imports as callable symbol bindings', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/runtime-setup.ts'),
+      [
+        'export function configureRuntime() {',
+        "  return 'configured';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/side-effect-login.ts'),
+      [
+        "import './runtime-setup.js';",
+        '',
+        'export function sideEffectLogin() {',
+        '  return configureRuntime();',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const fileImportEdges = queryRows(
+      `SELECT imported.path
+       FROM edges e
+       JOIN files importer ON importer.id = e.from_id
+       JOIN files imported ON imported.id = e.to_id
+       WHERE e.type = 'IMPORTS'
+         AND importer.path = 'src/services/side-effect-login.ts'
+       ORDER BY imported.path`,
+    ).map(([path]) => String(path));
+    expect(fileImportEdges).toEqual(['src/services/runtime-setup.ts']);
+
+    const falseReferences = queryRows(
+      `SELECT target.name
+       FROM edges e
+       JOIN files source_file ON source_file.id = e.from_id
+       JOIN symbols target ON target.id = e.to_id
+       WHERE e.type = 'REFERENCES'
+         AND source_file.path = 'src/services/side-effect-login.ts'
+         AND target.name = 'configureRuntime'`,
+    );
+    expect(falseReferences).toHaveLength(0);
+
+    const falseCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'sideEffectLogin'
+         AND caller_file.path = 'src/services/side-effect-login.ts'
+         AND callee.name = 'configureRuntime'`,
+    );
+    expect(falseCalls).toHaveLength(0);
+  });
+
+  it('does not use type-only imports as runtime callable bindings', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/type-only-runtime.ts'),
+      [
+        "import type { UserRecord } from '../repositories/user-repository.js';",
+        '',
+        'export function typeOnlyRuntime() {',
+        '  return UserRecord();',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const typeReferences = queryRows(
+      `SELECT target.name
+       FROM edges e
+       JOIN files source_file ON source_file.id = e.from_id
+       JOIN symbols target ON target.id = e.to_id
+       WHERE e.type = 'REFERENCES'
+         AND source_file.path = 'src/services/type-only-runtime.ts'
+         AND target.name = 'UserRecord'`,
+    );
+    expect(typeReferences).toHaveLength(1);
+
+    const falseTypeCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'typeOnlyRuntime'
+         AND caller_file.path = 'src/services/type-only-runtime.ts'
+         AND callee.name = 'UserRecord'`,
+    );
+    expect(falseTypeCalls).toHaveLength(0);
+  });
+
   it('resolves default imports to exported callees when building CALLS edges', async () => {
     writeFileSync(
       join(tempRoot, 'src/services/default-token.ts'),
@@ -339,6 +477,67 @@ describe('core indexing pipeline', () => {
     ).map(([name]) => String(name));
 
     expect(defaultCalls).toEqual(['issueDefaultToken']);
+  });
+
+  it('indexes anonymous default function exports and resolves default imports to them', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/anonymous-token.ts'),
+      [
+        'export default function(userId: string) {',
+        "  return `anonymous_${userId}`;",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/anonymous-login.ts'),
+      [
+        "import makeAnonymousToken from './anonymous-token.js';",
+        '',
+        'export function anonymousDefaultLogin(userId: string) {',
+        '  return makeAnonymousToken(userId);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const defaultSymbols = queryRows(
+      `SELECT s.id, s.name, s.kind, s.start_line, s.end_line
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE f.path = 'src/services/anonymous-token.ts'
+         AND s.name = 'default'
+         AND s.kind = 'function'`,
+    );
+    expect(defaultSymbols).toHaveLength(1);
+
+    const chunks = queryRows(
+      'SELECT content, start_line, end_line FROM chunks WHERE symbol_id = ?',
+      [String(defaultSymbols[0][0])],
+    );
+    expect(chunks).toHaveLength(1);
+    expect(String(chunks[0][0])).toContain('export default function');
+    expect(chunks[0][1]).toBe(1);
+
+    const defaultCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'anonymousDefaultLogin'
+         AND caller_file.path = 'src/services/anonymous-login.ts'
+         AND callee_file.path = 'src/services/anonymous-token.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(defaultCalls).toEqual(['default']);
   });
 
   it('resolves mixed default and named imports when building CALLS edges', async () => {
@@ -502,6 +701,47 @@ describe('core indexing pipeline', () => {
     ).map(([name]) => String(name));
 
     expect(aliasBarrelCalls).toEqual(['issueTokens']);
+  });
+
+  it('resolves namespace barrel re-exports when building CALLS edges', async () => {
+    writeFileSync(
+      join(tempRoot, 'src/services/user-api-barrel.ts'),
+      [
+        "export * as userApi from '../repositories/user-repository.js';",
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src/services/namespace-barrel-login.ts'),
+      [
+        "import { userApi } from './user-api-barrel.js';",
+        '',
+        'export async function namespaceBarrelLookup(email: string) {',
+        '  return userApi.findUserByEmail(email);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    const namespaceBarrelCalls = queryRows(
+      `SELECT callee.name
+       FROM edges e
+       JOIN symbols caller ON caller.id = e.from_id
+       JOIN symbols callee ON callee.id = e.to_id
+       JOIN files caller_file ON caller_file.id = caller.file_id
+       JOIN files callee_file ON callee_file.id = callee.file_id
+       WHERE e.type = 'CALLS'
+         AND caller.name = 'namespaceBarrelLookup'
+         AND caller_file.path = 'src/services/namespace-barrel-login.ts'
+         AND callee_file.path = 'src/repositories/user-repository.ts'
+       ORDER BY callee.name`,
+    ).map(([name]) => String(name));
+
+    expect(namespaceBarrelCalls).toEqual(['findUserByEmail']);
   });
 
   it('rejects vector-only search while embeddings are not wired', async () => {

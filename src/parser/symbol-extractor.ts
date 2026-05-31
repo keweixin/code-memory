@@ -181,6 +181,12 @@ export function extractSymbols(
       symbols.push(sym);
     }
   }
+  for (const sym of extractAnonymousDefaultExportSymbols(rootNode, sourceCode, fileId, lang)) {
+    if (!seen.has(sym.id)) {
+      seen.add(sym.id);
+      symbols.push(sym);
+    }
+  }
   log.debug("Extracted " + symbols.length + " symbols from " + fileId);
   return symbols;
 }
@@ -205,10 +211,21 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
   if (!nameCapture) return null;
   const name = nameCapture.node.text.trim();
   if (!name) return null;
+  const accessLevel = determineAccessLevel(match.captures);
+  return createSymbolRecord(declNode, sourceCode, fileId, name, kind, accessLevel);
+}
+
+function createSymbolRecord(
+  declNode: TSNode,
+  sourceCode: string,
+  fileId: string,
+  name: string,
+  kind: SymbolKind,
+  accessLevel: AccessLevel | null,
+): SymbolRecord {
   const symbolSource = sourceCode.slice(declNode.startIndex, declNode.endIndex);
   const signature = buildSignature(symbolSource);
   const hash = contentHash(symbolSource);
-  const accessLevel = determineAccessLevel(match.captures);
   const startLine = declNode.startPosition.row + 1;
   const endLine = declNode.endPosition.row + 1;
   const startColumn = declNode.startPosition.column;
@@ -232,6 +249,51 @@ function buildSymbol(match: QueryMatch, sourceCode: string, fileId: string): Sym
     hash,
     accessLevel,
   };
+}
+
+function extractAnonymousDefaultExportSymbols(
+  rootNode: TSNode,
+  sourceCode: string,
+  fileId: string,
+  lang: ParserLanguage,
+): SymbolRecord[] {
+  if (
+    lang !== ParserLanguage.TypeScript &&
+    lang !== ParserLanguage.TSX &&
+    lang !== ParserLanguage.JavaScript &&
+    lang !== ParserLanguage.JSX
+  ) {
+    return [];
+  }
+
+  const symbols: SymbolRecord[] = [];
+  walkNodes(rootNode, (node) => {
+    if (node.type !== "export_statement") return;
+    const text = node.text.trimStart();
+    if (!text.startsWith("export default")) return;
+
+    const isAnonymousFunction = /^export\s+default\s+(?:async\s+)?function\s*(?:<|\()/.test(text);
+    const isAnonymousClass = /^export\s+default\s+class\s*(?:\{|extends\b)/.test(text);
+    if (!isAnonymousFunction && !isAnonymousClass) return;
+
+    symbols.push(createSymbolRecord(
+      node,
+      sourceCode,
+      fileId,
+      "default",
+      isAnonymousClass ? "class" : "function",
+      null,
+    ));
+  });
+
+  return symbols;
+}
+
+function walkNodes(node: TSNode, visit: (node: TSNode) => void): void {
+  visit(node);
+  for (const child of node.children) {
+    walkNodes(child, visit);
+  }
 }
 
 function buildSignature(symbolSource: string): string {

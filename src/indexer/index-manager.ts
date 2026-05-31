@@ -39,6 +39,11 @@ interface ReexportAlias {
   exportedName: string;
 }
 
+interface ReexportNamespace {
+  source: string;
+  exportedName: string;
+}
+
 export class IndexManager {
   private rootPath: string;
   private config: CodeMemoryConfig;
@@ -426,6 +431,8 @@ export class IndexManager {
         edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'TESTS', 0.8, imp.source);
       }
 
+      if (this.isSideEffectImport(imp)) continue;
+
       const importedSymbols = this.resolveImportedSymbolBindings(imp, importedFile, filesByPath, symbolsByFile);
 
       for (const importedSymbol of importedSymbols) {
@@ -436,10 +443,12 @@ export class IndexManager {
             ...importedSymbol.resolutionNames,
           ]),
         ];
-        for (const resolutionName of resolutionNames) {
-          const current = symbolsByName.get(resolutionName) || [];
-          current.push(symbol);
-          symbolsByName.set(resolutionName, current);
+        if (!imp.isTypeOnly) {
+          for (const resolutionName of resolutionNames) {
+            const current = symbolsByName.get(resolutionName) || [];
+            current.push(symbol);
+            symbolsByName.set(resolutionName, current);
+          }
         }
         edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source);
         if (localTestSymbols.length > 0) {
@@ -451,6 +460,13 @@ export class IndexManager {
     }
 
     return { edgeCount, symbolsByName };
+  }
+
+  private isSideEffectImport(imp: ImportInfo): boolean {
+    return imp.names.length === 0
+      && !imp.defaultName
+      && !imp.isDefault
+      && !imp.isNamespace;
   }
 
   private resolveImportedSymbolBindings(
@@ -478,6 +494,15 @@ export class IndexManager {
       seenFileIds,
     );
     if (aliasedReexportMatches.length > 0) return aliasedReexportMatches;
+
+    const namespaceReexportMatches = this.resolveNamespaceReexportSymbols(
+      imp,
+      importedFile,
+      filesByPath,
+      symbolsByFile,
+      seenFileIds,
+    );
+    if (namespaceReexportMatches.length > 0) return namespaceReexportMatches;
 
     const reexportSources = importedFile.exports
       .filter((exportName) => exportName.startsWith('reexport:'))
@@ -511,6 +536,36 @@ export class IndexManager {
     return reexportedMatches;
   }
 
+  private resolveNamespaceReexportSymbols(
+    imp: ImportInfo,
+    importedFile: FileRecord,
+    filesByPath: Map<string, FileRecord>,
+    symbolsByFile: Map<string, SymbolRecord[]>,
+    seenFileIds: Set<string>,
+  ): ResolvedImportSymbol[] {
+    const requestedNames = new Set(imp.names);
+    if (imp.defaultName) requestedNames.add(imp.defaultName);
+    if (requestedNames.size === 0 && !imp.isNamespace) return [];
+
+    const matches: ResolvedImportSymbol[] = [];
+    for (const namespace of this.getReexportNamespaces(importedFile.exports)) {
+      if (!imp.isNamespace && !requestedNames.has(namespace.exportedName)) continue;
+
+      const reexportFile = this.resolveImportTarget(importedFile, namespace.source, filesByPath);
+      if (!reexportFile || seenFileIds.has(reexportFile.id)) continue;
+
+      const targetSymbols = this.getExportedSymbols(reexportFile, symbolsByFile.get(reexportFile.id) || []);
+      matches.push(
+        ...targetSymbols.map((symbol) => ({
+          symbol,
+          resolutionNames: [symbol.name],
+        })),
+      );
+    }
+
+    return matches;
+  }
+
   private resolveAliasedReexportSymbols(
     imp: ImportInfo,
     importedFile: FileRecord,
@@ -541,6 +596,14 @@ export class IndexManager {
     return matches;
   }
 
+  private getExportedSymbols(file: FileRecord, symbols: SymbolRecord[]): SymbolRecord[] {
+    const exportedNames = new Set(
+      file.exports.filter((exportName) => !exportName.startsWith('reexport')),
+    );
+    const exported = symbols.filter((symbol) => exportedNames.has(symbol.name));
+    return exported.length > 0 ? exported : symbols;
+  }
+
   private getReexportAliases(exports: string[]): ReexportAlias[] {
     const aliases: ReexportAlias[] = [];
     for (const exportName of exports) {
@@ -559,6 +622,25 @@ export class IndexManager {
       }
     }
     return aliases;
+  }
+
+  private getReexportNamespaces(exports: string[]): ReexportNamespace[] {
+    const namespaces: ReexportNamespace[] = [];
+    for (const exportName of exports) {
+      if (!exportName.startsWith('reexportNamespace:')) continue;
+      try {
+        const parsed = JSON.parse(exportName.slice('reexportNamespace:'.length)) as Partial<ReexportNamespace>;
+        if (parsed.source && parsed.exportedName) {
+          namespaces.push({
+            source: parsed.source,
+            exportedName: parsed.exportedName,
+          });
+        }
+      } catch {
+        // Ignore malformed legacy export metadata.
+      }
+    }
+    return namespaces;
   }
 
   private matchSymbolsByName(symbols: SymbolRecord[], names: string[]): SymbolRecord[] {

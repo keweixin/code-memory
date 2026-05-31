@@ -93,10 +93,21 @@ export function extractImports(
     let src = '';
     const strings = extractStringChildren(node);
     if (strings.length > 0) src = stripQuotes(strings[strings.length - 1]);
-    if (!src || seen.has(src)) continue;
-    seen.add(src);
+    if (!src) continue;
 
     const bindings = extractImportBindings(node.text);
+    const seenKey = [
+      src,
+      bindings.names.join(','),
+      JSON.stringify(bindings.aliases),
+      bindings.defaultName || '',
+      bindings.isNamespace ? 'namespace' : '',
+      bindings.isDefault ? 'default' : '',
+      node.startPosition.row,
+      node.startPosition.column,
+    ].join('\0');
+    if (seen.has(seenKey)) continue;
+    seen.add(seenKey);
 
     result.push({
       source: src,
@@ -201,11 +212,18 @@ export function extractExports(
     const node = m.captures[0]?.node;
     if (!node) continue;
 
+    if (node.text.trimStart().startsWith('export default')) {
+      ex.add('default');
+    }
+
     // Check if it's a re-export (export { x } from '...' or export * from '...')
     const strings = extractStringChildren(node);
     if (strings.length > 0) {
       const source = stripQuotes(strings[0]);
       ex.add('reexport:' + source);
+      for (const namespace of extractNamespaceReexports(node.text)) {
+        ex.add('reexportNamespace:' + JSON.stringify({ source, ...namespace }));
+      }
       for (const alias of extractExportAliases(node.text)) {
         ex.add('reexportAlias:' + JSON.stringify({ source, ...alias }));
       }
@@ -217,6 +235,11 @@ export function extractExports(
     for (const n of names) ex.add(n);
   }
   return Array.from(ex);
+}
+
+function extractNamespaceReexports(exportText: string): Array<{ exportedName: string }> {
+  const match = exportText.match(/export\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+/);
+  return match ? [{ exportedName: match[1] }] : [];
 }
 
 function extractExportAliases(exportText: string): Array<{ importedName: string; exportedName: string }> {
