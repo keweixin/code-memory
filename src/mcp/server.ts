@@ -13,7 +13,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SqlJsDatabase } from "../storage/database.js";
 import { getDatabase, closeDatabase, isInitialized } from "../storage/database.js";
 import { createLogger, setLogLevel } from "../shared/logger.js";
 import { CONFIG_DIR, CONFIG_FILE, VECTORS_DIR, VERSION } from "../shared/constants.js";

@@ -10,7 +10,7 @@
  */
 
 import type { SqlJsDatabase } from '../storage/database.js';
-import type { SymbolRecord, EdgeType, SymbolKind } from '../shared/types.js';
+import type { AccessLevel, SymbolRecord, SymbolKind } from '../shared/types.js';
 import { GraphEngine } from './graph-engine.js';
 import { createLogger } from '../shared/logger.js';
 
@@ -68,7 +68,7 @@ export class FeatureTracer {
   /**
    * Trace from a specific symbol — what does this symbol depend on?
    */
-  traceFromSymbol(symbolName: string, maxDepth: number = 4): FeatureTrace | null {
+  traceFromSymbol(symbolName: string, _maxDepth: number = 4): FeatureTrace | null {
     const symbol = this.findSymbol(symbolName);
     if (!symbol) return null;
 
@@ -92,7 +92,7 @@ export class FeatureTracer {
         );
         if (result.length > 0) {
           for (const row of result[0].values) {
-            results.push(this.desymbolize(row as any));
+            results.push(this.desymbolize(row));
           }
         }
       } catch { /* skip */ }
@@ -111,7 +111,7 @@ export class FeatureTracer {
           );
           if (symbolResult.length > 0) {
             for (const symRow of symbolResult[0].values) {
-              results.push(this.desymbolize(symRow as any));
+              results.push(this.desymbolize(symRow));
             }
           }
         }
@@ -144,7 +144,7 @@ export class FeatureTracer {
         );
         if (result.length > 0) {
           for (const row of result[0].values) {
-            symbols.push(this.desymbolize(row as any));
+            symbols.push(this.desymbolize(row));
           }
         }
       } catch { /* skip */ }
@@ -235,7 +235,7 @@ export class FeatureTracer {
         [name],
       );
       if (result.length > 0 && result[0].values.length > 0) {
-        return this.desymbolize(result[0].values[0] as any);
+        return this.desymbolize(result[0].values[0]);
       }
     } catch { /* not found */ }
     return null;
@@ -245,7 +245,7 @@ export class FeatureTracer {
     try {
       const result = this.db.exec(SYMBOL_SELECT + ' WHERE id = ?', [id]);
       if (result.length > 0 && result[0].values.length > 0) {
-        return this.desymbolize(result[0].values[0] as any);
+        return this.desymbolize(result[0].values[0]);
       }
     } catch { /* not found */ }
     return null;
@@ -279,7 +279,7 @@ export class FeatureTracer {
     return [...new Set(testFiles)];
   }
 
-  private findDocFiles(sourceFiles: string[]): string[] {
+  private findDocFiles(_sourceFiles: string[]): string[] {
     const docFiles: string[] = [];
     try {
       const result = this.db.exec(
@@ -294,7 +294,7 @@ export class FeatureTracer {
     return docFiles;
   }
 
-  private desymbolize(row: any[]): SymbolRecord {
+  private desymbolize(row: unknown[]): SymbolRecord {
     return {
       id: String(row[0]),
       fileId: String(row[1]),
@@ -311,7 +311,7 @@ export class FeatureTracer {
       signature: row[12] ? String(row[12]) : null,
       summary: row[13] ? String(row[13]) : null,
       hash: String(row[14]),
-      accessLevel: row[15] ? String(row[15]) as any : null,
+      accessLevel: row[15] ? String(row[15]) as AccessLevel : null,
     };
   }
 }

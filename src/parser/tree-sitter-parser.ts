@@ -7,8 +7,7 @@
  * Returns a ParseResult containing all extracted records.
  */
 
-import { Parser } from 'web-tree-sitter';
-import type { Node, Language as TSLang } from 'web-tree-sitter';
+import type { Node } from 'web-tree-sitter';
 import type { ParseResult, ParseError, SymbolRecord, ImportInfo, ChunkRecord } from '../shared/types.js';
 import { ParserLanguage, EXTENSION_TO_PARSER_LANGUAGE } from './types.js';
 import { getParser, getTreeSitterLanguage, loadLanguage } from './parser-registry.js';

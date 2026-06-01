@@ -7,11 +7,8 @@
  */
 
 import type { FileRecord, ImportInfo } from '../shared/types.js';
-import { createLogger } from '../shared/logger.js';
-import { getDatabaseSync, type SqlJsDatabase } from './database.js';
+import { getDatabaseSync } from './database.js';
 import { buildSearchText } from '../shared/search-text.js';
-
-const log = createLogger('file-repo');
 
 // ── JSON field helpers ──────────────────────────────────────
 

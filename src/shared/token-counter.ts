@@ -13,7 +13,6 @@
 
 // Approximate characters per token for different content types
 const CHARS_PER_TOKEN_CODE = 3.5;
-const CHARS_PER_TOKEN_TEXT = 4.0;
 const CHARS_PER_TOKEN_CJK = 1.5;
 
 // CJK Unicode ranges

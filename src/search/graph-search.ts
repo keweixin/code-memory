@@ -6,7 +6,7 @@
  */
 
 import type { SqlJsDatabase } from '../storage/database.js';
-import type { EdgeType, EdgeRecord } from '../shared/types.js';
+import type { EdgeType } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('graph-search');

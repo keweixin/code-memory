@@ -7,7 +7,7 @@
  * The scanner does NOT read file contents — that is the parser's job.
  */
 
-import type { CodeMemoryConfig, Language, FileRole } from '../shared/types.js';
+import type { CodeMemoryConfig } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 import { createIgnoreRule } from './ignore-rules.js';
 import { discoverFiles, type DiscoveredFile, type DiscoverOptions } from './file-discovery.js';

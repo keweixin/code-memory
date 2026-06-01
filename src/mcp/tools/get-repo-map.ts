@@ -121,7 +121,7 @@ function insertIntoTree(root: DirNode, entry: FileEntry, baseDir: string): void 
     : entry.path;
 
   const parts = relativePath.split("/");
-  const fileName = parts.pop()!;
+  parts.pop();
   let current = root;
 
   for (const part of parts) {

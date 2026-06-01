@@ -22,12 +22,12 @@ import type {
   ProjectCard,
   MemoryRecord,
   SearchResult,
-  CodeMemoryConfig,
+  Language,
   TokenBudgets,
   SymbolKind,
 } from '../shared/types.js';
 import { DEFAULT_TOKEN_BUDGETS } from '../shared/types.js';
-import { estimateTokens, truncateToTokenBudget } from '../shared/token-counter.js';
+import { estimateTokens } from '../shared/token-counter.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('context-packer');
@@ -193,7 +193,7 @@ export class ContextPacker {
 
       return {
         name: meta.get('project_name') || 'Unknown',
-        languages: (meta.get('languages') || '').split(',').filter(Boolean) as any,
+        languages: (meta.get('languages') || '').split(',').filter(Boolean) as Language[],
         totalFiles: parseInt(meta.get('total_files') || '0', 10),
         totalSymbols: parseInt(meta.get('total_symbols') || '0', 10),
         architectureStyle: meta.get('architecture_style') || null,
@@ -224,7 +224,7 @@ export class ContextPacker {
   /**
    * Get relevant project memories for a query.
    */
-  private getRelevantMemories(query: string): MemoryRecord[] {
+  private getRelevantMemories(_query: string): MemoryRecord[] {
     try {
       // Get all memories and filter by scope relevance
       const results = this.db.exec(

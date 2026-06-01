@@ -10,10 +10,6 @@
  */
 
 import type { SqlJsDatabase } from '../storage/database.js';
-import type { SymbolRecord, SymbolKind } from '../shared/types.js';
-import { createLogger } from '../shared/logger.js';
-
-const log = createLogger('test-mapper');
 
 export interface TestMapping {
   sourceFile: string;

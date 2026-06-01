@@ -259,7 +259,7 @@ function getCallParts(callNode: Node, lang: ParserLanguage): ExtractedCallParts 
 /**
  * Kept for older parser paths that only need the string callee.
  */
-function _extractLegacyCalleeName(callNode: Node, lang: ParserLanguage): string | null {
+function _extractLegacyCalleeName(callNode: Node, _lang: ParserLanguage): string | null {
   const firstChild = callNode.firstNamedChild;
   if (!firstChild) return null;
 

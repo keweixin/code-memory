@@ -7,10 +7,7 @@
  */
 
 import type { ChunkRecord } from '../shared/types.js';
-import { createLogger } from '../shared/logger.js';
 import { getDatabaseSync } from './database.js';
-
-const log = createLogger('chunk-repo');
 
 // ── Serialization ───────────────────────────────────────────
 

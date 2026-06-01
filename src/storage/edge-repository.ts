@@ -7,10 +7,7 @@
  */
 
 import type { EdgeRecord, EdgeType } from '../shared/types.js';
-import { createLogger } from '../shared/logger.js';
 import { getDatabaseSync } from './database.js';
-
-const log = createLogger('edge-repo');
 
 // ── Serialization ───────────────────────────────────────────
 

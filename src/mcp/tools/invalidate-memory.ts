@@ -12,7 +12,6 @@ import {
   getMemoryById,
   getMemoriesByType,
   deleteMemory,
-  updateMemory,
 } from "../../storage/memory-repository.js";
 import { createLogger } from "../../shared/logger.js";
 import type { MemoryType } from "../../shared/types.js";

@@ -55,6 +55,14 @@ export interface VectorSearchProvider {
   ): Promise<Array<{ id: string; rank: number }>>;
 }
 
+interface LanceVectorRow {
+  id: string;
+  name: string;
+  kind: string;
+  filePath: string;
+  _distance: number;
+}
+
 let dbInstance: lancedb.Connection | null = null;
 let dbInstancePath: string | null = null;
 let dbInstanceDimensions = DEFAULT_EMBEDDING_DIMENSIONS;
@@ -192,7 +200,7 @@ export async function searchVectors(
 
   try {
     const table = await dbInstance!.openTable(TABLE_NAME);
-    let results: any[];
+    let results: LanceVectorRow[];
     try {
       let query = table.vectorSearch(queryVector).limit(limit * 2); // Over-fetch for filtering
 
@@ -203,7 +211,7 @@ export async function searchVectors(
         query = query.where(`filePath LIKE '%${escapeSqlLike(fileFilter)}%'`);
       }
 
-      results = await query.toArray();
+      results = (await query.toArray()).filter(isLanceVectorRow);
     } finally {
       table.close();
     }
@@ -211,11 +219,11 @@ export async function searchVectors(
     if (!results.length) return [];
 
     // Normalize distances to 0-1 scores
-    const maxDistance = Math.max(...results.map((r: any) => r._distance || 0), 0.001);
+    const maxDistance = Math.max(...results.map((r) => r._distance || 0), 0.001);
 
     return results
       .slice(0, limit)
-      .map((r: any) => ({
+      .map((r) => ({
         id: r.id,
         name: r.name,
         kind: r.kind,
@@ -326,6 +334,16 @@ function assertVectorDimensions(vector: number[], expected: number): boolean {
   return vector.length === expected;
 }
 
+function isLanceVectorRow(value: unknown): value is LanceVectorRow {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === 'string' &&
+    typeof row.name === 'string' &&
+    typeof row.kind === 'string' &&
+    typeof row.filePath === 'string' &&
+    typeof row._distance === 'number';
+}
+
 /**
  * Create an IVF-PQ index for faster ANN search on large datasets.
  * Only needed when vector count exceeds ~100k.
@@ -339,9 +357,11 @@ export async function createVectorIndex(
     const table = await connection.openTable(TABLE_NAME);
     try {
       await table.createIndex('vector', {
-        numPartitions,
-        numSubVectors,
-      } as any);
+        config: lancedb.Index.ivfPq({
+          numPartitions,
+          numSubVectors,
+        }),
+      });
     } finally {
       table.close();
     }

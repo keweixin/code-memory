@@ -9,7 +9,7 @@
  */
 
 import type { SqlJsDatabase } from '../storage/database.js';
-import type { EdgeType, GraphNode, GraphEdge, SubGraph, GraphPath } from '../shared/types.js';
+import type { EdgeType, FileRole, GraphNode, GraphEdge, GraphPath, SubGraph, SymbolKind } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('graph-engine');
@@ -236,7 +236,7 @@ export class GraphEngine {
           id: nodeId,
           type: 'symbol',
           label: String(row[0]),
-          kind: String(row[1]) as any,
+          kind: String(row[1]) as SymbolKind,
           filePath,
           lineRange: [Number(row[3]), Number(row[4])],
           columnRange: [Number(row[5]), Number(row[6])],
@@ -256,7 +256,7 @@ export class GraphEngine {
           id: nodeId,
           type: 'file',
           label: String(row[0]),
-          kind: String(row[1]) as any,
+          kind: String(row[1]) as FileRole,
           filePath: String(row[0]),
           lineRange: null,
           columnRange: null,

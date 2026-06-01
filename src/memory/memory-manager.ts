@@ -21,7 +21,6 @@ import {
   getMemoriesByType,
   getMemoriesByScope,
   updateMemory,
-  deleteMemory,
 } from '../storage/memory-repository.js';
 import { getDatabaseSync } from '../storage/database.js';
 

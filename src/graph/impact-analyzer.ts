@@ -10,7 +10,7 @@
  */
 
 import type { SqlJsDatabase } from '../storage/database.js';
-import type { ImpactResult, ImpactFile, ImpactSymbol, RiskPoint, RiskLevel } from '../shared/types.js';
+import type { ImpactResult, ImpactFile, ImpactSymbol, RiskPoint, SymbolKind } from '../shared/types.js';
 import { GraphEngine } from './graph-engine.js';
 import { resolveTargetId } from './target-resolver.js';
 import { HIGH_RISK_PATTERNS } from '../shared/constants.js';
@@ -133,7 +133,7 @@ export class ImpactAnalyzer {
   /**
    * Find all references to a symbol (incoming REFERENCES edges).
    */
-  private findReferences(symbolId: string, maxDepth: number): ImpactSymbol[] {
+  private findReferences(symbolId: string, _maxDepth: number): ImpactSymbol[] {
     const refs: ImpactSymbol[] = [];
     const visited = new Set<string>([symbolId]);
 
@@ -182,7 +182,7 @@ export class ImpactAnalyzer {
         if (!tests.some((t) => t.filePath === testPath)) {
           tests.push({
             name: testPath.split('/').pop() || testPath,
-            kind: 'function' as any,
+            kind: 'function' as SymbolKind,
             filePath: testPath,
             impactType: 'reference',
             distance: 1,
@@ -321,7 +321,7 @@ export class ImpactAnalyzer {
   // Helpers
   // ============================================================
 
-  private getSymbolInfo(symbolId: string): { name: string; kind: any; filePath: string } | null {
+  private getSymbolInfo(symbolId: string): { name: string; kind: SymbolKind; filePath: string } | null {
     try {
       const result = this.db.exec(
         'SELECT name, kind, file_id FROM symbols WHERE id = ?',
@@ -339,7 +339,7 @@ export class ImpactAnalyzer {
 
         return {
           name: String(row[0]),
-          kind: String(row[1]),
+          kind: String(row[1]) as SymbolKind,
           filePath,
         };
       }
@@ -347,7 +347,7 @@ export class ImpactAnalyzer {
     return null;
   }
 
-  private getNodeImpactInfo(nodeId: string): { name: string; kind: any; filePath: string } | null {
+  private getNodeImpactInfo(nodeId: string): { name: string; kind: SymbolKind; filePath: string } | null {
     const symbolInfo = this.getSymbolInfo(nodeId);
     if (symbolInfo) return symbolInfo;
 

@@ -6,11 +6,8 @@
  */
 
 import type { SymbolRecord, SymbolKind } from '../shared/types.js';
-import { createLogger } from '../shared/logger.js';
 import { getDatabaseSync } from './database.js';
 import { buildSearchText } from '../shared/search-text.js';
-
-const log = createLogger('symbol-repo');
 
 // ── Serialization ───────────────────────────────────────────
 

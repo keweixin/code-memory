@@ -49,29 +49,6 @@ function gitCommand(cwd: string, args: string): string | null {
   }
 }
 
-/**
- * Parse `git log` output into CommitInfo objects.
- * Uses a null-byte separator to safely handle multi-line messages.
- */
-function parseLogOutput(output: string): CommitInfo[] {
-  const commits: CommitInfo[] = [];
-  const entries = output.split('\0').filter(Boolean);
-
-  for (const entry of entries) {
-    const lines = entry.split('\n');
-    if (lines.length < 2) continue;
-
-    commits.push({
-      hash: lines[0],
-      message: lines.slice(1, -2).join('\n').trim(),
-      author: lines[lines.length - 2] || '',
-      date: lines[lines.length - 1] || '',
-    });
-  }
-
-  return commits;
-}
-
 // ─── Public API ─────────────────────────────────────────────
 
 /**
