@@ -1,0 +1,8 @@
+{
+  "id": "find-service-usage",
+  "description": "Find all Service classes and how they validate payloads",
+  "query": "How does the Service class validate a payload?",
+  "expectedFiles": ["src/shared.ts", "src/module-0.ts"],
+  "expectedSymbols": ["Service0", "validate", "normalizeEmail", "Payload"],
+  "intent": "explain"
+}

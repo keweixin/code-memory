@@ -1,0 +1,150 @@
+/** Code Memory Graph — Embedding Generator */
+
+import type { EmbeddingConfig } from "../shared/types.js";
+import { createLogger } from "../shared/logger.js";
+import { resolveEmbeddingConfig } from "../shared/provider-config.js";
+
+const log = createLogger("embedding-gen");
+
+export class EmbeddingGenerator {
+  private config: EmbeddingConfig;
+  private available: boolean = false;
+
+  constructor(config: EmbeddingConfig) {
+    this.config = resolveEmbeddingConfig(config).config;
+    this.available = this.config.provider !== "none";
+  }
+
+  async generate(text: string): Promise<number[]> {
+    if (!this.available) throw new Error("Embedding generator not available (provider is none)");
+    if (!text || text.trim().length === 0) return [];
+    const trimmed = text.trim();
+    switch (this.config.provider) {
+      case "ollama": return this.ollama(trimmed);
+      case "openai": return this.openai(trimmed);
+      default: throw new Error("Unknown provider: " + this.config.provider);
+    }
+  }
+
+  async generateBatch(texts: string[]): Promise<number[][]> {
+    if (!this.available) throw new Error("Not available");
+    const normalized = texts.map((text) => text.trim());
+    if (normalized.length === 0) return [];
+
+    if (this.config.provider === "openai") {
+      try {
+        return await this.openaiBatch(normalized);
+      } catch (err) {
+        log.warn("OpenAI batch embedding failed, falling back to bounded single requests: " +
+          (err instanceof Error ? err.message : String(err)));
+      }
+    }
+
+    const concurrency = Math.max(1, Math.floor(this.config.concurrency ?? 2));
+    return boundedMap(normalized, concurrency, async (text) => {
+      try { return await this.generate(text); }
+      catch (err) { log.error("Batch embedding failed", err); return []; }
+    });
+  }
+
+  isAvailable(): boolean { return this.available; }
+
+  getDimensions(): number | undefined { return this.config.dimensions; }
+
+  private async ollama(text: string): Promise<number[]> {
+    const baseUrl = this.config.baseUrl || "http://localhost:11434";
+    const url = baseUrl.replace(/\/$/, "") + "/api/embeddings";
+    const body = JSON.stringify({
+      model: this.config.model || "nomic-embed-text",
+      prompt: text,
+    });
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error("Ollama API error " + resp.status + ": " + errText.slice(0, 200));
+    }
+    const data = await resp.json() as { embedding?: number[] };
+    if (!data.embedding || !Array.isArray(data.embedding)) {
+      throw new Error("Ollama response missing embedding");
+    }
+    return data.embedding;
+  }
+
+  private async openai(text: string): Promise<number[]> {
+    const baseUrl = this.config.baseUrl || "https://api.openai.com";
+    const url = baseUrl.replace(/\/$/, "") + "/v1/embeddings";
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.config.apiKey) headers["Authorization"] = "Bearer " + this.config.apiKey;
+    const body = JSON.stringify({
+      model: this.config.model || "text-embedding-3-small",
+      input: text,
+    });
+    const resp = await fetch(url, { method: "POST", headers, body });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error("OpenAI API error " + resp.status + ": " + errText.slice(0, 200));
+    }
+    const data = await resp.json() as { data?: Array<{ embedding?: number[] }> };
+    if (!data.data || data.data.length === 0 || !data.data[0].embedding) {
+      throw new Error("OpenAI response missing embedding");
+    }
+    return data.data[0].embedding;
+  }
+
+  private async openaiBatch(texts: string[]): Promise<number[][]> {
+    const baseUrl = this.config.baseUrl || "https://api.openai.com";
+    const url = baseUrl.replace(/\/$/, "") + "/v1/embeddings";
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.config.apiKey) headers["Authorization"] = "Bearer " + this.config.apiKey;
+    const body = JSON.stringify({
+      model: this.config.model || "text-embedding-3-small",
+      input: texts,
+    });
+    const resp = await fetch(url, { method: "POST", headers, body });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error("OpenAI API error " + resp.status + ": " + errText.slice(0, 200));
+    }
+    const data = await resp.json() as { data?: Array<{ embedding?: number[]; index?: number }> };
+    if (!data.data || data.data.length === 0) {
+      throw new Error("OpenAI response missing embeddings");
+    }
+    const results = Array.from({ length: texts.length }, () => [] as number[]);
+    for (let fallbackIndex = 0; fallbackIndex < data.data.length; fallbackIndex++) {
+      const item: { embedding?: number[]; index?: number } | undefined = data.data[fallbackIndex];
+      if (!item) continue;
+      const index = typeof item.index === "number" ? item.index : fallbackIndex;
+      if (item.embedding && index >= 0 && index < results.length) {
+        results[index] = item.embedding;
+      }
+    }
+    return results;
+  }
+}
+
+async function boundedMap<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, values.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(values[index], index);
+    }
+  }));
+
+  return results;
+}

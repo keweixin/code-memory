@@ -1,0 +1,12 @@
+/**
+ * AppError — Custom application error with HTTP status codes.
+ */
+export class AppError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number = 500,
+  ) {
+    super(message);
+    this.name = 'AppError';
+  }
+}

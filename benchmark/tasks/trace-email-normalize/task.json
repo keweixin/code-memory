@@ -1,0 +1,8 @@
+{
+  "id": "trace-email-normalize",
+  "description": "Trace the email normalization flow from input to storage",
+  "query": "How is email normalized before saving a record?",
+  "expectedFiles": ["src/shared.ts"],
+  "expectedSymbols": ["normalizeEmail", "saveRecord"],
+  "intent": "debug"
+}

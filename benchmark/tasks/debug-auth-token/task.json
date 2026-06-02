@@ -1,0 +1,29 @@
+{
+  "task": "AuthToken",
+  "expectedFiles": [
+    "src/auth/auth-token.ts",
+    "src/auth/auth-service.ts",
+    "src/middleware/auth-middleware.ts",
+    "src/utils/crypto.ts"
+  ],
+  "expectedSymbols": [
+    "validateAuthToken",
+    "refreshAuthToken",
+    "createAuthToken",
+    "revokeAuthToken",
+    "AuthService",
+    "authMiddleware",
+    "verifySignature",
+    "generateSecret"
+  ],
+  "forbiddenWasteFiles": [
+    "src/utils/logger.ts",
+    "src/utils/helpers.ts"
+  ],
+  "successCriteria": {
+    "keyFileRecall": 0.75,
+    "evidenceCoverage": 0.5,
+    "tokenWasteRatio": 0.1,
+    "searchLatencyMs": 5000
+  }
+}

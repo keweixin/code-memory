@@ -1,0 +1,8 @@
+{
+  "id": "locate-save-logic",
+  "description": "Find the save logic and its error handling",
+  "query": "Where is the save logic that throws on invalid payload?",
+  "expectedFiles": ["src/shared.ts", "src/module-0.ts"],
+  "expectedSymbols": ["save", "saveRecord", "Service0"],
+  "intent": "refactor"
+}

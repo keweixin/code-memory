@@ -1,0 +1,34 @@
+{
+  "task": "User",
+  "expectedFiles": [
+    "src/users/user-service.ts",
+    "src/users/user-repository.ts",
+    "src/users/user-model.ts",
+    "src/users/index.ts"
+  ],
+  "expectedSymbols": [
+    "findUserById",
+    "findUserByEmail",
+    "createUser",
+    "updateUser",
+    "deleteUser",
+    "listUsers",
+    "registerUser",
+    "getUserProfile",
+    "updateUserLastLogin",
+    "User",
+    "CreateUserDTO",
+    "UpdateUserDTO"
+  ],
+  "forbiddenWasteFiles": [
+    "src/utils/logger.ts",
+    "src/utils/helpers.ts",
+    "src/auth/auth-token.ts"
+  ],
+  "successCriteria": {
+    "keyFileRecall": 0.75,
+    "evidenceCoverage": 0.5,
+    "tokenWasteRatio": 0.15,
+    "searchLatencyMs": 5000
+  }
+}
