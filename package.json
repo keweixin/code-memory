@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "type": "module",
   "description": "Context Ledger and evidence-backed code graph for AI coding agents",
+  "author": "keweixin",
   "main": "dist/index.js",
   "bin": {
     "code-memory": "./dist/index.js"
