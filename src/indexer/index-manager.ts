@@ -78,6 +78,8 @@ import {
   type ProcessTraceResult,
 } from '../graph/process-tracer.js';
 import { detectCommunities } from '../graph/community-detector.js';
+import { invalidateExpiredMemories, getMemoriesByType } from '../storage/memory-repository.js';
+import { MemoryManager } from '../memory/memory-manager.js';
 
 const log = createLogger('index-manager');
 
@@ -267,6 +269,28 @@ export class IndexManager {
 
       log.info('Full index done in ' + (elapsed / 1000).toFixed(1) + 's: ' +
         indexedCount + ' files, ' + totalSymbols + ' symbols, ' + totalEdges + ' edges');
+
+      // Auto-lifecycle: clean expired memories and validate remaining ones
+      try {
+        const currentCommit = this.getMetadata('current_commit');
+        if (currentCommit) {
+          invalidateExpiredMemories(currentCommit);
+        }
+        const memoryManager = new MemoryManager();
+        const allMemories = [
+          ...getMemoriesByType('repo'),
+          ...getMemoriesByType('decision'),
+          ...getMemoriesByType('user_preference'),
+        ];
+        for (const memory of allMemories) {
+          if (memory.confidence >= 0.3 && currentCommit) {
+            memoryManager.validate(memory.id, currentCommit);
+          }
+        }
+        log.debug('[Auto-Lifecycle] Memory states calibrated with current Git commit.');
+      } catch (memErr) {
+        log.warn('Memory lifecycle sync failed: ' + (memErr instanceof Error ? memErr.message : String(memErr)));
+      }
 
       this.completeIndexRun(runId);
       runCompleted = true;
@@ -500,6 +524,46 @@ export class IndexManager {
       }, forceAll ? 'full' : 'incremental');
 
       log.info('Incremental index done: ' + indexedCount + ' files updated');
+
+      // Auto-lifecycle: check memory invalidation for dirty files and validate remaining memories
+      try {
+        const db = getDatabaseSync();
+        const currentCommit = this.getMetadata('current_commit');
+
+        // Convert dirty file IDs to file paths for invalidation check
+        const dirtyFilePaths: string[] = [];
+        for (const fileId of expandedDirtyFileIds) {
+          const rows = db.exec('SELECT path FROM files WHERE id = ?', [fileId]);
+          if (rows.length > 0 && rows[0].values.length > 0) {
+            dirtyFilePaths.push(String(rows[0].values[0][0]));
+          }
+        }
+
+        if (dirtyFilePaths.length > 0) {
+          const memoryManager = new MemoryManager();
+          const invalidatedIds = memoryManager.checkInvalidation(dirtyFilePaths);
+          if (invalidatedIds.length > 0) {
+            log.info(`[Auto-Lifecycle] Incremental index: ${invalidatedIds.length} memories invalidated.`);
+          }
+        }
+
+        // Validate remaining memories against current commit
+        if (currentCommit) {
+          const memoryManager = new MemoryManager();
+          const allMemories = [
+            ...getMemoriesByType('repo'),
+            ...getMemoriesByType('decision'),
+          ];
+          for (const memory of allMemories) {
+            if (memory.confidence >= 0.3) {
+              memoryManager.validate(memory.id, currentCommit);
+            }
+          }
+        }
+      } catch (memErr) {
+        log.warn('Memory lifecycle sync after incremental index failed: ' + (memErr instanceof Error ? memErr.message : String(memErr)));
+      }
+
       this.completeIndexRun(runId);
       runCompleted = true;
       return this.buildStatus(indexedCount, totalSymbols, totalEdges, totalChunks);

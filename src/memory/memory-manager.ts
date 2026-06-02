@@ -139,6 +139,8 @@ export class MemoryManager {
     const allMemories = [
       ...getMemoriesByType('repo'),
       ...getMemoriesByType('decision'),
+      ...getMemoriesByType('branch'),
+      ...getMemoriesByType('user_preference'),
     ];
 
     const staleIds: string[] = [];

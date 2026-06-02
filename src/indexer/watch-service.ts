@@ -7,6 +7,7 @@ import { getDatabase, getDatabaseSync, saveDatabase } from '../storage/database.
 import { IndexManager } from './index-manager.js';
 import { createIgnoreRule, isIgnored } from '../scanner/ignore-rules.js';
 import { normalizePath } from '../shared/utils.js';
+import { MemoryManager } from '../memory/memory-manager.js';
 
 const log = createLogger('watch');
 
@@ -117,6 +118,18 @@ export function startIndexWatcherWithState(
         forceAll: false,
         fallbackToScan: true,
       });
+
+      // Auto-lifecycle: check memory invalidation after successful incremental index
+      try {
+        const memoryManager = new MemoryManager();
+        const invalidatedIds = memoryManager.checkInvalidation(changedPaths);
+        if (invalidatedIds.length > 0) {
+          log.info(`[Auto-Lifecycle] Watch triggered: Invalidated ${invalidatedIds.length} memories affected by file changes.`);
+        }
+      } catch (memErr) {
+        log.error('Automated memory invalidation failed: ' + (memErr instanceof Error ? memErr.message : String(memErr)));
+      }
+
       await recordWatchSyncSuccess(projectRoot, changedPaths, {
         triggerReason,
         syncDurationMs: Date.now() - startedAt,

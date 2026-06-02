@@ -19,6 +19,7 @@ import {
   partitionPending,
 } from "./_stale-banner.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
+import { getDatabaseSync } from "../../storage/database.js";
 import {
   loadVectorSearchProviderForRepo,
   type VectorSearchProviderResolver,
@@ -111,9 +112,22 @@ export function registerSearchCodeTool(
 
 function wrapWithStaleBanner(text: string): string {
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
-  if (pending.length === 0) return text;
+
+  // Check for stale (low-confidence) memories
+  let staleMemoriesCount = 0;
+  try {
+    const db = getDatabaseSync();
+    const rows = db.exec(
+      "SELECT COUNT(*) as cnt FROM memories WHERE confidence <= 0.3 AND type IN ('repo', 'decision', 'user_preference')"
+    );
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch { /* non-critical */ }
+
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
   const { inResponse, notInResponse } = partitionPending(pending, text);
-  return attachStaleBanner(text, inResponse, notInResponse);
+  return attachStaleBanner(text, inResponse, notInResponse, undefined, staleMemoriesCount);
 }
 
 function formatSearchResults(

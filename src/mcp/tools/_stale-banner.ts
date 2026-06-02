@@ -90,14 +90,25 @@ export function formatAge(ms: number): string {
   return `${Math.round(ms / 3_600_000)}h`;
 }
 
+export function formatMemoryStaleBanner(staleCount: number): string {
+  if (staleCount <= 0) return '';
+  return [
+    `[CODE-MEMORY CRITICAL ALERT]: ${staleCount} project design memories linked to this module have expired or gone STALE due to local code mutations.`,
+    '-> MANDATORY ACTION: Call invalidate_memory to clear obsolete context, then remember_project_fact to refresh the ledger.',
+    '',
+  ].join('\n');
+}
+
 export function attachStaleBanner(
   text: string,
   pendingInResponse: PendingFile[],
   pendingNotInResponse: PendingFile[],
   nowMs?: number,
+  staleMemoriesCount: number = 0,
 ): string {
   const banner = formatStaleBanner(pendingInResponse, nowMs);
   const footer = formatStaleFooter(pendingNotInResponse, 5, nowMs);
-  const parts = [banner, text, footer].filter(Boolean);
+  const memoryBanner = formatMemoryStaleBanner(staleMemoriesCount);
+  const parts = [banner, memoryBanner, text, footer].filter(Boolean);
   return parts.join('\n');
 }
