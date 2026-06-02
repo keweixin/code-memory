@@ -43,7 +43,7 @@ export function upsertEdge(edge: EdgeRecord): void {
     `INSERT OR REPLACE INTO edges
        (id, from_id, to_id, type, confidence, evidence)
      VALUES ($id, $fromId, $toId, $type, $confidence, $evidence)`,
-    [p.$id, p.$fromId, p.$toId, p.$type, p.$confidence, p.$evidence],
+    p,
   );
 }
 
@@ -129,24 +129,31 @@ export function getNeighbors(
 
   const typeFilter = type ? ' AND type = ?' : '';
 
-  if (direction === 'out' || direction === 'both') {
-    const sql = `SELECT to_id FROM edges WHERE from_id = ?${typeFilter}`;
+  if (direction === 'both') {
+    const sql = `SELECT to_id AS neighbor_id FROM edges WHERE from_id = ?${typeFilter} UNION SELECT from_id AS neighbor_id FROM edges WHERE to_id = ?${typeFilter}`;
     const stmt = db.prepare(sql);
-    const params = type ? [nodeId, type] : [nodeId];
+    const params = type ? [nodeId, type, nodeId, type] : [nodeId, nodeId];
     stmt.bind(params);
     while (stmt.step()) {
-      neighborSet.add(stmt.getAsObject().to_id as string);
+      neighborSet.add(stmt.getAsObject().neighbor_id as string);
     }
     stmt.free();
-  }
-
-  if (direction === 'in' || direction === 'both') {
-    const sql = `SELECT from_id FROM edges WHERE to_id = ?${typeFilter}`;
+  } else if (direction === 'out') {
+    const sql = `SELECT to_id AS neighbor_id FROM edges WHERE from_id = ?${typeFilter}`;
     const stmt = db.prepare(sql);
     const params = type ? [nodeId, type] : [nodeId];
     stmt.bind(params);
     while (stmt.step()) {
-      neighborSet.add(stmt.getAsObject().from_id as string);
+      neighborSet.add(stmt.getAsObject().neighbor_id as string);
+    }
+    stmt.free();
+  } else {
+    const sql = `SELECT from_id AS neighbor_id FROM edges WHERE to_id = ?${typeFilter}`;
+    const stmt = db.prepare(sql);
+    const params = type ? [nodeId, type] : [nodeId];
+    stmt.bind(params);
+    while (stmt.step()) {
+      neighborSet.add(stmt.getAsObject().neighbor_id as string);
     }
     stmt.free();
   }

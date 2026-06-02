@@ -74,6 +74,31 @@ export function getExtension(filePath: string): string {
   return '';
 }
 
+const globCache = new Map<string, RegExp>();
+const GLOB_CACHE_MAX_SIZE = 256;
+
+function globToRegex(pattern: string): RegExp {
+  let regex = globCache.get(pattern);
+  if (regex) return regex;
+
+  // Convert glob to regex
+  const regexStr = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '{{DOUBLESTAR}}')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/\{\{DOUBLESTAR\}\}/g, '.*');
+
+  regex = new RegExp(`^${regexStr}$`, 'i');
+
+  if (globCache.size >= GLOB_CACHE_MAX_SIZE) {
+    const firstKey = globCache.keys().next().value;
+    if (firstKey) globCache.delete(firstKey);
+  }
+  globCache.set(pattern, regex);
+  return regex;
+}
+
 /**
  * Check if a glob pattern matches a string.
  * Simple implementation supporting *, ?, and ** wildcards.
@@ -83,16 +108,8 @@ export function globMatch(pattern: string, str: string): boolean {
   const normalizedPattern = pattern.replace(/\\/g, '/');
   const normalizedStr = str.replace(/\\/g, '/');
 
-  // Convert glob to regex
-  const regexStr = normalizedPattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '{{DOUBLESTAR}}')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\{\{DOUBLESTAR\}\}/g, '.*');
-
   try {
-    const regex = new RegExp(`^${regexStr}$`, 'i');
+    const regex = globToRegex(normalizedPattern);
     return regex.test(normalizedStr);
   } catch {
     return false;

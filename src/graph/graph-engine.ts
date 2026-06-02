@@ -189,8 +189,24 @@ export class GraphEngine {
     // Fetch all edges between discovered nodes in one query
     const edges = this.batchGetEdges(discoveredIds, edgeTypes);
 
+    // Ensure seed nodes come first in the result array (callers rely on nodes[0] being the seed)
+    const nodes: GraphNode[] = [];
+    const seenIds = new Set<string>();
+    for (const seedId of centerNodeIds) {
+      const node = nodeMap.get(seedId);
+      if (node) {
+        nodes.push(node);
+        seenIds.add(seedId);
+      }
+    }
+    for (const node of nodeMap.values()) {
+      if (!seenIds.has(node.id)) {
+        nodes.push(node);
+      }
+    }
+
     return {
-      nodes: Array.from(nodeMap.values()),
+      nodes,
       edges,
     };
   }
@@ -465,13 +481,13 @@ export class GraphEngine {
     if (nodeIds.length === 0) return [];
 
     const edges: GraphEdge[] = [];
+    const nodeIdSet = new Set(nodeIds);
 
     try {
       const placeholders = nodeIds.map(() => '?').join(', ');
-      const params: unknown[] = [...nodeIds];
+      const params: unknown[] = [...nodeIds, ...nodeIds];
 
-      let sql = `SELECT from_id, to_id, type, confidence FROM edges WHERE from_id IN (${placeholders}) AND to_id IN (${placeholders})`;
-      params.push(...nodeIds); // second set for to_id
+      let sql = `SELECT from_id, to_id, type, confidence FROM edges WHERE (from_id IN (${placeholders}) OR to_id IN (${placeholders}))`;
 
       if (edgeTypes && edgeTypes.length > 0) {
         const typePlaceholders = edgeTypes.map(() => '?').join(', ');
@@ -482,12 +498,17 @@ export class GraphEngine {
       const results = this.db.exec(sql, params);
       if (results.length > 0) {
         for (const row of results[0].values) {
-          edges.push({
-            from: String(row[0]),
-            to: String(row[1]),
-            type: String(row[2]) as EdgeType,
-            confidence: Number(row[3]),
-          });
+          const fromId = String(row[0]);
+          const toId = String(row[1]);
+          // Only include edges where both endpoints are in the discovered node set
+          if (nodeIdSet.has(fromId) && nodeIdSet.has(toId)) {
+            edges.push({
+              from: fromId,
+              to: toId,
+              type: String(row[2]) as EdgeType,
+              confidence: Number(row[3]),
+            });
+          }
         }
       }
     } catch (err) {

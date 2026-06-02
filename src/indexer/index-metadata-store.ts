@@ -43,6 +43,8 @@ export interface IndexRunStats {
   writeMs?: number;
   edgeMs?: number;
   vectorMs?: number;
+  communityMs?: number;
+  processMs?: number;
   peakRssMb?: number;
 }
 
@@ -219,6 +221,8 @@ export class IndexMetadataStore {
     this.set('last_index_write_ms', String(runStats.writeMs ?? 0));
     this.set('last_index_edge_ms', String(runStats.edgeMs ?? 0));
     this.set('last_index_vector_ms', String(runStats.vectorMs ?? 0));
+    this.set('last_index_community_ms', String(runStats.communityMs ?? 0));
+    this.set('last_index_process_ms', String(runStats.processMs ?? 0));
     this.set('last_index_peak_rss_mb', String(runStats.peakRssMb ?? 0));
     this.set('parse_workers', String(runStats.parseWorkers));
     this.set('dirty_files', String(runStats.dirtyFiles));

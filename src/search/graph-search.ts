@@ -238,6 +238,9 @@ export function findShortestPath(
 /**
  * Get all nodes reachable from a set of start nodes within N hops,
  * grouped by their relationship type.
+ *
+ * Uses a single recursive CTE instead of 5 separate bfsExpand calls
+ * to reduce edge-table scans from 5 to 1.
  */
 export function expandContext(
   db: SqlJsDatabase,
@@ -258,55 +261,66 @@ export function expandContext(
     tests: new Set<string>(),
   };
 
-  // Expand callers (incoming CALLS edges)
-  const callers = bfsExpand(db, {
-    startNodeIds,
-    direction: 'incoming',
-    edgeTypes: ['CALLS'],
-    maxHops: hops,
-    maxNodes: 100,
-  });
-  for (const c of callers) result.callers.add(c.nodeId);
+  if (startNodeIds.length === 0 || hops <= 0) return result;
 
-  // Expand callees (outgoing CALLS edges)
-  const callees = bfsExpand(db, {
-    startNodeIds,
-    direction: 'outgoing',
-    edgeTypes: ['CALLS'],
-    maxHops: hops,
-    maxNodes: 100,
-  });
-  for (const c of callees) result.callees.add(c.nodeId);
+  try {
+    const allEdgeTypes: EdgeType[] = ['CALLS', 'REFERENCES', 'IMPORTS', 'TESTS'];
+    const seedSelect = startNodeIds.map(() => 'SELECT ? AS id').join(' UNION ALL ');
+    const edgeTypePlaceholders = allEdgeTypes.map(() => '?').join(',');
 
-  // Expand references (incoming REFERENCES edges)
-  const refs = bfsExpand(db, {
-    startNodeIds,
-    direction: 'incoming',
-    edgeTypes: ['REFERENCES'],
-    maxHops: hops,
-    maxNodes: 100,
-  });
-  for (const r of refs) result.references.add(r.nodeId);
+    const sql = `WITH RECURSIVE
+      seeds(id) AS (${seedSelect}),
+      graph_expand(id, depth, edge_type, is_outgoing, path) AS (
+        SELECT id, 0, NULL, NULL, '>' || id || '>' FROM seeds
+        UNION ALL
+        SELECT e.to_id, ge.depth + 1, e.type, 1, ge.path || e.to_id || '>'
+        FROM graph_expand ge
+        JOIN edges e ON e.from_id = ge.id
+        WHERE ge.depth < ?
+          AND e.type IN (${edgeTypePlaceholders})
+          AND instr(ge.path, '>' || e.to_id || '>') = 0
+        UNION ALL
+        SELECT e.from_id, ge.depth + 1, e.type, 0, ge.path || e.from_id || '>'
+        FROM graph_expand ge
+        JOIN edges e ON e.to_id = ge.id
+        WHERE ge.depth < ?
+          AND e.type IN (${edgeTypePlaceholders})
+          AND instr(ge.path, '>' || e.from_id || '>') = 0
+      )
+      SELECT id, edge_type, is_outgoing, MIN(depth) AS depth
+      FROM graph_expand
+      WHERE depth > 0
+      GROUP BY id, edge_type, is_outgoing`;
 
-  // Expand dependents (incoming IMPORTS edges)
-  const deps = bfsExpand(db, {
-    startNodeIds,
-    direction: 'incoming',
-    edgeTypes: ['IMPORTS'],
-    maxHops: 1,
-    maxNodes: 50,
-  });
-  for (const d of deps) result.dependents.add(d.nodeId);
+    const params: Array<string | number> = [
+      ...startNodeIds,
+      hops, ...allEdgeTypes,
+      hops, ...allEdgeTypes,
+    ];
 
-  // Expand tests (incoming TESTS edges)
-  const tests = bfsExpand(db, {
-    startNodeIds,
-    direction: 'incoming',
-    edgeTypes: ['TESTS'],
-    maxHops: 1,
-    maxNodes: 50,
-  });
-  for (const t of tests) result.tests.add(t.nodeId);
+    const rows = db.exec(sql, params)[0]?.values ?? [];
+
+    for (const row of rows) {
+      const nodeId = String(row[0]);
+      const edgeType = String(row[1]);
+      const isOutgoing = Number(row[2]) === 1;
+      const depth = Number(row[3]);
+
+      if (edgeType === 'CALLS' && !isOutgoing) {
+        result.callers.add(nodeId);
+      } else if (edgeType === 'CALLS' && isOutgoing) {
+        result.callees.add(nodeId);
+      } else if (edgeType === 'REFERENCES' && !isOutgoing) {
+        result.references.add(nodeId);
+      } else if (edgeType === 'IMPORTS' && !isOutgoing && depth <= 1) {
+        result.dependents.add(nodeId);
+      } else if (edgeType === 'TESTS' && !isOutgoing && depth <= 1) {
+        result.tests.add(nodeId);
+      }
+    }
+  } catch (err) {
+    log.warn(`SQL context expansion failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   return result;
 }

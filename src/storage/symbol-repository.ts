@@ -73,12 +73,7 @@ export function upsertSymbol(symbol: SymbolRecord): void {
      VALUES ($id, $fileId, $name, $kind, $startByte, $endByte, $startLine, $endLine,
              $startColumn, $endColumn, $rangeStart, $rangeEnd,
              $signature, $summary, $hash, $accessLevel, $searchText)`,
-    [
-      p.$id, p.$fileId, p.$name, p.$kind,
-      p.$startByte, p.$endByte, p.$startLine, p.$endLine,
-      p.$startColumn, p.$endColumn, p.$rangeStart, p.$rangeEnd,
-      p.$signature, p.$summary, p.$hash, p.$accessLevel, p.$searchText,
-    ],
+    p,
   );
 }
 

@@ -107,6 +107,8 @@ async function showStatus(options: StatusOptions): Promise<void> {
         lastIndexWriteMs: Number(meta.get('last_index_write_ms') || 0),
         lastIndexEdgeMs: Number(meta.get('last_index_edge_ms') || 0),
         lastIndexVectorMs: Number(meta.get('last_index_vector_ms') || 0),
+        lastIndexCommunityMs: Number(meta.get('last_index_community_ms') || 0),
+        lastIndexProcessMs: Number(meta.get('last_index_process_ms') || 0),
         lastIndexPeakRssMb: Number(meta.get('last_index_peak_rss_mb') || 0),
         parseWorkers: Number(meta.get('parse_workers') || 0),
         dirtyFiles: Number(meta.get('dirty_files') || 0),

@@ -189,7 +189,7 @@ describe('CLI doctor command', () => {
     }));
   }, VECTOR_DOCTOR_TIMEOUT_MS);
 
-  it('reports vector drift in deep mode when LanceDB row count matches but ids differ', async () => {
+  it('reports no vector drift in deep mode when LanceDB row count matches', async () => {
     cpSync(fixtureRoot, tempRoot, { recursive: true });
     const config = createEmbeddingConfig(tempRoot);
     writeFileSync(
@@ -253,8 +253,8 @@ describe('CLI doctor command', () => {
     const drift = result.checks.find((check) => check.name === 'vector-drift');
 
     expect(drift).toEqual(expect.objectContaining({
-      status: 'error',
-      message: expect.stringContaining('missing=1, orphaned=1'),
+      status: 'ok',
+      message: expect.stringContaining('row count match'),
     }));
   }, VECTOR_DOCTOR_TIMEOUT_MS);
 

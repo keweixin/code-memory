@@ -28,7 +28,51 @@ jobs:
       - run: npm run pack:check
       - run: npm run test:smoke
       - run: npm run audit:official
-      - run: npm run benchmark:index -- --files 50 --workers 0 --embedding none
-      - run: npm run benchmark:context
-      - run: npm run benchmark:agent
+      - run: npm run benchmark:index -- --files 50 --workers 0 --embedding none > benchmark-index.json 2>&1
+      - run: npm run benchmark:context > benchmark-context.json 2>&1
+      - run: npm run benchmark:agent > benchmark-agent.json 2>&1
+      - name: Archive benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ matrix.os }}-node${{ matrix.node }}
+          path: |
+            benchmark-index.json
+            benchmark-context.json
+            benchmark-agent.json
+      - name: Benchmark performance gate
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: |
+          node -e "
+            const fs = require('fs');
+            const THRESHOLD_THROUGHPUT_DROP = 0.20;
+            const THRESHOLD_MEMORY_INCREASE = 0.30;
+            const EXPECTED_MIN_THROUGHPUT = 5;
+            const EXPECTED_MAX_MEMORY_MB = 500;
+            const warnings = [];
+            try {
+              const raw = fs.readFileSync('benchmark-index.json', 'utf8');
+              const json = JSON.parse(raw.substring(raw.indexOf('{')));
+              if (json.parseThroughputFilesPerSec !== undefined) {
+                const throughput = json.parseThroughputFilesPerSec;
+                if (throughput > 0 && throughput < EXPECTED_MIN_THROUGHPUT * (1 - THRESHOLD_THROUGHPUT_DROP)) {
+                  warnings.push('Index throughput ' + throughput.toFixed(1) + ' files/s dropped >' + (THRESHOLD_THROUGHPUT_DROP * 100) + '% below expected ' + EXPECTED_MIN_THROUGHPUT + ' files/s');
+                }
+              }
+              if (json.peakRssMb !== undefined) {
+                const rss = json.peakRssMb;
+                if (rss > EXPECTED_MAX_MEMORY_MB * (1 + THRESHOLD_MEMORY_INCREASE)) {
+                  warnings.push('Index peak RSS ' + rss + 'MB increased >' + (THRESHOLD_MEMORY_INCREASE * 100) + '% above expected ' + EXPECTED_MAX_MEMORY_MB + 'MB');
+                }
+              }
+            } catch(e) { warnings.push('Failed to parse benchmark-index.json: ' + e.message); }
+            for (const w of warnings) {
+              console.log('::warning::' + w);
+            }
+            if (warnings.length > 0) {
+              console.log('Performance gate warnings: ' + warnings.length);
+            } else {
+              console.log('Performance gate passed.');
+            }
+          "
       - run: node dist/index.js --help

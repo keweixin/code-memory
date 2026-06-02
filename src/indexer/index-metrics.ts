@@ -4,6 +4,8 @@ export interface IndexPhaseMetrics {
   writeMs: number;
   edgeMs: number;
   vectorMs: number;
+  communityMs: number;
+  processMs: number;
   totalMs: number;
   peakRssMb: number;
 }

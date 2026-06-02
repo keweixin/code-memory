@@ -64,11 +64,7 @@ export function createMemory(memory: MemoryRecord): void {
      VALUES ($id, $type, $content, $scope, $evidence, $confidence,
              $createdCommit, $lastValidatedCommit, $invalidationRules,
              $createdAt, $updatedAt)`,
-    [
-      p.$id, p.$type, p.$content, p.$scope, p.$evidence, p.$confidence,
-      p.$createdCommit, p.$lastValidatedCommit, p.$invalidationRules,
-      p.$createdAt, p.$updatedAt,
-    ],
+    p,
   );
 }
 

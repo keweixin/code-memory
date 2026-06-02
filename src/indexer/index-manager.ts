@@ -148,6 +148,10 @@ export class IndexManager {
   private moduleResolver: ModuleResolver | null = null;
   private metadata: IndexMetadataStore;
   private graphBuffer: GraphWriteBuffer;
+  private _lastCommunityMs = 0;
+
+  /** Community detection timing from the most recent run (ms). */
+  get lastCommunityMs(): number { return this._lastCommunityMs; }
 
   constructor(rootPath: string, config: CodeMemoryConfig) {
     this.rootPath = resolve(rootPath);
@@ -170,24 +174,26 @@ export class IndexManager {
     let runStarted = false;
     let runCompleted = false;
     let scanMs = 0;
-    let parseMs = 0;
-    let writeMs = 0;
-    let vectorMs = 0;
-    let edgeMs = 0;
+  let parseMs = 0;
+  let writeMs = 0;
+  let vectorMs = 0;
+  let edgeMs = 0;
+  let communityMs = 0;
+  let processMs = 0;
 
-    try {
-      await this.ensureDb();
-      lock = acquireIndexLock(this.rootPath);
-      await initTreeSitter();
-      await this.prepareVectorStore(true);
+  try {
+    await this.ensureDb();
+    lock = acquireIndexLock(this.rootPath);
+    await initTreeSitter();
+    await this.prepareVectorStore(true);
 
-      this.beginIndexRun(runId, 'full');
-      runStarted = true;
+    this.beginIndexRun(runId, 'full');
+    runStarted = true;
 
-      log.info('Scanning project files...');
-      const scanStart = Date.now();
-      const scanResult = scanProject(this.rootPath, this.config);
-      scanMs = Date.now() - scanStart;
+    log.info('Scanning project files...');
+    const scanStart = Date.now();
+    const scanResult = scanProject(this.rootPath, this.config);
+    scanMs = Date.now() - scanStart;
       this.gitHistoryAvailable = Boolean(scanResult.gitInfo.currentCommit);
       const files = scanResult.files;
       log.info('Discovered ' + files.length + ' files to index');
@@ -235,7 +241,10 @@ export class IndexManager {
       }
       const totalEdges = await this.rebuildGraphEdges('full');
       edgeMs = Date.now() - edgeStart;
+      const processStart = Date.now();
       await this.runProcessAndCommunityDetection();
+      processMs = Date.now() - processStart;
+      communityMs = this.lastCommunityMs;
       const elapsed = Date.now() - startTime;
       this.markIndexRunCommitting(runId);
       this.updateFinalMetadata(scanResult, {
@@ -251,6 +260,8 @@ export class IndexManager {
         writeMs,
         edgeMs,
         vectorMs,
+        communityMs,
+        processMs,
         peakRssMb: metrics.peakRssMb(),
       }, 'full');
 
@@ -298,6 +309,8 @@ export class IndexManager {
     let writeMs = 0;
     let vectorMs = 0;
     let edgeMs = 0;
+    let communityMs = 0;
+    let processMs = 0;
 
     try {
       await this.ensureDb();
@@ -459,7 +472,10 @@ export class IndexManager {
       const edgeStart = Date.now();
       const totalEdges = await this.rebuildGraphEdges(forceAll ? 'full' : 'dirty', expandedDirtyFileIds);
       edgeMs = Date.now() - edgeStart;
+      const processStart = Date.now();
       await this.runProcessAndCommunityDetection();
+      processMs = Date.now() - processStart;
+      communityMs = this.lastCommunityMs;
       const elapsed = Date.now() - startTime;
       if (usedPathAwarePlan) {
         scanResult.stats.totalFiles = this.getTableCount('files');
@@ -478,6 +494,8 @@ export class IndexManager {
         writeMs,
         edgeMs,
         vectorMs,
+        communityMs,
+        processMs,
         peakRssMb: metrics.peakRssMb(),
       }, forceAll ? 'full' : 'incremental');
 
@@ -828,6 +846,8 @@ export class IndexManager {
       writeMs?: number;
       edgeMs?: number;
       vectorMs?: number;
+      communityMs?: number;
+      processMs?: number;
       peakRssMb?: number;
     },
     mode: 'full' | 'incremental',
@@ -889,7 +909,9 @@ export class IndexManager {
    */
   async runProcessAndCommunityDetection(): Promise<void> {
     this.runProcessDetection();
+    const communityStart = Date.now();
     this.runCommunityDetection();
+    this._lastCommunityMs = Date.now() - communityStart;
   }
 
   /**
@@ -1294,11 +1316,10 @@ export class IndexManager {
     const configuredFiles = indexedFiles.filter((file) => file.role === 'source' || file.role === 'test');
     let edgeCount = 0;
 
-    const normalizedRoot = normalizePath(this.rootPath);
-
     for (const config of configs) {
       const configDir = posixPath.dirname(normalizePath(config.path));
-      const isRootConfig = configDir === normalizedRoot;
+      // A config is "root-level" if it sits in the project root (dirname is '.' or '')
+      const isRootConfig = configDir === '.' || configDir === '';
 
       for (const configuredFile of configuredFiles) {
         if (!isRootConfig) {
@@ -1851,17 +1872,24 @@ export class IndexManager {
     const classes = symbols.filter((symbol) => symbol.kind === 'class' || symbol.kind === 'interface');
     const methods = symbols.filter((symbol) => symbol.kind === 'method' || symbol.kind === 'constructor');
 
+    // Group methods by file ID for O(M+C) instead of O(C*M)
+    const methodsByFileId = new Map<string, SymbolRecord[]>();
+    for (const method of methods) {
+      const list = methodsByFileId.get(method.fileId);
+      if (list) list.push(method);
+      else methodsByFileId.set(method.fileId, [method]);
+    }
+
+    // For each class, only check methods in the same file
     for (const cls of classes) {
-      const classMethods = methods.filter((method) => (
-        method.fileId === cls.fileId &&
-        method.startLine >= cls.startLine &&
-        method.endLine <= cls.endLine
-      ));
+      const fileMethods = methodsByFileId.get(cls.fileId) || [];
       const byName = index.get(cls.name) || new Map<string, SymbolRecord[]>();
-      for (const method of classMethods) {
-        const list = byName.get(method.name) || [];
-        list.push(method);
-        byName.set(method.name, list);
+      for (const method of fileMethods) {
+        if (method.startLine >= cls.startLine && method.endLine <= cls.endLine) {
+          const list = byName.get(method.name) || [];
+          list.push(method);
+          byName.set(method.name, list);
+        }
       }
       index.set(cls.name, byName);
     }

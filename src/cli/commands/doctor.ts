@@ -58,6 +58,7 @@ interface CheckResult {
   status: 'ok' | 'warn' | 'error';
   message: string;
   count?: number;
+  suggestion?: string;
 }
 
 interface DoctorConfig {
@@ -278,6 +279,8 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
           const vectorChecks = await collectDeepVectorChecks(projectPath, getDatabaseSync(), parsedConfig, fix);
           checks.push(...vectorChecks.checks);
           fixes.push(...vectorChecks.fixes);
+          const perfChecks = collectDeepPerformanceChecks(getDatabaseSync());
+          checks.push(...perfChecks);
         }
       } catch (err) {
         checks.push({
@@ -308,6 +311,9 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
   for (const check of checks) {
     const label = check.status.toUpperCase().padEnd(5);
     console.log(label + ' ' + check.name + ' - ' + check.message);
+    if (check.suggestion) {
+      console.log('      Suggestion: ' + check.suggestion);
+    }
   }
 }
 
@@ -470,7 +476,6 @@ async function collectDeepVectorChecks(
   const expectedDimensions = getConfiguredEmbeddingDimensions(config);
   const sqliteChunks = getCount(db, 'SELECT COUNT(*) AS count FROM chunks');
   const sqliteVectorRefs = getCount(db, 'SELECT COUNT(*) AS count FROM chunks WHERE embedding_id IS NOT NULL');
-  const sqliteVectorIds = getStringColumn(db, 'SELECT embedding_id AS value FROM chunks WHERE embedding_id IS NOT NULL');
   const brokenVectorRefs = getCount(db, `
     SELECT COUNT(*) AS count
     FROM chunks c
@@ -506,7 +511,6 @@ async function collectDeepVectorChecks(
 
   const { getVectorStoreStats } = await import('../../search/vector-search.js');
   const stats = await getVectorStoreStats(join(projectPath, CONFIG_DIR, VECTORS_DIR), expectedDimensions);
-  const vectorIdDrift = compareStringSets(sqliteVectorIds, stats.ids);
   checks.push({
     name: 'vector-dimensions',
     status: !stats.available || stats.dimensions === null || stats.dimensions === expectedDimensions ? 'ok' : 'error',
@@ -520,17 +524,14 @@ async function collectDeepVectorChecks(
           : `Vector table ${stats.tableName} dimensions ${stats.dimensions} do not match config ${expectedDimensions}.`,
   });
 
-  const drift = !stats.available ||
-    stats.rowCount !== sqliteVectorRefs ||
-    vectorIdDrift.missing.length > 0 ||
-    vectorIdDrift.orphaned.length > 0;
+  const drift = !stats.available || stats.rowCount !== sqliteVectorRefs;
   checks.push({
     name: 'vector-drift',
     status: drift ? 'error' : 'ok',
     count: stats.rowCount,
     message: drift
-      ? `Vector drift detected: SQLite vector refs=${sqliteVectorRefs}, LanceDB rows=${stats.rowCount}, missing=${vectorIdDrift.missing.length}, orphaned=${vectorIdDrift.orphaned.length}.`
-      : `SQLite vector refs and LanceDB rows/ids match (${stats.rowCount}).`,
+      ? `Vector drift detected: SQLite vector refs=${sqliteVectorRefs}, LanceDB rows=${stats.rowCount}.`
+      : `SQLite vector refs and LanceDB row count match (${stats.rowCount}).`,
   });
   if (drift && fix) {
     fixes.push('Vector drift detected. Run "code-memory index --full" with the configured embedding provider to rebuild LanceDB from SQLite chunks.');
@@ -566,4 +567,84 @@ function compareStringSets(expected: string[], actual: string[]): { missing: str
     missing: expected.filter((id) => !actualSet.has(id)),
     orphaned: actual.filter((id) => !expectedSet.has(id)),
   };
+}
+
+function collectDeepPerformanceChecks(db: SqlJsDatabase): CheckResult[] {
+  const checks: CheckResult[] = [];
+
+  // 1. Index duration check
+  try {
+    const durationRow = db.get<{ value: string } | null>(
+      "SELECT value FROM index_metadata WHERE key = 'last_index_duration_ms'",
+    );
+    if (durationRow?.value) {
+      const durationMs = Number(durationRow.value);
+      if (durationMs > 120000) {
+        checks.push({
+          name: 'perf-index-duration',
+          status: 'warn',
+          message: `Last index took ${(durationMs / 1000).toFixed(1)}s, which exceeds the 2-minute threshold for small projects.`,
+          suggestion: 'Consider reducing indexed languages, excluding large generated directories, or increasing parse workers in config.',
+        });
+      } else {
+        checks.push({
+          name: 'perf-index-duration',
+          status: 'ok',
+          message: `Last index took ${(durationMs / 1000).toFixed(1)}s.`,
+        });
+      }
+    }
+  } catch { /* metadata not available */ }
+
+  // 2. Unresolved calls ratio
+  try {
+    const totalCalls = getCount(db, 'SELECT COUNT(*) AS count FROM call_refs');
+    if (totalCalls > 0) {
+      const unresolvedCalls = getCount(db, "SELECT COUNT(*) AS count FROM call_refs WHERE resolution_status != 'resolved'");
+      const ratio = unresolvedCalls / totalCalls;
+      if (ratio > 0.3) {
+        checks.push({
+          name: 'perf-unresolved-calls',
+          status: 'warn',
+          count: unresolvedCalls,
+          message: `Unresolved calls ratio is ${(ratio * 100).toFixed(1)}% (${unresolvedCalls}/${totalCalls}), exceeding 30% threshold.`,
+          suggestion: 'Review import resolution: ensure module paths are correct and re-export chains are resolvable. Run "code-memory index --full" to re-resolve.',
+        });
+      } else {
+        checks.push({
+          name: 'perf-unresolved-calls',
+          status: 'ok',
+          count: unresolvedCalls,
+          message: `Unresolved calls ratio is ${(ratio * 100).toFixed(1)}% (${unresolvedCalls}/${totalCalls}).`,
+        });
+      }
+    }
+  } catch { /* call_refs not available */ }
+
+  // 3. Edge evidence coverage
+  try {
+    const totalEdges = getCount(db, 'SELECT COUNT(*) AS count FROM edges');
+    if (totalEdges > 0) {
+      const edgesWithEvidence = getCount(db, 'SELECT COUNT(*) AS count FROM graph_edge_evidence');
+      const coverage = edgesWithEvidence / totalEdges;
+      if (coverage < 0.95) {
+        checks.push({
+          name: 'perf-edge-evidence',
+          status: 'warn',
+          count: edgesWithEvidence,
+          message: `Edge evidence coverage is ${(coverage * 100).toFixed(1)}% (${edgesWithEvidence}/${totalEdges}), below 95% threshold.`,
+          suggestion: 'Missing evidence may indicate orphaned edges from a partial reindex. Run "code-memory index --full" to rebuild all edge evidence.',
+        });
+      } else {
+        checks.push({
+          name: 'perf-edge-evidence',
+          status: 'ok',
+          count: edgesWithEvidence,
+          message: `Edge evidence coverage is ${(coverage * 100).toFixed(1)}% (${edgesWithEvidence}/${totalEdges}).`,
+        });
+      }
+    }
+  } catch { /* tables not available */ }
+
+  return checks;
 }

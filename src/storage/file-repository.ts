@@ -70,11 +70,7 @@ export function upsertFile(file: FileRecord): void {
         is_generated, is_ignored, exports, imports, summary, risk_level, search_text)
      VALUES ($id, $path, $language, $role, $size, $hash, $indexedAt, $lastCommit,
              $isGenerated, $isIgnored, $exports, $imports, $summary, $riskLevel, $searchText)`,
-    [
-      p.$id, p.$path, p.$language, p.$role, p.$size, p.$hash,
-      p.$indexedAt, p.$lastCommit, p.$isGenerated, p.$isIgnored,
-      p.$exports, p.$imports, p.$summary, p.$riskLevel, p.$searchText,
-    ],
+    p,
   );
 }
 

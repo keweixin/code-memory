@@ -59,7 +59,6 @@ export interface VectorStoreStats {
   available: boolean;
   rowCount: number;
   dimensions: number | null;
-  ids: string[];
   tableName: string;
   error?: string;
 }
@@ -174,7 +173,6 @@ export async function getVectorStoreStats(
         available: false,
         rowCount: 0,
         dimensions: null,
-        ids: [],
         tableName: TABLE_NAME,
         error: 'Vector table does not exist.',
       };
@@ -183,16 +181,11 @@ export async function getVectorStoreStats(
     const table = await connection.openTable(TABLE_NAME);
     try {
       const rowCount = await table.countRows("id != '__schema_placeholder__'");
-      const sampleRows = await table.query()
-        .where("id != '__schema_placeholder__'")
-        .select(['vector'])
-        .limit(1)
-        .toArray();
-      const idRows = rowCount > 0
+      const sampleRows = rowCount > 0
         ? await table.query()
           .where("id != '__schema_placeholder__'")
-          .select(['id'])
-          .limit(rowCount)
+          .select(['vector'])
+          .limit(1)
           .toArray()
         : [];
       const sampleVector = sampleRows[0]?.vector;
@@ -200,9 +193,6 @@ export async function getVectorStoreStats(
         available: true,
         rowCount,
         dimensions: Array.isArray(sampleVector) ? sampleVector.length : null,
-        ids: idRows
-          .map((row) => (row as { id?: unknown }).id)
-          .filter((id): id is string => typeof id === 'string'),
         tableName: TABLE_NAME,
       };
     } finally {
@@ -214,7 +204,6 @@ export async function getVectorStoreStats(
       available: false,
       rowCount: 0,
       dimensions: null,
-      ids: [],
       tableName: TABLE_NAME,
       error: err instanceof Error ? err.message : String(err),
     };

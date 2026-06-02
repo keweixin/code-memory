@@ -61,12 +61,7 @@ export function upsertChunk(chunk: ChunkRecord): void {
         start_column, end_column, content_hash, content, token_count, summary, embedding_id)
      VALUES ($id, $fileId, $symbolId, $startByte, $endByte, $startLine, $endLine,
              $startColumn, $endColumn, $contentHash, $content, $tokenCount, $summary, $embeddingId)`,
-    [
-      p.$id, p.$fileId, p.$symbolId,
-      p.$startByte, p.$endByte, p.$startLine, p.$endLine,
-      p.$startColumn, p.$endColumn, p.$contentHash, p.$content,
-      p.$tokenCount, p.$summary, p.$embeddingId,
-    ],
+    p,
   );
 }
 

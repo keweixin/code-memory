@@ -473,11 +473,28 @@ class NativeStatementAdapter implements SqlJsStatement {
   }
 }
 
+const sqlTemplateCache = new Map<string, { sql: string; paramNames: string[] }>();
+
 function normalizeSqlAndParams(sql: string, params?: Params): { sql: string; params?: unknown[] | Record<string, unknown> } {
-  if (!Array.isArray(params)) return { sql, params };
-  if (!/\$[A-Za-z_][A-Za-z0-9_]*/.test(sql)) return { sql, params };
-  return {
-    sql: sql.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, '?'),
-    params,
-  };
+  if (Array.isArray(params)) {
+    return { sql, params };
+  }
+
+  let cached = sqlTemplateCache.get(sql);
+  if (!cached) {
+    const paramNames: string[] = [];
+    const normalizedSql = sql.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match) => {
+      paramNames.push(match);
+      return '?';
+    });
+    cached = { sql: normalizedSql, paramNames };
+    sqlTemplateCache.set(sql, cached);
+  }
+
+  if (!params) {
+    return { sql: cached.sql };
+  }
+
+  const orderedParams = cached.paramNames.map(name => params[name]);
+  return { sql: cached.sql, params: orderedParams };
 }
