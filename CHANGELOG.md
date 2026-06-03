@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8] - 2026-06-04
+
+### Fixed
+- Print CLI mirror failures directly to stderr even when tool execution runs with silent logging
+- Accept UTF-8 BOM in `code-memory tool --args-file` JSON files, matching Windows PowerShell output
+- Cover `search_code` CLI mirror structured result output and BOM args-file handling in tests
+
 ## [0.3.7] - 2026-06-04
 
 ### Added

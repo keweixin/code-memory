@@ -45,7 +45,11 @@ export function registerToolCommand(program: Command): void {
       try {
         await runMcpToolFromCli(name, options);
       } catch (err) {
-        log.error('Tool command failed', err);
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Tool command failed: ${message}`);
+        if (err instanceof Error && err.stack) {
+          log.debug(err.stack);
+        }
         process.exit(1);
       }
     });
@@ -144,11 +148,15 @@ function parseToolArgs(options: ToolOptions): Record<string, unknown> {
   const raw = options.argsFile
     ? readFileSync(options.argsFile, 'utf-8')
     : options.args || '{}';
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed = JSON.parse(stripUtf8Bom(raw)) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Tool arguments must be a JSON object.');
   }
   return parsed as Record<string, unknown>;
+}
+
+function stripUtf8Bom(value: string): string {
+  return value.charCodeAt(0) === 0xfeff ? value.slice(1) : value;
 }
 
 function parseWithToolSchema(tool: CollectedTool, args: Record<string, unknown>): unknown {

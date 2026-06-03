@@ -101,6 +101,45 @@ describe('CLI MCP tool mirror', () => {
     expect(output).toContain('[Next:');
   });
 
+  it('runs search_code through the CLI mirror with structured result JSON', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runMcpToolFromCli('search_code', {
+      project: tempRoot,
+      args: JSON.stringify({ query: 'AuthService', limit: 1, searchMode: 'keyword' }),
+    });
+
+    const output = logSpy.mock.calls.map(([line]) => String(line)).join('\n');
+    const result = JSON.parse(output.split('\n\n')[0]) as {
+      status: string;
+      project: { root: string; repoName: string; dbPath: string };
+      data: { results: unknown[] };
+      nextAction: { tool?: string; reason: string };
+      display: string;
+    };
+
+    expect(result.status).toBe('ready');
+    expect(result.project.root).toBe(tempRoot);
+    expect(result.data.results.length).toBeGreaterThan(0);
+    expect(result.nextAction.tool).toBe('get_context_pack');
+    expect(result.display).toContain('Search results for: "AuthService"');
+  });
+
+  it('accepts UTF-8 BOM in args files from Windows PowerShell', async () => {
+    const argsFile = join(tempRoot, 'tool-args.json');
+    writeFileSync(argsFile, `\uFEFF${JSON.stringify({ query: 'AuthService', limit: 1, searchMode: 'keyword' })}`, 'utf-8');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runMcpToolFromCli('search_code', {
+      project: tempRoot,
+      argsFile,
+    });
+
+    const output = logSpy.mock.calls.map(([line]) => String(line)).join('\n');
+    const result = JSON.parse(output.split('\n\n')[0]) as { status: string };
+    expect(result.status).toBe('ready');
+  });
+
   it('runs resolve_project for a missing project without requiring an index first', async () => {
     const missingRoot = mkdtempSync(join(tmpdir(), 'code-memory-cli-tool-missing-'));
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
