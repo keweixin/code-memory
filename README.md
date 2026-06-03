@@ -9,21 +9,21 @@ Current source version: `0.3.0`.
 Published npm status can lag the repository. Check before using `@latest`:
 
 ```bash
-npm view code-memory version
+npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.3.0`, the GitHub source is ahead of the published package and `npx code-memory@latest` will not include the setup/bootstrap/tool mirror flow yet.
+If npm reports a version older than `0.3.0`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the setup/bootstrap/tool mirror flow yet.
 
 Run this from the project you want an agent to understand:
 
 ```bash
-npx -y code-memory@latest setup --agent cursor --project .
+npx -y @keweixin/code-memory@latest setup --agent cursor --project .
 ```
 
 Then verify the installation:
 
 ```bash
-npx -y code-memory@latest doctor --project .
+npx -y @keweixin/code-memory@latest doctor --project .
 ```
 
 Reload your IDE after setup. The generated MCP config starts a global router, so the MCP server can start even when the IDE current working directory is not an initialized project.
@@ -45,22 +45,22 @@ The default runtime is `npx`, which avoids global installs:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "code-memory@latest", "serve", "--watch", "--auto-project"]
+  "args": ["-y", "@keweixin/code-memory@latest", "serve", "--watch", "--auto-project"]
 }
 ```
 
 Use a fixed project server only when you explicitly want the MCP process bound to one repository:
 
 ```bash
-npx -y code-memory@latest setup --agent cursor --project . --bind-project
+npx -y @keweixin/code-memory@latest setup --agent cursor --project . --bind-project
 ```
 
 Advanced runtime choices:
 
 ```bash
-npx -y code-memory@latest setup --agent cursor --project . --runtime npx
-npx -y code-memory@latest setup --agent cursor --project . --runtime global
-npx -y code-memory@latest setup --agent cursor --project . --runtime local
+npx -y @keweixin/code-memory@latest setup --agent cursor --project . --runtime npx
+npx -y @keweixin/code-memory@latest setup --agent cursor --project . --runtime global
+npx -y @keweixin/code-memory@latest setup --agent cursor --project . --runtime local
 ```
 
 ## What Setup Does
@@ -79,9 +79,9 @@ npx -y code-memory@latest setup --agent cursor --project . --runtime local
 Useful variants:
 
 ```bash
-npx -y code-memory@latest setup --agent cursor --project . --no-bootstrap
-npx -y code-memory@latest setup --agent cursor --project . --dry-run
-npx -y code-memory@latest analyze --project .
+npx -y @keweixin/code-memory@latest setup --agent cursor --project . --no-bootstrap
+npx -y @keweixin/code-memory@latest setup --agent cursor --project . --dry-run
+npx -y @keweixin/code-memory@latest analyze --project .
 ```
 
 Use `analyze` when you want the index plus project AI context files without writing an agent MCP config.
@@ -89,22 +89,22 @@ Use `analyze` when you want the index plus project AI context files without writ
 ## Verify Success
 
 ```bash
-npx -y code-memory@latest status --project .
-npx -y code-memory@latest doctor --project .
-npx -y code-memory@latest query "auth" --project . --json
+npx -y @keweixin/code-memory@latest status --project .
+npx -y @keweixin/code-memory@latest doctor --project .
+npx -y @keweixin/code-memory@latest query "auth" --project . --json
 ```
 
 If the MCP server is started directly, `serve --watch` also performs safe cold-start bootstrap by default:
 
 ```bash
-npx -y code-memory@latest serve --watch --project .
-npx -y code-memory@latest serve --watch --auto-project
+npx -y @keweixin/code-memory@latest serve --watch --project .
+npx -y @keweixin/code-memory@latest serve --watch --auto-project
 ```
 
 Strict mode for CI or debugging:
 
 ```bash
-npx -y code-memory@latest serve --watch --project . --no-bootstrap
+npx -y @keweixin/code-memory@latest serve --watch --project . --no-bootstrap
 ```
 
 ## Common Commands
@@ -162,7 +162,7 @@ The same workflow appears in MCP tool descriptions, response hints, generated `A
 Every MCP tool also has a CLI mirror:
 
 ```bash
-npx -y code-memory@latest tool plan_context --project . --args "{\"query\":\"find auth flow\"}"
+npx -y @keweixin/code-memory@latest tool plan_context --project . --args "{\"query\":\"find auth flow\"}"
 ```
 
 Core tools:
@@ -275,8 +275,8 @@ More detailed docs:
 ## Uninstall
 
 ```bash
-npx -y code-memory@latest uninstall --agent cursor --project .
-npx -y code-memory@latest uninstall --all --project .
+npx -y @keweixin/code-memory@latest uninstall --agent cursor --project .
+npx -y @keweixin/code-memory@latest uninstall --all --project .
 ```
 
 Uninstall removes managed MCP config entries plus Code Memory managed project onboarding artifacts: generated context blocks, `.claude/skills/code-memory/`, and the generated Claude Code PreToolUse hook. It preserves user-owned content outside those managed blocks.

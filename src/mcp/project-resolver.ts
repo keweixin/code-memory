@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE } from '../shared/constants.js';
+import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE, NPM_PACKAGE_SPEC } from '../shared/constants.js';
 import { findRepo, readRegistry, type RegistryEntry } from '../cli/registry.js';
 import { getIndexStaleness, type IndexFreshness } from '../indexer/staleness.js';
 
@@ -144,7 +144,7 @@ function unresolved(reason: string): ProjectResolution {
     indexStatus: 'unknown',
     status: 'unknown',
     nextAction: 'register_or_pass_project',
-    command: 'npx -y code-memory@latest register --project <absolute-project-path>',
+    command: `npx -y ${NPM_PACKAGE_SPEC} register --project <absolute-project-path>`,
     reason,
   };
 }
@@ -152,15 +152,15 @@ function unresolved(reason: string): ProjectResolution {
 function getCommand(action: ProjectResolutionNextAction, projectRoot: string): string | null {
   if (action === 'use_code_memory') return null;
   if (action === 'index') {
-    return 'npx -y code-memory@latest index --full --project ' + JSON.stringify(projectRoot);
+    return `npx -y ${NPM_PACKAGE_SPEC} index --full --project ` + JSON.stringify(projectRoot);
   }
   if (action === 'sync') {
-    return 'npx -y code-memory@latest sync --project ' + JSON.stringify(projectRoot);
+    return `npx -y ${NPM_PACKAGE_SPEC} sync --project ` + JSON.stringify(projectRoot);
   }
   if (action === 'bootstrap') {
-    return 'npx -y code-memory@latest bootstrap --project ' + JSON.stringify(projectRoot);
+    return `npx -y ${NPM_PACKAGE_SPEC} bootstrap --project ` + JSON.stringify(projectRoot);
   }
-  return 'npx -y code-memory@latest register --project ' + JSON.stringify(projectRoot);
+  return `npx -y ${NPM_PACKAGE_SPEC} register --project ` + JSON.stringify(projectRoot);
 }
 
 function findRepoByRoot(rootPath: string): RegistryEntry | null {

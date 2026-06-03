@@ -68,7 +68,7 @@ describe('ProjectResolver', () => {
     expect(resolution.configExists).toBe(false);
     expect(resolution.indexExists).toBe(false);
     expect(resolution.nextAction).toBe('bootstrap');
-    expect(resolution.command).toContain('npx -y code-memory@latest bootstrap --project');
+    expect(resolution.command).toContain('npx -y @keweixin/code-memory@latest bootstrap --project');
     expect(resolution.projectRoot).toBe(projectRoot);
   });
 
@@ -83,7 +83,7 @@ describe('ProjectResolver', () => {
     expect(resolution.status).toBe('stale');
     expect(resolution.indexStatus).toBe('stale');
     expect(resolution.nextAction).toBe('sync');
-    expect(resolution.command).toContain('npx -y code-memory@latest sync --project');
+    expect(resolution.command).toContain('npx -y @keweixin/code-memory@latest sync --project');
   });
 
   function readyProject(name: string): string {

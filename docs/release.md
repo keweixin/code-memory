@@ -32,10 +32,10 @@ git push origin v0.3.0
 
 The release workflow verifies the tag matches `package.json`, runs the full release gate, creates a GitHub Release, and publishes to npm only when repository secret `NPM_TOKEN` is configured.
 
-Before telling users to rely on `npx -y code-memory@latest`, verify:
+Before telling users to rely on `npx -y @keweixin/code-memory@latest`, verify:
 
 ```bash
-npm view code-memory version
+npm view @keweixin/code-memory version
 ```
 
 It must report the release version.

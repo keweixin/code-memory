@@ -3,7 +3,10 @@
  */
 
 // Version
-export const VERSION = '0.3.1';
+export const VERSION = '0.3.2';
+
+// Published npm package spec used by generated npx commands.
+export const NPM_PACKAGE_SPEC = '@keweixin/code-memory@latest';
 
 // Default config directory name
 export const CONFIG_DIR = '.code-memory';

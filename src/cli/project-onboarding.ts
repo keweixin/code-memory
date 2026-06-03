@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RuntimeName } from './agent-config.js';
+import { NPM_PACKAGE_SPEC } from '../shared/constants.js';
 
 const PROJECT_MARKER_START = '<!-- CODE_MEMORY_CONTEXT_START -->';
 const PROJECT_MARKER_END = '<!-- CODE_MEMORY_CONTEXT_END -->';
@@ -383,7 +384,7 @@ function getHookLaunchSpec(runtime: RuntimeName): { command: string; args: strin
     const distIndexPath = join(dirname(dirname(fileURLToPath(import.meta.url))), 'index.js');
     return { command: 'node', args: [distIndexPath] };
   }
-  return { command: 'npx', args: ['-y', 'code-memory@latest'] };
+  return { command: 'npx', args: ['-y', NPM_PACKAGE_SPEC] };
 }
 
 function applyHookSettings(text: string): string {

@@ -7,6 +7,7 @@ import {
   CODE_MEMORY_MARKER_START,
   getManagedInstructionBlock,
 } from '../mcp/server-instructions.js';
+import { NPM_PACKAGE_SPEC } from '../shared/constants.js';
 
 export type AgentName = 'claude' | 'cursor' | 'codex' | 'gemini' | 'opencode';
 export type AgentSelector = AgentName | 'auto';
@@ -107,7 +108,7 @@ function getMcpLaunchSpec(projectRoot: string, runtime: RuntimeName, bindProject
     const distIndexPath = join(dirname(dirname(fileURLToPath(import.meta.url))), 'index.js');
     return { command: 'node', args: [distIndexPath, ...serveArgs] };
   }
-  return { command: 'npx', args: ['-y', 'code-memory@latest', ...serveArgs] };
+  return { command: 'npx', args: ['-y', NPM_PACKAGE_SPEC, ...serveArgs] };
 }
 
 function buildSetupChange(agent: AgentName, options: AgentConfigOptions): AgentConfigChange {

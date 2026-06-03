@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2] - 2026-06-03
+
+### Fixed
+- Publish under the available scoped npm package name `@keweixin/code-memory`
+- Generated `npx` MCP setup, hook, resolver recovery commands, README, and release docs now use `@keweixin/code-memory@latest`
+- Keep the CLI binary name as `code-memory` while avoiding the already-owned unscoped npm package name
+
 ## [0.3.1] - 2026-06-03
 
 ### Fixed

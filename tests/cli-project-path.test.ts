@@ -119,7 +119,7 @@ describe('CLI --project routing', () => {
     };
     expect(cursorConfig.mcpServers['code-memory']).toEqual({
       command: 'npx',
-      args: ['-y', 'code-memory@latest', 'serve', '--watch', '--auto-project'],
+      args: ['-y', '@keweixin/code-memory@latest', 'serve', '--watch', '--auto-project'],
     });
     expect(readFileSync(join(projectRoot, 'AGENTS.md'), 'utf-8')).toContain('CODE_MEMORY_CONTEXT_START');
     const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');

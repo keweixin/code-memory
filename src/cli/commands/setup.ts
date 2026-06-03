@@ -6,6 +6,7 @@ import {
   type RuntimeName,
 } from '../agent-config.js';
 import { createLogger } from '../../shared/logger.js';
+import { NPM_PACKAGE_SPEC } from '../../shared/constants.js';
 import { resolveProjectPath } from '../project-path.js';
 import {
   formatProjectOnboardingChanges,
@@ -99,5 +100,5 @@ function formatMcpCommand(runtime: RuntimeName, projectRoot: string, bindProject
     : ['serve', '--watch', '--auto-project'];
   if (runtime === 'global') return ['code-memory', ...args].join(' ');
   if (runtime === 'local') return ['node', '<local dist/index.js>', ...args].join(' ');
-  return ['npx', '-y', 'code-memory@latest', ...args].join(' ');
+  return ['npx', '-y', NPM_PACKAGE_SPEC, ...args].join(' ');
 }

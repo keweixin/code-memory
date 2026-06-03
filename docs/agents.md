@@ -14,7 +14,7 @@ Runtime options:
 
 | Runtime | MCP command |
 |---|---|
-| `npx` | `npx -y code-memory@latest serve --watch --auto-project` |
+| `npx` | `npx -y @keweixin/code-memory@latest serve --watch --auto-project` |
 | `global` | `code-memory serve --watch --auto-project` |
 | `local` | `node <absolute dist/index.js> serve --watch --auto-project` |
 

@@ -39,7 +39,7 @@ try {
   const server = cursorConfig.mcpServers?.['code-memory'];
   if (
     server?.command !== 'npx' ||
-    !server.args?.includes('code-memory@latest') ||
+    !server.args?.includes('@keweixin/code-memory@latest') ||
     !server.args?.includes('--auto-project') ||
     server.args?.includes('--project')
   ) {
@@ -49,7 +49,7 @@ try {
     throw new Error('Packed setup smoke failed to write AGENTS.md Code Memory context.');
   }
 
-  const bin = join(temp, 'node_modules', 'code-memory', 'dist', 'index.js');
+  const bin = join(temp, 'node_modules', '@keweixin', 'code-memory', 'dist', 'index.js');
   const runCodeMemory = (args) => execFileSync(process.execPath, [bin, ...args], { cwd: temp, stdio: 'inherit' });
   runCodeMemory(['--help']);
   runCodeMemory(['init', '--embedding', 'none']);
