@@ -2,85 +2,38 @@
 
 > **Autonomous knowledge graph for AI coding agents.** Zero-command setup, self-healing stale memory, evidence-backed context, and multi-repo awareness — all local-first.
 
-```bash
-# Zero-command: AI handles everything
-npx code-memory serve --watch
+---
 
-# Or manual one-time setup
-npx code-memory@latest init && npx code-memory@latest index --full
+## Quick Start
+
+Add this to your IDE's MCP settings, then reload:
+
+```json
+{
+  "mcpServers": {
+    "code-memory": {
+      "command": "npx",
+      "args": ["code-memory@latest", "serve", "--watch"]
+    }
+  }
+}
 ```
+
+Done. No `npm install`, no `cwd` path — `npx` auto-downloads and runs in whatever project you have open.
 
 ---
 
 ## What It Does
 
-Code Memory gives AI agents **persistent memory and code understanding** that survives across sessions. It builds a local SQLite knowledge graph of your entire codebase — symbols, calls, imports, routes, tests, and project facts — then serves it through 26 MCP tools.
-
 **Three killer features AI agents actually need:**
 
 | Capability | Without Code Memory | With Code Memory |
 |---|---|---|
-| New project indexing | AI crashes, user runs commands | **AI auto-initializes via bootstrap protocol** |
-| Code changed, memory stale | AI uses outdated facts silently | **Auto-detects staleness, pushes `[CRITICAL ALERT]` banner** |
-| Multi-repo work | Wrong database, wrong answers | **`repo` parameter routes every tool to the correct DB** |
-| Repeated context in long sessions | Wastes tokens on same code | **Context Ledger tracks what was shown, deduplicates** |
-| "Why did you include this file?" | No explanation | **Every snippet comes with evidence lines** |
-
----
-
-## Quick Start
-
-### 1. Add MCP config to your IDE
-
-```json
-{
-  "mcpServers": {
-    "code-memory": {
-      "command": "npx",
-      "args": ["code-memory@latest", "serve", "--watch"]
-    }
-  }
-}
-```
-
-### 2. Reload IDE window
-
-That's it. The first time AI connects, it will:
-1. `npx` auto-downloads code-memory (no `npm install` needed)
-2. Detect no index exists → auto-run `init` and `index --full`
-3. Once indexed → all 26 tools work immediately
-4. As you edit code → watcher auto-updates, stale memories get flagged
-
-### MCP Config
-
-Add to your IDE's MCP settings:
-
-```json
-{
-  "mcpServers": {
-    "code-memory": {
-      "command": "npx",
-      "args": ["code-memory@latest", "serve", "--watch"]
-    }
-  }
-}
-```
-
-No `cwd` needed — `npx` inherits the IDE workspace directory automatically. Opens in project A → serves A. Opens in project B → serves B.
-
-Or if you prefer a fixed path:
-
-```json
-{
-  "mcpServers": {
-    "code-memory": {
-      "command": "npx",
-      "args": ["code-memory@latest", "serve", "--watch"],
-      "cwd": "${workspaceFolder}"
-    }
-  }
-}
-```
+| New project, no index | AI crashes, human runs commands | **AI auto-initializes via bootstrap protocol** |
+| Code changed, memory stale | AI uses outdated facts silently | **Auto-detects staleness, pushes `[CRITICAL ALERT]`** |
+| Multi-repo work | Wrong database, wrong answers | **`repo` param routes every tool to correct DB** |
+| Long session, repeated context | Wastes tokens on same code | **Context Ledger tracks & deduplicates** |
+| "Why this file?" | No explanation | **Evidence lines on every snippet** |
 
 ---
 
@@ -89,10 +42,10 @@ Or if you prefer a fixed path:
 ```
 You edit code → watcher auto-reindexes → MemoryManager degrades stale facts
                                                      ↓
-AI starts new task → server-instructions force plan_context first
+AI starts new task → instructions force plan_context first
                                                      ↓
-If index missing → [BOOTSTRAP PROTOCOL] guides AI to initialize
-If code changed → [CRITICAL ALERT] banner warns AI about stale memories
+If no index → [BOOTSTRAP PROTOCOL] guides AI to npx code-memory@latest init && index --full
+If code changed → [CRITICAL ALERT] warns AI about stale memories
                                                      ↓
 AI auto-calls invalidate_memory + remember_project_fact
                                                      ↓
@@ -162,21 +115,20 @@ Clean context, fresh facts, zero human intervention
 
 ---
 
-## CLI Commands
+## CLI Commands (via npx)
 
 ```bash
-code-memory init              # Initialize project for indexing
-code-memory index             # Build/update index (--full for rebuild)
-code-memory query "auth"      # Ad-hoc search from terminal
-code-memory status            # Index freshness and stats
-code-memory doctor            # Diagnose config, schema, grammar
-code-memory serve --watch     # Start MCP server with file watcher
-code-memory watch             # Background file watcher only
-code-memory sync              # Manual re-sync on demand
-code-memory wiki              # Export wiki.json for LLM consumption
-code-memory register my-app   # Register repo for multi-repo routing
-code-memory list              # List registered repos
-code-memory unregister my-app # Remove from registry
+npx code-memory@latest init              # Initialize project
+npx code-memory@latest index --full      # Full re-index
+npx code-memory@latest query "auth"      # Ad-hoc search
+npx code-memory@latest status            # Index freshness
+npx code-memory@latest doctor            # Diagnose config
+npx code-memory@latest serve --watch     # MCP server + file watcher
+npx code-memory@latest watch             # Background watcher only
+npx code-memory@latest register my-app   # Register for multi-repo
+npx code-memory@latest list              # List registered repos
+npx code-memory@latest unregister my-app # Remove from registry
+npx code-memory@latest wiki              # Export wiki.json
 ```
 
 ---
@@ -190,32 +142,28 @@ code-memory unregister my-app # Remove from registry
 | Python | yes | partial | partial | FastAPI | partial | beta |
 | Go | yes | partial | partial | — | partial | beta |
 
-TSX parsing uses bundled `tree-sitter-tsx.wasm`. Weak/inferred edges are flagged with lower confidence scores.
-
 ---
 
 ## Vector Search (Optional)
 
 ```bash
 # Ollama (local, free)
-code-memory init --embedding ollama --embedding-model nomic-embed-text
-code-memory index --full
+npx code-memory@latest init --embedding ollama --embedding-model nomic-embed-text
+npx code-memory@latest index --full
 
 # OpenAI
 $env:CODE_MEMORY_EMBEDDING_API_KEY = "sk-..."
-code-memory init --embedding openai --embedding-model text-embedding-3-small
-code-memory index --full
+npx code-memory@latest init --embedding openai --embedding-model text-embedding-3-small
+npx code-memory@latest index --full
 ```
-
-Secrets are resolved from env vars first: `CODE_MEMORY_EMBEDDING_API_KEY` → `OPENAI_API_KEY` → legacy config fallback.
 
 ---
 
 ## Multi-Repo
 
 ```bash
-code-memory register --name backend
-code-memory register --name frontend
+npx code-memory@latest register --name backend
+npx code-memory@latest register --name frontend
 ```
 
 Then pass `repo` to any tool:
@@ -226,22 +174,9 @@ Then pass `repo` to any tool:
 
 ---
 
-## Performance
-
-2000-file project benchmarks:
-- Parse throughput: 90+ files/sec
-- Memory: under 900MB peak RSS
-- FTS5 + graph search: sub-200ms P95
-
-```bash
-npm run benchmark:index -- --files 2000 --workers auto --embedding none
-```
-
----
-
 ## Privacy
 
-Everything runs locally. No telemetry. No code uploads. The only external calls are optional embedding API requests if you configure a provider. Keep `.code-memory/` in `.gitignore`.
+Everything runs locally. No telemetry. No code uploads. The only external calls are optional embedding API requests. Keep `.code-memory/` in `.gitignore`.
 
 ---
 
