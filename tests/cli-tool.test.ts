@@ -70,6 +70,10 @@ describe('CLI MCP tool mirror', () => {
     expect(output).toContain('plan_context');
     expect(output).toContain('search_symbols');
     expect(output).toContain('impact_analysis');
+    expect(output).toContain('mark_context_used');
+    expect(output).toContain('before sending more context');
+    expect(output.match(/resolve_project\t/g)).toHaveLength(1);
+    expect(output.match(/resolve_project\t.*WHEN TO USE/g)).toHaveLength(1);
   });
 
   it('runs an MCP tool handler through the CLI mirror', async () => {

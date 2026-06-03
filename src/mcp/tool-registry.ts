@@ -84,6 +84,7 @@ function withResponseTiming(server: McpServer): McpServer {
 }
 
 function appendToolDescriptionGuidance(toolName: string, description: string): string {
+  if (description.includes('WHEN TO USE:')) return description;
   const guidance = getToolWorkflowGuidance(toolName);
   if (!guidance) return description;
   return description + " " + guidance;
@@ -97,7 +98,22 @@ function getToolWorkflowGuidance(toolName: string): string {
     return 'WHEN TO USE: first call for a new task, repo switch, missing index, or cwd mismatch. AFTER THIS: call plan_context if ready, otherwise run the returned bootstrap/index command.';
   }
   if (toolName === 'get_context_pack' || toolName === 'search_code') {
-    return 'WHEN TO USE: understand a feature or find code after plan_context. AFTER THIS: call search_symbols, then find_definition or find_references for exact symbols.';
+    return 'WHEN TO USE: understand a feature or find code after plan_context. AFTER THIS: call search_symbols for exact symbols; when returning context to an agent, call mark_context_used or use sessionId with get_context_pack.';
+  }
+  if (toolName === 'mark_context_used') {
+    return 'WHEN TO USE: after returning context that was not automatically ledgered by get_context_pack. AFTER THIS: use get_context_delta or avoid_repeated_context before sending more context for the same session.';
+  }
+  if (toolName === 'get_context_delta' || toolName === 'avoid_repeated_context') {
+    return 'WHEN TO USE: before returning more files, symbols, chunks, or evidence for an existing session. AFTER THIS: prefer the kept/new context and call mark_context_used after sending it.';
+  }
+  if (toolName === 'explain_why_this_context') {
+    return 'WHEN TO USE: when an agent doubts whether a returned file, symbol, or chunk is repeated, stale, useful, or irrelevant. AFTER THIS: apply feedback if needed, then continue with get_context_delta.';
+  }
+  if (toolName === 'compact_session_context') {
+    return 'WHEN TO USE: when a long session needs a compact ledger summary instead of rereading prior snippets. AFTER THIS: use get_context_delta for the next candidate context.';
+  }
+  if (toolName === 'reset_context_session') {
+    return 'WHEN TO USE: when a materially new task starts and the old session ledger should not penalize retrieval. AFTER THIS: restart with resolve_project -> plan_context.';
   }
   if (toolName === 'search_symbols' || toolName === 'find_definition' || toolName === 'find_references') {
     return 'WHEN TO USE: locate and inspect named symbols. AFTER THIS: call impact_analysis before editing shared code, public contracts, or startup/index lifecycle paths.';
@@ -122,7 +138,22 @@ function getNextStepHint(toolName: string): string {
     return '[Next: if status is ready call plan_context; otherwise run the returned bootstrap/index command.]';
   }
   if (toolName === 'get_context_pack' || toolName === 'search_code') {
-    return '[Next: pick a symbol/file from the results, then call search_symbols -> find_definition/find_references.]';
+    return '[Next: pick a symbol/file from the results; call search_symbols for precision; call mark_context_used when manually returning context outside get_context_pack.]';
+  }
+  if (toolName === 'mark_context_used') {
+    return '[Next: before sending more context for this session, call get_context_delta or avoid_repeated_context.]';
+  }
+  if (toolName === 'get_context_delta' || toolName === 'avoid_repeated_context') {
+    return '[Next: return the new/kept context, then call mark_context_used if get_context_pack did not record it automatically.]';
+  }
+  if (toolName === 'explain_why_this_context') {
+    return '[Next: use feedback to adjust retrieval; call get_context_delta before adding more context.]';
+  }
+  if (toolName === 'compact_session_context') {
+    return '[Next: continue with get_context_delta for candidate files/symbols, or reset_context_session for a new task.]';
+  }
+  if (toolName === 'reset_context_session') {
+    return '[Next: restart context retrieval with resolve_project -> plan_context -> get_context_pack.]';
   }
   if (toolName === 'search_symbols' || toolName === 'find_definition' || toolName === 'find_references') {
     return '[Next: before editing, call impact_analysis on the exact symbol or file; after editing, call get_related_tests.]';
@@ -212,5 +243,5 @@ export function registerAllTools(
   // ---- Multi-Repo ----
   registerGetUnifiedRepoMapTool(timedServer, db);
 
-  log.info("All 26 MCP tools registered");
+  log.info("All MCP tools registered");
 }
