@@ -36,7 +36,7 @@ jobs:
       - run: npm run benchmark:agent > benchmark-agent.json 2>&1
       - name: Archive benchmark results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: benchmark-${{ matrix.os }}-node${{ matrix.node }}
           path: |
