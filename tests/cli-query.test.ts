@@ -137,4 +137,24 @@ describe('CLI query command', () => {
     });
     expect(logSpy).toHaveBeenCalledWith('[]');
   });
+
+  it('can query an explicit --project path when cwd is elsewhere', async () => {
+    process.chdir(tmpdir());
+    const searchSpy = vi
+      .spyOn(HybridSearchEngine.prototype, 'searchCode')
+      .mockResolvedValue([]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await queryIndex('login', {
+      limit: '2',
+      project: tempRoot,
+      json: true,
+    });
+
+    expect(searchSpy).toHaveBeenCalledWith('login', {
+      limit: 2,
+      searchMode: 'hybrid',
+    });
+    expect(logSpy).toHaveBeenCalledWith('[]');
+  });
 });

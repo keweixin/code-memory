@@ -74,7 +74,7 @@ export function registerSearchCodeTool(
             const modeHint = searchMode === 'graph'
               ? "\n\nGraph mode only expands from indexed symbols that match the query. Try 'hybrid' or 'keyword' mode first if there is no obvious seed symbol."
               : searchMode === 'vector'
-                ? "\n\nVector mode only searches indexed chunk embeddings. Configure embeddings, run 'code-memory index --full', and use 'hybrid' or 'keyword' mode if no vectors are present."
+                ? "\n\nVector mode only searches indexed chunk embeddings. Configure embeddings, run 'code-memory bootstrap --project .', and use 'hybrid' or 'keyword' mode if no vectors are present."
                 : "";
             return {
               content: [{
@@ -104,7 +104,7 @@ export function registerSearchCodeTool(
           return {
             content: [{
               type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
             }],
             isError: false,
           };

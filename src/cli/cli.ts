@@ -19,6 +19,8 @@ import { registerWatchCommand } from './commands/watch.js';
 import { registerRegistryCommands } from './commands/registry.js';
 import { registerWikiCommand } from './commands/wiki.js';
 import { registerBootstrapCommand } from './commands/bootstrap.js';
+import { registerAnalyzeCommand } from './commands/analyze.js';
+import { registerToolCommand } from './commands/tool.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -41,6 +43,8 @@ export function createCli(): Command {
   registerRegistryCommands(program);
   registerWikiCommand(program);
   registerBootstrapCommand(program);
+  registerAnalyzeCommand(program);
+  registerToolCommand(program);
 
   return program;
 }

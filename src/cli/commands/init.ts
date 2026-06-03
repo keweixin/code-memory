@@ -13,8 +13,11 @@ import {
 } from '../../shared/constants.js';
 import { DEFAULT_TOKEN_BUDGETS } from '../../shared/types.js';
 import { createLogger } from '../../shared/logger.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('init');
+
+export const INIT_NEXT_STEP_MESSAGE = '\nNext step: Run "code-memory bootstrap --project ." to build the project graph, or "code-memory setup --project ." for full AI onboarding.';
 
 export function registerInitCommand(program: Command): void {
   program
@@ -27,6 +30,7 @@ export function registerInitCommand(program: Command): void {
     .option('--embedding-model <model>', 'Embedding model name')
     .option('-i, --index', 'Run a full index immediately after writing config')
     .option('--workers <n>', 'Parse worker count for --index: auto, 0, or a positive integer')
+    .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .action(async (options) => {
       try {
         await initProject(options);
@@ -45,10 +49,11 @@ interface InitOptions {
   embeddingModel?: string;
   index?: boolean;
   workers?: string;
+  project?: string;
 }
 
 export async function initProject(options: InitOptions): Promise<void> {
-  const projectPath = process.cwd();
+  const projectPath = resolveProjectPath(options);
   const configDir = join(projectPath, CONFIG_DIR);
 
   // Detect project name
@@ -108,7 +113,7 @@ export async function initProject(options: InitOptions): Promise<void> {
     const { indexProject } = await import('./index.js');
     await indexProject(projectPath, { full: true, workers: options.workers || 'auto' });
   } else {
-    log.info(`\nNext step: Run "code-memory index" to build the project graph.`);
+    log.info(INIT_NEXT_STEP_MESSAGE);
   }
 }
 

@@ -9,6 +9,7 @@ import type { CodeMemoryConfig } from '../../shared/types.js';
 import { CONFIG_DIR, CONFIG_FILE } from '../../shared/constants.js';
 import { createLogger } from '../../shared/logger.js';
 import { stripUtf8Bom } from '../../shared/utils.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('serve');
 
@@ -19,6 +20,7 @@ export function registerServeCommand(program: Command): void {
     .option('--mcp', 'Use MCP stdio transport (default)', true)
     .option('--no-mcp', 'Fail clearly; alternate transports are not supported yet')
     .option('--watch', 'Keep the index synchronized while serving MCP')
+    .option('--no-bootstrap', 'Do not auto-initialize or index before serving')
     .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .action(async (options) => {
       try {
@@ -37,10 +39,12 @@ export function registerServeCommand(program: Command): void {
 interface ServeOptions {
   mcp?: boolean;
   watch?: boolean;
+  bootstrap?: boolean;
   project?: string;
 }
 
 export type ServeErrorCode =
+  | 'BOOTSTRAP_FAILED'
   | 'CONFIG_MISSING'
   | 'CONFIG_INVALID_JSON'
   | 'CONFIG_INVALID_SCHEMA'
@@ -61,6 +65,7 @@ export class ServeCommandError extends Error {
 }
 
 export interface ServeDependencies {
+  bootstrapProject?: (options: { project: string; embedding?: string; workers?: string }) => Promise<void>;
   startIndexWatcher?: (projectPath: string, config: CodeMemoryConfig) => unknown;
   startMcpServer?: (
     projectPath: string,
@@ -69,15 +74,19 @@ export interface ServeDependencies {
 }
 
 export async function startServer(options: ServeOptions, deps: ServeDependencies = {}): Promise<void> {
-  const projectPath = options.project
-    ?? process.env.CODE_MEMORY_PROJECT
-    ?? process.cwd();
+  const projectPath = resolveProjectPath(options);
 
   if (options.mcp === false) {
     throw new ServeCommandError(
       'UNSUPPORTED_TRANSPORT',
       '--no-mcp is not supported yet. code-memory serve currently supports MCP stdio only.',
     );
+  }
+
+  if (options.watch) {
+    if (options.bootstrap !== false) {
+      await bootstrapBeforeServe(projectPath, deps);
+    }
   }
 
   const config = loadServeConfig(projectPath);
@@ -104,12 +113,25 @@ export async function startServer(options: ServeOptions, deps: ServeDependencies
   }
 }
 
+async function bootstrapBeforeServe(projectPath: string, deps: ServeDependencies): Promise<void> {
+  try {
+    const bootstrap = deps.bootstrapProject ?? (await import('./bootstrap.js')).bootstrapProject;
+    await bootstrap({ project: projectPath, embedding: 'none', workers: 'auto' });
+  } catch (err) {
+    throw new ServeCommandError(
+      'BOOTSTRAP_FAILED',
+      'Auto-bootstrap failed. Run "code-memory bootstrap --project ' + projectPath + '" or retry with --no-bootstrap for strict startup.',
+      err,
+    );
+  }
+}
+
 export function loadServeConfig(projectPath: string = process.cwd()): CodeMemoryConfig {
   const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
   if (!existsSync(configPath)) {
     throw new ServeCommandError(
       'CONFIG_MISSING',
-      'Missing config. Run "code-memory init" first.',
+      'Missing config. Run "code-memory setup --project ." for full AI onboarding, or omit --no-bootstrap so serve can initialize automatically.',
     );
   }
 
@@ -127,7 +149,7 @@ export function loadServeConfig(projectPath: string = process.cwd()): CodeMemory
   if (!isServeConfig(parsed)) {
     throw new ServeCommandError(
       'CONFIG_INVALID_SCHEMA',
-      'Config JSON is missing required code-memory fields. Run "code-memory init" to recreate it.',
+      'Config JSON is missing required code-memory fields. Run "code-memory setup --project ." to recreate onboarding, or "code-memory init --project ." for config-only setup.',
     );
   }
 

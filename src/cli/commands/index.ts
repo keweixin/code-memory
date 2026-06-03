@@ -9,6 +9,7 @@ import { CONFIG_DIR, CONFIG_FILE } from '../../shared/constants.js';
 import type { CodeMemoryConfig } from '../../shared/types.js';
 import { createLogger } from '../../shared/logger.js';
 import { safeJsonParse } from '../../shared/utils.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('index');
 
@@ -20,10 +21,11 @@ export function registerIndexCommand(program: Command): void {
     .option('--workers <n>', 'Parse worker count: auto, 0, or a positive integer')
     .option('--embedding-batch-size <n>', 'Chunk embedding batch size')
     .option('--embedding-concurrency <n>', 'Chunk embedding concurrency')
+    .option('--project <path>', 'Project root path (overrides positional path, cwd, and CODE_MEMORY_PROJECT env)')
     .option('-v, --verbose', 'Show detailed progress')
     .action(async (path, options) => {
       try {
-        await indexProject(path || process.cwd(), options);
+        await indexProject(resolveProjectPath(options, path), options);
       } catch (err) {
         log.error('Indexing failed', err);
         process.exit(1);
@@ -37,6 +39,7 @@ export interface IndexOptions {
   workers?: string;
   embeddingBatchSize?: string;
   embeddingConcurrency?: string;
+  project?: string;
 }
 
 export async function indexProject(projectPath: string, options: IndexOptions): Promise<void> {
@@ -52,7 +55,7 @@ export async function indexProject(projectPath: string, options: IndexOptions): 
     if (!parsed) throw new Error('Invalid config JSON');
     config = parsed;
   } catch {
-    log.error('No config found. Run "code-memory init" first.');
+    log.error('No config found. Run "code-memory setup --project ." for full AI onboarding, or "code-memory init --project ." for config-only setup.');
     process.exit(1);
   }
 

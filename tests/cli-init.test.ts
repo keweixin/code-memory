@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initProject } from '../src/cli/commands/init.js';
+import { INIT_NEXT_STEP_MESSAGE, initProject } from '../src/cli/commands/init.js';
 
 describe('CLI init command', () => {
   let tempRoot: string;
@@ -39,5 +39,10 @@ describe('CLI init command', () => {
 
     expect(config.embedding.provider).toBe('openai');
     expect(config.embedding.model).toBe('text-embedding-3-small');
+  });
+
+  it('points first-run users to bootstrap or setup after config-only init', () => {
+    expect(INIT_NEXT_STEP_MESSAGE).toContain('code-memory bootstrap --project .');
+    expect(INIT_NEXT_STEP_MESSAGE).toContain('code-memory setup --project .');
   });
 });

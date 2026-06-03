@@ -6,26 +6,46 @@
 
 ## Quick Start
 
-Add this to your IDE's MCP settings, then reload:
+Run setup from the project you want indexed, then reload your IDE:
+
+```bash
+npx code-memory@latest setup --agent codex
+```
+
+`setup` runs a safe bootstrap, writes an MCP config that uses `npx -y code-memory@latest serve --watch --project <absolute-path>`, and installs project AI context files under `AGENTS.md`, `CLAUDE.md`, and `.claude/skills/code-memory/`. The IDE does not need a global install and does not depend on its current working directory.
+
+Use `analyze` when you want the index plus project AI context files without changing an agent MCP config:
+
+```bash
+npx code-memory@latest analyze --project .
+```
+
+Manual MCP config, if you prefer to edit settings yourself:
 
 ```json
 {
   "mcpServers": {
     "code-memory": {
       "command": "npx",
-      "args": ["code-memory@latest", "serve", "--watch"]
+      "args": ["-y", "code-memory@latest", "serve", "--watch", "--project", "/absolute/path/to/project"]
     }
   }
 }
 ```
 
-First time in a project?
+That's it. `serve --watch` auto-runs safe bootstrap on cold start: if no config exists it runs `init` + `index --full`; if config exists but no index exists it runs `index --full`; if an index exists it runs an incremental update before serving MCP.
+
+Need strict startup for CI or debugging?
 
 ```bash
-npx code-memory@latest bootstrap
+npx code-memory@latest serve --watch --no-bootstrap --project .
 ```
 
-That's it. `bootstrap` checks if `.code-memory/index.db` exists, and if not runs `init` + `index --full` automatically.
+You can also run bootstrap manually:
+
+```bash
+npx code-memory@latest bootstrap --project .
+```
 
 ---
 
@@ -50,7 +70,7 @@ You edit code → watcher auto-reindexes → MemoryManager degrades stale facts
                                                      ↓
 AI starts new task → instructions force plan_context first
                                                      ↓
-If no index → [BOOTSTRAP PROTOCOL] guides AI to npx code-memory@latest init && index --full
+If no index → serve --watch auto-runs bootstrap, or [BOOTSTRAP PROTOCOL] guides AI to npx code-memory@latest bootstrap --project .
 If code changed → [CRITICAL ALERT] warns AI about stale memories
                                                      ↓
 AI auto-calls invalidate_memory + remember_project_fact
@@ -61,6 +81,12 @@ Clean context, fresh facts, zero human intervention
 ---
 
 ## 26 MCP Tools
+
+Every tool description now includes `WHEN TO USE` / `AFTER THIS` guidance, and tool responses append a compact next-step hint. The default agent path is:
+
+```text
+plan_context -> get_context_pack/search_code -> search_symbols/find_definition -> impact_analysis -> get_related_tests
+```
 
 ### Navigation & Discovery
 | Tool | Purpose |
@@ -121,13 +147,32 @@ Clean context, fresh facts, zero human intervention
 
 ---
 
+## MCP Resources
+
+Resources are read-only project maps for agents that need orientation before choosing a tool:
+
+| Resource | Purpose |
+|---|---|
+| `code-memory://repos` | Registered repositories |
+| `code-memory://repo/{name}/context` | Project identity, index status, languages, communities, recommended workflow |
+| `code-memory://repo/{name}/symbols` | Top indexed symbols with file and line locations |
+| `code-memory://repo/{name}/flows` | Indexed execution flows/processes |
+| `code-memory://repo/{name}/schema` | Code Memory database schema map |
+
+---
+
 ## CLI Commands (via npx)
 
 ```bash
 npx code-memory@latest bootstrap         # Auto-init: detect + init + index
+npx code-memory@latest analyze           # Bootstrap + AGENTS/CLAUDE + skills/hooks, no MCP config write
+npx code-memory@latest setup             # Configure Codex MCP using npx + absolute --project
+npx code-memory@latest setup --runtime global # Use a global code-memory binary instead of npx
 npx code-memory@latest init              # Initialize project
 npx code-memory@latest index --full      # Full re-index
-npx code-memory@latest query "auth"      # Ad-hoc search
+npx code-memory@latest query "auth" --project . --json # Ad-hoc search / hook mirror
+npx code-memory@latest tool --list --project . # List MCP tools available through CLI mirror
+npx code-memory@latest tool plan_context --project . --args '{"task":"find auth flow"}' # Run any MCP tool from CLI
 npx code-memory@latest status            # Index freshness
 npx code-memory@latest doctor            # Diagnose config
 npx code-memory@latest serve --watch     # MCP server + file watcher
@@ -137,6 +182,8 @@ npx code-memory@latest list              # List registered repos
 npx code-memory@latest unregister my-app # Remove from registry
 npx code-memory@latest wiki              # Export wiki.json
 ```
+
+Every MCP tool has the same debugging path outside an agent: run `code-memory tool <tool_name> --project <path> --args '<json>'`. This keeps CLI and MCP behavior aligned because the command invokes the registered MCP tool handler directly.
 
 ---
 

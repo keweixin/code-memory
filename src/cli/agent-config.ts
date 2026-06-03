@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   CODE_MEMORY_MARKER_END,
   CODE_MEMORY_MARKER_START,
@@ -8,6 +8,12 @@ import {
 } from '../mcp/server-instructions.js';
 
 export type AgentName = 'claude' | 'cursor' | 'codex' | 'gemini' | 'opencode';
+export type RuntimeName = 'npx' | 'global' | 'local';
+
+interface McpLaunchSpec {
+  command: string;
+  args: string[];
+}
 
 export interface AgentConfigChange {
   agent: AgentName;
@@ -24,6 +30,7 @@ export interface AgentConfigOptions {
   dryRun?: boolean;
   projectRoot?: string;
   homeDir?: string;
+  runtime?: RuntimeName;
 }
 
 export const SUPPORTED_AGENTS: AgentName[] = ['claude', 'cursor', 'codex', 'gemini', 'opencode'];
@@ -71,15 +78,34 @@ function getHomeDir(options: AgentConfigOptions): string {
 }
 
 function getProjectRoot(options: AgentConfigOptions): string {
-  return options.projectRoot || process.cwd();
+  return resolve(options.projectRoot || process.cwd());
+}
+
+function getRuntime(options: AgentConfigOptions): RuntimeName {
+  const runtime = options.runtime || 'npx';
+  if (runtime === 'npx' || runtime === 'global' || runtime === 'local') return runtime;
+  throw new Error('--runtime must be one of: npx, global, local');
+}
+
+function getMcpLaunchSpec(projectRoot: string, runtime: RuntimeName): McpLaunchSpec {
+  const serveArgs = ['serve', '--watch', '--project', projectRoot];
+  if (runtime === 'global') {
+    return { command: 'code-memory', args: serveArgs };
+  }
+  if (runtime === 'local') {
+    return { command: 'npx', args: ['code-memory', ...serveArgs] };
+  }
+  return { command: 'npx', args: ['-y', 'code-memory@latest', ...serveArgs] };
 }
 
 function buildSetupChange(agent: AgentName, options: AgentConfigOptions): AgentConfigChange {
   const filePath = getAgentConfigPath(agent, options);
   const before = readText(filePath);
+  const projectRoot = getProjectRoot(options);
+  const launch = getMcpLaunchSpec(projectRoot, getRuntime(options));
   const after = isJsonAgent(agent)
-    ? applyJsonMcpConfig(before, getProjectRoot(options))
-    : applyManagedBlock(before, getAgentBlock(agent, getProjectRoot(options)));
+    ? applyJsonMcpConfig(before, launch)
+    : applyManagedBlock(before, getAgentBlock(agent, launch));
   return {
     agent,
     filePath,
@@ -123,20 +149,19 @@ function getAgentConfigPath(agent: AgentName, options: AgentConfigOptions): stri
   }
 }
 
-function getAgentBlock(agent: AgentName, projectRoot: string): string {
+function getAgentBlock(agent: AgentName, launch: McpLaunchSpec): string {
   if (agent === 'codex') {
     return [
       '# ' + CODE_MEMORY_MARKER_START,
       '[mcp_servers.code-memory]',
-      'command = "code-memory"',
-      'args = ["serve", "--watch"]',
-      `cwd = ${JSON.stringify(projectRoot)}`,
+      `command = ${JSON.stringify(launch.command)}`,
+      `args = ${JSON.stringify(launch.args)}`,
       '# ' + CODE_MEMORY_MARKER_END,
     ].join('\n');
   }
 
   if (agent === 'claude') {
-    return getManagedInstructionBlock('code-memory', ['serve', '--watch']);
+    return getManagedInstructionBlock(launch.command, launch.args);
   }
 
   throw new Error('JSON agents are handled by applyJsonMcpConfig: ' + agent);
@@ -159,13 +184,12 @@ function isJsonAgent(agent: AgentName): boolean {
   return agent === 'cursor' || agent === 'gemini' || agent === 'opencode';
 }
 
-function applyJsonMcpConfig(text: string, projectRoot: string): string {
+function applyJsonMcpConfig(text: string, launch: McpLaunchSpec): string {
   const config = parseJsonObject(text);
   const mcpServers = isRecord(config.mcpServers) ? config.mcpServers : {};
   mcpServers['code-memory'] = {
-    command: 'code-memory',
-    args: ['serve', '--watch'],
-    cwd: projectRoot,
+    command: launch.command,
+    args: launch.args,
   };
   config.mcpServers = mcpServers;
   config.__codeMemoryMarkerStart = CODE_MEMORY_MARKER_START;

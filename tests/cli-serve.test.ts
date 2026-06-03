@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadServeConfig, ServeCommandError, startServer } from '../src/cli/commands/serve.js';
@@ -48,7 +48,7 @@ describe('CLI serve command', () => {
     } catch (err) {
       expect(err).toMatchObject({
         code: 'CONFIG_MISSING',
-        message: 'Missing config. Run "code-memory init" first.',
+        message: 'Missing config. Run "code-memory setup --project ." for full AI onboarding, or omit --no-bootstrap so serve can initialize automatically.',
       });
     }
   });
@@ -96,7 +96,7 @@ describe('CLI serve command', () => {
     );
 
     await expect(startServer(
-      { watch: true },
+      { watch: true, bootstrap: false },
       {
         startIndexWatcher: () => {
           throw new Error('watch backend unavailable');
@@ -106,6 +106,41 @@ describe('CLI serve command', () => {
     )).rejects.toMatchObject({
       code: 'WATCH_START_FAILED',
       message: 'Failed to start the index watcher.',
+    });
+  });
+
+  it('auto-bootstraps before loading config when serve --watch starts cold', async () => {
+    await expect(startServer(
+      { watch: true },
+      {
+        bootstrapProject: async ({ project }) => {
+          mkdirSync(join(project, '.code-memory'), { recursive: true });
+          writeFileSync(
+            join(project, '.code-memory', 'config.json'),
+            JSON.stringify(createConfig(project), null, 2),
+            'utf-8',
+          );
+        },
+        startIndexWatcher: () => {},
+        startMcpServer: async () => {},
+      },
+    )).resolves.toBeUndefined();
+
+    expect(existsSync(join(tempRoot, '.code-memory', 'config.json'))).toBe(true);
+  });
+
+  it('keeps --no-bootstrap strict for cold serve startup', async () => {
+    await expect(startServer(
+      { watch: true, bootstrap: false },
+      {
+        bootstrapProject: async () => {
+          throw new Error('should not bootstrap');
+        },
+        startMcpServer: async () => {},
+      },
+    )).rejects.toMatchObject({
+      code: 'CONFIG_MISSING',
+      message: 'Missing config. Run "code-memory setup --project ." for full AI onboarding, or omit --no-bootstrap so serve can initialize automatically.',
     });
   });
 

@@ -36,7 +36,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
   const dbPath = join(projectPath, CONFIG_DIR, DATABASE_FILE);
 
   if (!existsSync(dbPath)) {
-    console.log('No index found. Run "code-memory init" and "code-memory index" first.');
+    console.log('No index found. Run "code-memory setup --project ." for full AI onboarding, or "code-memory bootstrap --project ." for index-only setup.');
     return;
   }
 
@@ -127,7 +127,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
       console.log(`Commit:      ${(meta.get('current_commit') || '').slice(0, 8) || '(not set)'}`);
       console.log(`Embedding:   ${meta.get('embedding_provider') || '(not set)'} (${meta.get('embedding_model') || '(not set)'})`);
       console.log(`Vector:      ${getVectorSearchStatus(meta).replace('_', ' ')}`);
-      console.log(`Schema:      v${health.schemaVersion}${health.needsReindex ? ' (needs index --full)' : ''}`);
+      console.log(`Schema:      v${health.schemaVersion}${health.needsReindex ? ' (needs bootstrap --project .)' : ''}`);
       console.log(`Index State: ${meta.get('index_status') || 'idle'}`);
       console.log(`Last Index:  ${meta.get('last_full_index') || '(never)'}`);
       if (meta.get('last_index_error')) {
@@ -167,7 +167,7 @@ async function showStatus(options: StatusOptions): Promise<void> {
     }
   } catch (err) {
     log.error('Failed to read index', err);
-    console.log('Error reading index. Try running "code-memory index" first.');
+    console.log('Error reading index. Try running "code-memory bootstrap --project ." first.');
   }
 }
 

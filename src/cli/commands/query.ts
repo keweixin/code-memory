@@ -9,6 +9,7 @@ import { CONFIG_DIR, CONFIG_FILE, VECTORS_DIR } from '../../shared/constants.js'
 import type { CodeMemoryConfig } from '../../shared/types.js';
 import { createLogger } from '../../shared/logger.js';
 import { safeJsonParse } from '../../shared/utils.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('query');
 
@@ -18,6 +19,7 @@ export function registerQueryCommand(program: Command): void {
     .description('Query the project index')
     .option('-l, --limit <number>', 'Max results', '10')
     .option('-m, --mode <mode>', 'Search mode: hybrid | keyword | vector | graph', 'hybrid')
+    .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .option('--json', 'Output as JSON')
     .action(async (question, options) => {
       try {
@@ -32,11 +34,12 @@ export function registerQueryCommand(program: Command): void {
 export interface QueryOptions {
   limit?: string;
   mode?: string;
+  project?: string;
   json?: boolean;
 }
 
 export async function queryIndex(question: string, options: QueryOptions): Promise<void> {
-  const projectPath = process.cwd();
+  const projectPath = resolveProjectPath(options);
   const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
 
   let config: CodeMemoryConfig;
@@ -46,7 +49,7 @@ export async function queryIndex(question: string, options: QueryOptions): Promi
     if (!parsed) throw new Error('Invalid config JSON');
     config = parsed;
   } catch {
-    console.error('No config found. Run "code-memory init" first.');
+    console.error('No config found. Run "code-memory setup --project ' + projectPath + '" first.');
     process.exit(1);
   }
 

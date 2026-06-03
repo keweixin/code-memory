@@ -17,6 +17,7 @@ import { VERSION } from "../shared/constants.js";
 import { registerAllTools } from "./tool-registry.js";
 import { getServerInstructions } from "./server-instructions.js";
 import { loadVectorSearchProviderForRepo } from "./vector-provider-router.js";
+import { registerCodeMemoryResources } from "./resources.js";
 
 const log = createLogger("mcp:server");
 
@@ -62,6 +63,7 @@ export async function createMcpServer(dbPath?: string): Promise<McpServer> {
   });
 
   // Register all tools
+  registerCodeMemoryResources(server, db);
   registerAllTools(server, db, {
     vectorSearchProvider,
     vectorSearchProviderResolver: loadVectorSearchProviderForRepo,

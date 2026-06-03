@@ -317,7 +317,7 @@ describe('CLI doctor command', () => {
     expect(result.checks).toContainEqual({
       name: 'vector-search',
       status: 'ok',
-      message: 'Vector search is configured; run "code-memory index --full" to generate chunk embeddings.',
+      message: 'Vector search is configured; run "code-memory bootstrap --project ." to generate chunk embeddings.',
     });
   });
 

@@ -96,7 +96,7 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
     status: existsSync(configPath) ? 'ok' : 'error',
     message: existsSync(configPath)
       ? 'Found ' + configPath
-      : 'Missing config. Run "code-memory init" first.',
+      : 'Missing config. Run "code-memory setup --project ." for full AI onboarding.',
   });
 
   checks.push({
@@ -104,7 +104,7 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
     status: existsSync(dbPath) ? 'ok' : 'warn',
     message: existsSync(dbPath)
       ? 'Found ' + dbPath
-      : 'No index found. Run "code-memory index --full".',
+      : 'No index found. Run "code-memory bootstrap --project .".',
   });
 
   checks.push(await checkNativeSqlite());
@@ -212,7 +212,7 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
         ? 'Vector search is disabled because embedding provider is none; hybrid search is keyword + graph only.'
         : needsOpenAiKey
           ? 'Vector search needs an OpenAI apiKey or custom baseUrl before indexing embeddings.'
-        : 'Vector search is configured; run "code-memory index --full" to generate chunk embeddings.',
+        : 'Vector search is configured; run "code-memory bootstrap --project ." to generate chunk embeddings.',
     });
   }
 
@@ -269,7 +269,7 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
         name: 'schema',
         status: health.needsReindex ? 'warn' : 'ok',
         message: health.needsReindex
-          ? `Index schema v${health.schemaVersion || 'unknown'} needs "code-memory index --full".`
+          ? `Index schema v${health.schemaVersion || 'unknown'} needs "code-memory bootstrap --project .".`
           : `Index schema v${health.schemaVersion} is current.`,
       });
       try {
@@ -388,7 +388,7 @@ async function runPerfDiagnostics(): Promise<void> {
       console.log('Database query error: ' + (err instanceof Error ? err.message : String(err)));
     }
   } else {
-    console.log('Database: not found (run "code-memory index --full" first)');
+    console.log('Database: not found (run "code-memory bootstrap --project ." first)');
   }
 
   // Vectors directory size
@@ -504,7 +504,7 @@ async function collectDeepVectorChecks(
       count: sqliteVectorRefs,
       message: sqliteVectorRefs === 0
         ? 'Deep vector check skipped because embedding provider is none.'
-        : 'Embedding provider is none but SQLite still has vector refs; run "code-memory index --full --embedding none" to clear stale vector refs.',
+        : 'Embedding provider is none but SQLite still has vector refs; run "code-memory bootstrap --project . --embedding none" to clear stale vector refs.',
     });
     return { checks, fixes };
   }
@@ -534,7 +534,7 @@ async function collectDeepVectorChecks(
       : `SQLite vector refs and LanceDB row count match (${stats.rowCount}).`,
   });
   if (drift && fix) {
-    fixes.push('Vector drift detected. Run "code-memory index --full" with the configured embedding provider to rebuild LanceDB from SQLite chunks.');
+    fixes.push('Vector drift detected. Run "code-memory bootstrap --project ." with the configured embedding provider to rebuild LanceDB from SQLite chunks.');
   }
 
   return { checks, fixes };
@@ -608,7 +608,7 @@ function collectDeepPerformanceChecks(db: SqlJsDatabase): CheckResult[] {
           status: 'warn',
           count: unresolvedCalls,
           message: `Unresolved calls ratio is ${(ratio * 100).toFixed(1)}% (${unresolvedCalls}/${totalCalls}), exceeding 30% threshold.`,
-          suggestion: 'Review import resolution: ensure module paths are correct and re-export chains are resolvable. Run "code-memory index --full" to re-resolve.',
+          suggestion: 'Review import resolution: ensure module paths are correct and re-export chains are resolvable. Run "code-memory bootstrap --project ." to re-resolve.',
         });
       } else {
         checks.push({
@@ -633,7 +633,7 @@ function collectDeepPerformanceChecks(db: SqlJsDatabase): CheckResult[] {
           status: 'warn',
           count: edgesWithEvidence,
           message: `Edge evidence coverage is ${(coverage * 100).toFixed(1)}% (${edgesWithEvidence}/${totalEdges}), below 95% threshold.`,
-          suggestion: 'Missing evidence may indicate orphaned edges from a partial reindex. Run "code-memory index --full" to rebuild all edge evidence.',
+          suggestion: 'Missing evidence may indicate orphaned edges from a partial reindex. Run "code-memory bootstrap --project ." to rebuild all edge evidence.',
         });
       } else {
         checks.push({

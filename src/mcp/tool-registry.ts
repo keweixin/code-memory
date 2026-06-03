@@ -44,6 +44,11 @@ function withResponseTiming(server: McpServer): McpServer {
   const timedServer = Object.create(server) as McpServer;
 
   (timedServer as unknown as { tool: (...args: unknown[]) => unknown }).tool = (...args: unknown[]) => {
+    const toolName = typeof args[0] === 'string' ? args[0] : '';
+    if (typeof args[1] === 'string') {
+      args[1] = appendToolDescriptionGuidance(toolName, args[1]);
+    }
+
     const maybeHandler = args[args.length - 1];
     if (typeof maybeHandler !== 'function') {
       return originalTool(...args);
@@ -55,6 +60,13 @@ function withResponseTiming(server: McpServer): McpServer {
       const elapsedMs = performance.now() - startMs;
 
       if (isToolResult(result)) {
+        const hint = getNextStepHint(toolName);
+        if (hint) {
+          result.content.push({
+            type: 'text' as const,
+            text: hint,
+          });
+        }
         result.content.push({
           type: 'text' as const,
           text: `[X-Response-Time-Ms: ${elapsedMs.toFixed(0)}]`,
@@ -68,6 +80,53 @@ function withResponseTiming(server: McpServer): McpServer {
   };
 
   return timedServer;
+}
+
+function appendToolDescriptionGuidance(toolName: string, description: string): string {
+  const guidance = getToolWorkflowGuidance(toolName);
+  if (!guidance) return description;
+  return description + " " + guidance;
+}
+
+function getToolWorkflowGuidance(toolName: string): string {
+  if (toolName === 'plan_context') {
+    return 'WHEN TO USE: first call for a new task or repo switch. AFTER THIS: call get_context_pack or search_code.';
+  }
+  if (toolName === 'get_context_pack' || toolName === 'search_code') {
+    return 'WHEN TO USE: retrieve task evidence after plan_context. AFTER THIS: call search_symbols or find_definition for exact symbols.';
+  }
+  if (toolName === 'search_symbols' || toolName === 'find_definition' || toolName === 'find_references') {
+    return 'WHEN TO USE: drill into named symbols. AFTER THIS: call impact_analysis before editing shared code.';
+  }
+  if (toolName === 'impact_analysis') {
+    return 'WHEN TO USE: before modifying a symbol, file, route, or public contract. AFTER THIS: call get_related_tests and run repository tests after edits.';
+  }
+  if (toolName === 'get_related_tests') {
+    return 'WHEN TO USE: choose narrow validation after context or impact analysis. AFTER THIS: run the suggested tests outside MCP.';
+  }
+  if (toolName === 'remember_project_fact' || toolName === 'invalidate_memory') {
+    return 'WHEN TO USE: maintain durable project memory. AFTER THIS: continue with plan_context/get_context_pack for the active task.';
+  }
+  return 'WHEN TO USE: use after plan_context when this specific map or graph is needed. AFTER THIS: prefer symbol-level context before editing.';
+}
+
+function getNextStepHint(toolName: string): string {
+  if (toolName === 'plan_context') {
+    return '[Next: call get_context_pack for bounded evidence, or search_code if you only need ranked matches.]';
+  }
+  if (toolName === 'get_context_pack' || toolName === 'search_code') {
+    return '[Next: pick a symbol/file from the results and call search_symbols, find_definition, or find_references.]';
+  }
+  if (toolName === 'search_symbols' || toolName === 'find_definition' || toolName === 'find_references') {
+    return '[Next: before editing, call impact_analysis on the exact symbol or file; after editing, call get_related_tests.]';
+  }
+  if (toolName === 'impact_analysis') {
+    return '[Next: review affected files, call get_related_tests, then run the suggested repository tests after changes.]';
+  }
+  if (toolName === 'get_related_tests') {
+    return '[Next: run the listed tests via the project CLI and then save durable findings with remember_project_fact if useful.]';
+  }
+  return '[Next: for a new task use plan_context; for edits use impact_analysis before changing code.]';
 }
 
 function isToolResult(value: unknown): value is { content: unknown[] } {
