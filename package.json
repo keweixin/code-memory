@@ -6,7 +6,7 @@
   "author": "keweixin",
   "main": "dist/index.js",
   "bin": {
-    "code-memory": "./dist/index.js"
+    "code-memory": "dist/index.js"
   },
   "files": [
     "dist",
