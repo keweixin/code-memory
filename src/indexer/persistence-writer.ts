@@ -1,7 +1,7 @@
 import type { DiscoveredFile } from '../scanner/file-discovery.js';
 import { getFileLastCommit } from '../scanner/git-integration.js';
 import { getDatabaseSync } from '../storage/database.js';
-import { upsertChunk, upsertChunks } from '../storage/chunk-repository.js';
+import { upsertChunks } from '../storage/chunk-repository.js';
 import { upsertFile } from '../storage/file-repository.js';
 import { replaceParseMetadata } from '../storage/parse-metadata-repository.js';
 import { upsertSymbol } from '../storage/symbol-repository.js';

@@ -629,21 +629,6 @@ function getCount(db: SqlJsDatabase, sql: string): number {
   return Number(row?.count ?? 0);
 }
 
-function getStringColumn(db: SqlJsDatabase, sql: string): string[] {
-  return db.all<{ value: string | null }>(sql)
-    .map((row) => row.value)
-    .filter((value): value is string => typeof value === 'string' && value.length > 0);
-}
-
-function compareStringSets(expected: string[], actual: string[]): { missing: string[]; orphaned: string[] } {
-  const expectedSet = new Set(expected);
-  const actualSet = new Set(actual);
-  return {
-    missing: expected.filter((id) => !actualSet.has(id)),
-    orphaned: actual.filter((id) => !expectedSet.has(id)),
-  };
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

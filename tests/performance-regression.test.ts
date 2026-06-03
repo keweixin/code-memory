@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { CodeMemoryConfig } from '../src/shared/types.js';
 import { DEFAULT_TOKEN_BUDGETS } from '../src/shared/types.js';
 import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
 import { IndexManager } from '../src/indexer/index-manager.js';
-import { closeDatabase, getDatabase, getDatabaseSync } from '../src/storage/database.js';
+import { closeDatabase, getDatabaseSync } from '../src/storage/database.js';
 import { HybridSearchEngine } from '../src/search/hybrid-search.js';
 import { upsertEdges } from '../src/storage/edge-repository.js';
 import { upsertChunks } from '../src/storage/chunk-repository.js';
@@ -336,7 +336,6 @@ describe('performance regression', () => {
       const config = createConfig(tempRoot);
       writeConfig(tempRoot, config);
 
-      const rssBefore = process.memoryUsage().rss;
       const startMs = performance.now();
 
       const manager = new IndexManager(tempRoot, config);

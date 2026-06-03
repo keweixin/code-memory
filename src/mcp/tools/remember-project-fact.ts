@@ -41,7 +41,7 @@ export function registerRememberProjectFactTool(server: McpServer, db: SqlJsData
     },
     async ({ content, type, scope, confidence, evidence, invalidateOn, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, _projectRoot) => {
+        return await withRepoDatabase(repo, db, async (_activeDb, _projectRoot) => {
           if (!content.trim()) {
             return {
               content: [{ type: "text" as const, text: "Error: Content cannot be empty." }],

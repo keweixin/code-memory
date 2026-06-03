@@ -358,9 +358,8 @@ export class ContextPacker {
     const snippets: ContextSnippet[] = [];
     if (results.length === 0) return snippets;
 
-    // Collect unique file paths and symbol IDs for batch queries
+    // Collect unique file paths for batch queries
     const filePaths = [...new Set(results.map((r) => r.filePath))];
-    const symbolIds = [...new Set(results.filter((r) => r.kind !== 'file').map((r) => r.id))];
 
     // Resolve file paths to file IDs in one query
     const filePlaceholders = filePaths.map(() => '?').join(',');

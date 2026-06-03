@@ -189,20 +189,6 @@ function loadSymbolCached(db: SqlJsDatabase, symbolId: string, cache: Map<string
   return result;
 }
 
-function loadOutgoingEdges(db: SqlJsDatabase, symbolId: string): EdgeRow[] {
-  try {
-    return db.all<EdgeRow>(
-      `SELECT id, from_id, to_id, type FROM edges
-       WHERE from_id = ? AND type IN ('CALLS', 'IMPORTS')
-       ORDER BY type, to_id`,
-      [symbolId],
-    );
-  } catch (err) {
-    log.warn(`loadOutgoingEdges(${symbolId}) failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-}
-
 function isTerminalSymbol(db: SqlJsDatabase, symbolId: string, cache: Map<string, SymbolRow | null>): boolean {
   const symbol = loadSymbolCached(db, symbolId, cache);
   if (!symbol) return false;

@@ -34,7 +34,7 @@ export function registerInvalidateMemoryTool(server: McpServer, db: SqlJsDatabas
     },
     async ({ memoryId, type, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, _projectRoot) => {
+        return await withRepoDatabase(repo, db, async (_activeDb, _projectRoot) => {
           if (!memoryId && !type) {
             return {
               content: [{ type: "text" as const, text: "Error: Provide either memoryId or type to invalidate." }],
