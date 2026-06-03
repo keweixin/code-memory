@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CODE_MEMORY_MARKER_END,
   CODE_MEMORY_MARKER_START,
@@ -93,7 +94,8 @@ function getMcpLaunchSpec(projectRoot: string, runtime: RuntimeName): McpLaunchS
     return { command: 'code-memory', args: serveArgs };
   }
   if (runtime === 'local') {
-    return { command: 'npx', args: ['code-memory', ...serveArgs] };
+    const distIndexPath = join(dirname(dirname(fileURLToPath(import.meta.url))), 'index.js');
+    return { command: 'node', args: [distIndexPath, ...serveArgs] };
   }
   return { command: 'npx', args: ['-y', 'code-memory@latest', ...serveArgs] };
 }

@@ -86,6 +86,11 @@ describe('MCP resources', () => {
     expect(server.resources.has('code-memory-repo-symbols')).toBe(true);
     expect(server.resources.has('code-memory-repo-flows')).toBe(true);
     expect(server.resources.has('code-memory-repo-schema')).toBe(true);
+    expect(server.resources.has('code-memory-repo-staleness')).toBe(true);
+    expect(server.resources.has('code-memory-repo-routes')).toBe(true);
+    expect(server.resources.has('code-memory-repo-tests')).toBe(true);
+    expect(server.resources.has('code-memory-repo-communities')).toBe(true);
+    expect(server.resources.has('code-memory-repo-memories')).toBe(true);
 
     const context = await server.resources.get('code-memory-repo-context')!(
       new URL('code-memory://repo/current/context'),
@@ -93,7 +98,7 @@ describe('MCP resources', () => {
     );
     expect(context.contents[0].mimeType).toBe('text/markdown');
     expect(context.contents[0].text).toContain('Code Memory Repo Context');
-    expect(context.contents[0].text).toContain('plan_context -> get_context_pack/search_code');
+    expect(context.contents[0].text).toContain('plan_context -> get_context_pack/search_code -> search_symbols');
 
     const symbols = await server.resources.get('code-memory-repo-symbols')!(
       new URL('code-memory://repo/current/symbols'),
@@ -101,5 +106,26 @@ describe('MCP resources', () => {
     );
     expect(symbols.contents[0].mimeType).toBe('application/json');
     expect(symbols.contents[0].text).toContain('AuthService');
+
+    const staleness = await server.resources.get('code-memory-repo-staleness')!(
+      new URL('code-memory://repo/current/staleness'),
+      {},
+    );
+    expect(staleness.contents[0].mimeType).toBe('application/json');
+    expect(staleness.contents[0].text).toContain('indexStatus');
+
+    const tests = await server.resources.get('code-memory-repo-tests')!(
+      new URL('code-memory://repo/current/tests'),
+      {},
+    );
+    expect(tests.contents[0].mimeType).toBe('application/json');
+    expect(tests.contents[0].text).toContain('"tests"');
+
+    const communities = await server.resources.get('code-memory-repo-communities')!(
+      new URL('code-memory://repo/current/communities'),
+      {},
+    );
+    expect(communities.contents[0].mimeType).toBe('application/json');
+    expect(communities.contents[0].text).toContain('"communities"');
   });
 });

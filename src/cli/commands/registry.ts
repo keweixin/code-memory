@@ -7,7 +7,8 @@ import {
   unregisterRepo,
 } from '../registry.js';
 import { createLogger } from '../../shared/logger.js';
-import { basename, resolve } from 'node:path';
+import { basename } from 'node:path';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('registry');
 
@@ -15,13 +16,14 @@ export function registerRegistryCommands(program: Command): void {
   program
     .command('register')
     .description('Register the current repository in the global code-memory registry')
-    .argument('[path]', 'Repository root path', process.cwd())
+    .argument('[path]', 'Repository root path')
+    .option('--project <path>', 'Project root path (overrides positional path, cwd, and CODE_MEMORY_PROJECT env)')
     .option('--name <name>', 'Registry name for the repository')
     .option('--dry-run', 'Print the entry without writing registry.json')
     .action((path: string, options) => {
       try {
+        const rootPath = resolveProjectPath(options, path);
         if (options.dryRun) {
-          const rootPath = resolve(path);
           const name = options.name || basename(rootPath) || 'repo';
           console.log(JSON.stringify({
             dryRun: true,
@@ -33,7 +35,7 @@ export function registerRegistryCommands(program: Command): void {
           }, null, 2));
           return;
         }
-        const entry = registerRepo(path, options.name);
+        const entry = registerRepo(rootPath, options.name);
         console.log('Registered ' + entry.name + ': ' + entry.rootPath);
       } catch (err) {
         log.error('Register failed', err);
@@ -72,18 +74,24 @@ export function registerRegistryCommands(program: Command): void {
   program
     .command('unregister')
     .description('Remove a repository from the global code-memory registry')
-    .argument('<nameOrPath>', 'Registered repo name or root path')
+    .argument('[nameOrPath]', 'Registered repo name or root path')
+    .option('--project <path>', 'Project root path to unregister when nameOrPath is omitted')
     .option('--dry-run', 'Print the removal without writing registry.json')
     .action((nameOrPath: string, options) => {
+      const target = nameOrPath || (options.project ? resolveProjectPath(options) : '');
+      if (!target) {
+        console.error('Repository name/path required, or pass --project <path>.');
+        process.exit(1);
+      }
       if (options.dryRun) {
         console.log(JSON.stringify({
           dryRun: true,
           registryPath: getRegistryPath(),
-          match: findRepo(nameOrPath),
+          match: findRepo(target),
         }, null, 2));
         return;
       }
-      const removed = unregisterRepo(nameOrPath);
+      const removed = unregisterRepo(target);
       console.log('Removed repos: ' + removed);
     });
 

@@ -5,6 +5,7 @@ import {
   type AgentName,
 } from '../agent-config.js';
 import { createLogger } from '../../shared/logger.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('uninstall');
 
@@ -14,12 +15,15 @@ export function registerUninstallCommand(program: Command): void {
     .description('Remove code-memory MCP configuration from AI agent config files')
     .option('--agent <agent>', 'Agent: claude | cursor | codex | gemini | opencode', 'codex')
     .option('--all', 'Remove configuration from all supported agents')
+    .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .option('--dry-run', 'Print planned changes without writing files')
     .action((options) => {
       try {
+        const projectRoot = resolveProjectPath(options);
         const changes = uninstallAgents({
           agent: options.agent as AgentName,
           all: Boolean(options.all),
+          projectRoot,
           dryRun: Boolean(options.dryRun),
         });
         console.log(formatAgentChanges(changes, Boolean(options.dryRun)));

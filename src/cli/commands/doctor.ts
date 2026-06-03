@@ -21,6 +21,7 @@ import { safeJsonParse } from '../../shared/utils.js';
 import { collectInvariants } from '../../storage/invariants.js';
 import type { SqlJsDatabase } from '../../storage/database.js';
 import { resolveEmbeddingConfig, resolveLlmConfig } from '../../shared/provider-config.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('doctor');
 
@@ -39,13 +40,15 @@ export function registerDoctorCommand(program: Command): void {
     .option('--fix', 'Create a missing default config and report follow-up actions')
     .option('--deep', 'Run slower SQLite/LanceDB consistency checks')
     .option('--perf', 'Show performance diagnostics')
+    .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .action(async (options) => {
       try {
+        const projectPath = resolveProjectPath(options);
         if (options.perf) {
-          await runPerfDiagnostics();
+          await runPerfDiagnostics(projectPath);
           return;
         }
-        await runDoctor(Boolean(options.json), Boolean(options.fix), Boolean(options.deep));
+        await runDoctor(Boolean(options.json), Boolean(options.fix), Boolean(options.deep), projectPath);
       } catch (err) {
         log.error('Doctor failed', err);
         process.exit(1);
@@ -78,8 +81,7 @@ interface DoctorConfig {
   } | null;
 }
 
-async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<void> {
-  const projectPath = process.cwd();
+export async function runDoctor(asJson: boolean, fix = false, deep = false, projectPath = process.cwd()): Promise<void> {
   const checks: CheckResult[] = [];
   const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
   const dbPath = join(projectPath, CONFIG_DIR, DATABASE_FILE);
@@ -87,7 +89,7 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
 
   if (fix && !existsSync(configPath)) {
     const { initProject } = await import('./init.js');
-    await initProject({});
+    await initProject({ project: projectPath });
     fixes.push('Created default .code-memory/config.json with embedding provider none.');
   }
 
@@ -317,8 +319,7 @@ async function runDoctor(asJson: boolean, fix = false, deep = false): Promise<vo
   }
 }
 
-async function runPerfDiagnostics(): Promise<void> {
-  const projectPath = process.cwd();
+async function runPerfDiagnostics(projectPath: string): Promise<void> {
   const dbPath = join(projectPath, CONFIG_DIR, DATABASE_FILE);
 
   console.log('=== Performance Diagnostics ===');

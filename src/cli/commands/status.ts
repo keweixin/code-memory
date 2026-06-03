@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_DIR, DATABASE_FILE } from '../../shared/constants.js';
 import { createLogger } from '../../shared/logger.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('status');
 
@@ -14,6 +15,7 @@ export function registerStatusCommand(program: Command): void {
   program
     .command('status')
     .description('Show the current index status')
+    .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .option('--json', 'Output as JSON')
     .option('--staleness', 'Include index freshness and changed-file diagnostics')
     .action(async (options) => {
@@ -27,12 +29,13 @@ export function registerStatusCommand(program: Command): void {
 }
 
 interface StatusOptions {
+  project?: string;
   json?: boolean;
   staleness?: boolean;
 }
 
 async function showStatus(options: StatusOptions): Promise<void> {
-  const projectPath = process.cwd();
+  const projectPath = resolveProjectPath(options);
   const dbPath = join(projectPath, CONFIG_DIR, DATABASE_FILE);
 
   if (!existsSync(dbPath)) {

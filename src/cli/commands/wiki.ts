@@ -17,6 +17,7 @@ import {
   type SqlJsDatabase,
 } from '../../storage/database.js';
 import { createLogger } from '../../shared/logger.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('wiki');
 
@@ -74,9 +75,10 @@ export function registerWikiCommand(program: Command): void {
   program
     .command('wiki [path]')
     .description('Generate .code-memory/wiki.json for downstream LLM consumption')
-    .action(async (path) => {
+    .option('--project <path>', 'Project root path (overrides positional path, cwd, and CODE_MEMORY_PROJECT env)')
+    .action(async (path, options) => {
       try {
-        await runWiki(path);
+        await runWiki(path, options);
       } catch (err) {
         log.error('Wiki generation failed', err);
         process.exit(1);
@@ -84,8 +86,8 @@ export function registerWikiCommand(program: Command): void {
     });
 }
 
-export async function runWiki(pathArg?: string): Promise<void> {
-  const projectRoot = resolve(pathArg || process.cwd());
+export async function runWiki(pathArg?: string, options: { project?: string } = {}): Promise<void> {
+  const projectRoot = resolveProjectPath(options, pathArg);
 
   const wikiDir = join(projectRoot, CONFIG_DIR);
   const wikiPath = join(wikiDir, 'wiki.json');
@@ -99,7 +101,7 @@ export async function runWiki(pathArg?: string): Promise<void> {
   const dbPath = join(projectRoot, CONFIG_DIR, DATABASE_FILE);
 
   if (!existsSync(dbPath)) {
-    console.error('Error: No code-memory index found at ' + dbPath + '. Run `code-memory init` and `code-memory index` first.');
+    console.error('Error: No code-memory index found at ' + dbPath + '. Run `code-memory setup --project .` or `code-memory bootstrap --project .` first.');
     process.exit(1);
   }
 
@@ -109,7 +111,7 @@ export async function runWiki(pathArg?: string): Promise<void> {
   const db = await getDatabase(projectRoot);
   try {
     if (needsReindex()) {
-      console.error('Error: Index is stale. Run `code-memory index` first.');
+      console.error('Error: Index is stale. Run `code-memory bootstrap --project .` first.');
       process.exit(1);
     }
 

@@ -10,6 +10,7 @@
   },
   "files": [
     "dist",
+    "docs/*.md",
     "grammars",
     "README.md",
     "LICENSE"

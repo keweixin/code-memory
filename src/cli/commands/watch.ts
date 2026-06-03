@@ -5,6 +5,7 @@ import { CONFIG_DIR, CONFIG_FILE } from '../../shared/constants.js';
 import type { CodeMemoryConfig } from '../../shared/types.js';
 import { createLogger } from '../../shared/logger.js';
 import { safeJsonParse } from '../../shared/utils.js';
+import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('watch');
 
@@ -12,10 +13,11 @@ export function registerWatchCommand(program: Command): void {
   program
     .command('watch [path]')
     .description('Watch project files and keep the index synchronized')
+    .option('--project <path>', 'Project root path (overrides positional path, cwd, and CODE_MEMORY_PROJECT env)')
     .option('--debounce-ms <n>', 'Debounce file changes before indexing')
     .action(async (path, options) => {
       try {
-        const projectRoot = path || process.cwd();
+        const projectRoot = resolveProjectPath(options, path);
         const config = loadConfig(projectRoot);
         const { startIndexWatcher } = await import('../../indexer/watch-service.js');
         startIndexWatcher(projectRoot, config, {

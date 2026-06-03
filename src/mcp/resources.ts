@@ -4,6 +4,7 @@ import type { SqlJsDatabase } from '../storage/database.js';
 import { readRegistry } from '../cli/registry.js';
 import { SCHEMA_VERSION } from '../storage/schema.js';
 import { openRoutedDatabase } from './repo-router.js';
+import { getIndexStaleness } from '../indexer/staleness.js';
 
 type ResourceVariables = Record<string, string | string[]>;
 
@@ -29,6 +30,11 @@ export function registerCodeMemoryResources(server: McpServer, db: SqlJsDatabase
   registerRepoResource(server, db, 'code-memory-repo-symbols', 'code-memory://repo/{name}/symbols', 'application/json', readRepoSymbols);
   registerRepoResource(server, db, 'code-memory-repo-flows', 'code-memory://repo/{name}/flows', 'application/json', readRepoFlows);
   registerRepoResource(server, db, 'code-memory-repo-schema', 'code-memory://repo/{name}/schema', 'text/markdown', readRepoSchema);
+  registerRepoResource(server, db, 'code-memory-repo-staleness', 'code-memory://repo/{name}/staleness', 'application/json', readRepoStaleness);
+  registerRepoResource(server, db, 'code-memory-repo-routes', 'code-memory://repo/{name}/routes', 'application/json', readRepoRoutes);
+  registerRepoResource(server, db, 'code-memory-repo-tests', 'code-memory://repo/{name}/tests', 'application/json', readRepoTests);
+  registerRepoResource(server, db, 'code-memory-repo-communities', 'code-memory://repo/{name}/communities', 'application/json', readRepoCommunities);
+  registerRepoResource(server, db, 'code-memory-repo-memories', 'code-memory://repo/{name}/memories', 'application/json', readRepoMemories);
 }
 
 function registerRepoResource(
@@ -84,7 +90,7 @@ function readRepoContext(db: SqlJsDatabase, projectRoot: string): string {
     '',
     '## Recommended Workflow',
     '',
-    'plan_context -> get_context_pack/search_code -> search_symbols/find_definition -> impact_analysis -> get_related_tests',
+    'plan_context -> get_context_pack/search_code -> search_symbols -> find_definition/find_references -> impact_analysis -> get_related_tests',
     '',
     '## Languages',
     '',
@@ -142,6 +148,61 @@ function readRepoSchema(db: SqlJsDatabase, projectRoot: string): string {
     '- Use MCP tools for normal workflows; resources are project maps.',
     '- Prefer `impact_analysis` before editing code discovered through these resources.',
   ].join('\n');
+}
+
+function readRepoStaleness(db: SqlJsDatabase, projectRoot: string): string {
+  return JSON.stringify(getIndexStaleness(projectRoot, db), null, 2);
+}
+
+function readRepoRoutes(db: SqlJsDatabase): string {
+  const rows = queryRows(
+    db,
+    `SELECT re.framework,
+            re.http_method AS method,
+            re.route_path AS path,
+            f.path AS filePath,
+            re.symbol_id AS handlerSymbolId
+       FROM route_endpoints re
+       LEFT JOIN files f ON f.id = re.file_id
+      ORDER BY re.route_path ASC, re.http_method ASC
+      LIMIT 500`,
+  );
+  return JSON.stringify({ routes: rows, truncated: rows.length >= 500 }, null, 2);
+}
+
+function readRepoTests(db: SqlJsDatabase): string {
+  const rows = queryRows(
+    db,
+    `SELECT path, language, size, indexed_at AS indexedAt
+       FROM files
+      WHERE role = 'test'
+      ORDER BY path ASC
+      LIMIT 500`,
+  );
+  return JSON.stringify({ tests: rows, truncated: rows.length >= 500 }, null, 2);
+}
+
+function readRepoCommunities(db: SqlJsDatabase): string {
+  const rows = queryRows(
+    db,
+    `SELECT name, cohesion, symbol_count AS symbolCount, keywords, top_entry_symbols AS topEntrySymbols
+       FROM communities
+      ORDER BY symbol_count DESC, name ASC
+      LIMIT 250`,
+  );
+  return JSON.stringify({ communities: rows, truncated: rows.length >= 250 }, null, 2);
+}
+
+function readRepoMemories(db: SqlJsDatabase): string {
+  const rows = queryRows(
+    db,
+    `SELECT id, type, content, scope, evidence, confidence, created_commit AS createdCommit,
+            last_validated_commit AS lastValidatedCommit, updated_at AS updatedAt
+       FROM memories
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 250`,
+  );
+  return JSON.stringify({ memories: rows, truncated: rows.length >= 250 }, null, 2);
 }
 
 function readMetadata(db: SqlJsDatabase): Record<string, string> {

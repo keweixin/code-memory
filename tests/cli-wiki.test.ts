@@ -132,7 +132,7 @@ describe('CLI wiki command', () => {
 
     const errorOutput = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(errorOutput).toContain('Index is stale');
-    expect(errorOutput).toContain('code-memory index');
+    expect(errorOutput).toContain('code-memory bootstrap --project .');
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 

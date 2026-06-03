@@ -1,8 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { RuntimeName } from './agent-config.js';
 
-const PROJECT_MARKER_START = '<!-- CODE_MEMORY_PROJECT_CONTEXT_START -->';
-const PROJECT_MARKER_END = '<!-- CODE_MEMORY_PROJECT_CONTEXT_END -->';
+const PROJECT_MARKER_START = '<!-- CODE_MEMORY_CONTEXT_START -->';
+const PROJECT_MARKER_END = '<!-- CODE_MEMORY_CONTEXT_END -->';
+const LEGACY_PROJECT_MARKER_START = '<!-- CODE_MEMORY_PROJECT_CONTEXT_START -->';
+const LEGACY_PROJECT_MARKER_END = '<!-- CODE_MEMORY_PROJECT_CONTEXT_END -->';
+const HOOK_TIMEOUT_MS = 5000;
+const HOOK_MAX_OUTPUT_CHARS = 4000;
 
 export interface ProjectOnboardingOptions {
   projectRoot: string;
@@ -10,6 +16,7 @@ export interface ProjectOnboardingOptions {
   writeContext?: boolean;
   writeSkills?: boolean;
   writeHooks?: boolean;
+  runtime?: RuntimeName;
 }
 
 export interface ProjectOnboardingChange {
@@ -29,7 +36,7 @@ export function setupProjectOnboarding(options: ProjectOnboardingOptions): Proje
     changes.push(...buildSkillChanges(options.projectRoot));
   }
   if (options.writeHooks !== false) {
-    changes.push(...buildHookChanges(options.projectRoot));
+    changes.push(...buildHookChanges(options.projectRoot, options.runtime || 'npx'));
   }
 
   if (!options.dryRun) {
@@ -68,25 +75,25 @@ function buildProjectContextBlock(projectRoot: string): string {
     PROJECT_MARKER_START,
     '# Code Memory - AI Context Workflow',
     '',
-    'This repository is prepared for Code Memory. Use it as the first local project map before broad file reads.',
+    'This repository is prepared for Code Memory. Use it as a local project map before broad file reads.',
     '',
     '## Recommended Tool Path',
     '',
-    'Default chain: plan_context -> get_context_pack/search_code -> search_symbols -> impact_analysis -> get_related_tests.',
+    'Default chain: plan_context -> get_context_pack/search_code -> search_symbols -> find_definition/find_references -> impact_analysis -> get_related_tests.',
     '',
     '1. `plan_context` - classify the task, check index/vector/ledger readiness, and choose retrieval routes.',
     '2. `get_context_pack` or `search_code` - retrieve bounded evidence for the current task.',
     '3. `search_symbols` then `find_definition` / `find_references` - drill into a specific symbol.',
-    '4. `impact_analysis` - run before editing shared symbols or files.',
+    '4. `impact_analysis` - run before editing shared symbols, public contracts, or startup/index lifecycle code.',
     '5. `get_related_tests` - identify narrow validation targets.',
     '6. `remember_project_fact` - save durable architecture decisions or bug root causes.',
     '',
-    '## CLI Mirrors',
+    '## CLI Mirrors And Health',
     '',
     '- `code-memory setup --project .` initializes, indexes, writes MCP config, and installs this context.',
     '- `code-memory bootstrap --project .` safely initializes or refreshes the local index.',
     '- `code-memory query "search terms" --project . --json` mirrors indexed search outside MCP.',
-    '- `code-memory status --json` and `code-memory doctor` verify index health.',
+    '- `code-memory status --project . --json` and `code-memory doctor --project .` verify index health.',
     '',
     '## Project Root',
     '',
@@ -115,7 +122,9 @@ function buildExploringSkill(): string {
   return [
     '# Code Memory Exploring',
     '',
-    'Use when you need to understand architecture, feature flow, ownership, or unfamiliar code.',
+    '## When to use',
+    '',
+    'Understand architecture, feature flow, ownership, or unfamiliar code.',
     '',
     '## Tool Order',
     '',
@@ -125,7 +134,7 @@ function buildExploringSkill(): string {
     '4. `find_definition` for exact source locations',
     '5. `get_call_graph` or `get_dependency_graph` when relationships matter',
     '',
-    '## Checklist',
+    '## Done checklist',
     '',
     '- Prefer indexed evidence before broad grep or recursive reads.',
     '- Cite files and symbols from tool output before making claims.',
@@ -137,7 +146,9 @@ function buildDebuggingSkill(): string {
   return [
     '# Code Memory Debugging',
     '',
-    'Use when investigating a failing behavior, regression, stale index, or suspicious result.',
+    '## When to use',
+    '',
+    'Investigate failing behavior, regression, stale index, or suspicious tool output.',
     '',
     '## Tool Order',
     '',
@@ -147,9 +158,9 @@ function buildDebuggingSkill(): string {
     '4. `find_references` / `get_call_graph` to trace callers and callees',
     '5. `get_related_tests` for narrow verification',
     '',
-    '## Risk Checks',
+    '## Done checklist',
     '',
-    '- If stale diagnostics appear, run `code-memory sync --project .` or `code-memory index --project . --full`.',
+    '- If stale diagnostics appear, run `code-memory sync --project .` or `code-memory bootstrap --project .`.',
     '- If evidence is contradictory, prefer current file contents and refresh the index.',
     '- Record confirmed root causes with `remember_project_fact`.',
   ].join('\n') + '\n';
@@ -159,7 +170,9 @@ function buildImpactSkill(): string {
   return [
     '# Code Memory Impact Analysis',
     '',
-    'Use before editing a shared symbol, route, exported API, config loader, parser, or index lifecycle code.',
+    '## When to use',
+    '',
+    'Before editing a shared symbol, route, exported API, config loader, parser, or index lifecycle code.',
     '',
     '## Tool Order',
     '',
@@ -168,7 +181,7 @@ function buildImpactSkill(): string {
     '3. `get_related_tests` for validation targets.',
     '4. After edits, rerun targeted tests and inspect affected files.',
     '',
-    '## Risk Judgment',
+    '## Done checklist',
     '',
     '- Low: isolated file or symbol with few references.',
     '- Medium: multiple callers, generated outputs, or CLI/MCP behavior.',
@@ -180,7 +193,9 @@ function buildRefactoringSkill(): string {
   return [
     '# Code Memory Refactoring',
     '',
-    'Use when renaming, extracting, splitting modules, or changing public contracts.',
+    '## When to use',
+    '',
+    'Rename, extract, split modules, or change public contracts.',
     '',
     '## Tool Order',
     '',
@@ -189,7 +204,7 @@ function buildRefactoringSkill(): string {
     '3. `impact_analysis` before changing the target.',
     '4. `get_related_tests` and repository-native tests after edits.',
     '',
-    '## Guardrails',
+    '## Done checklist',
     '',
     '- Do not use blind find-and-replace for exported symbols.',
     '- Keep response shapes stable unless tests cover the contract change.',
@@ -197,11 +212,11 @@ function buildRefactoringSkill(): string {
   ].join('\n') + '\n';
 }
 
-function buildHookChanges(projectRoot: string): ProjectOnboardingChange[] {
+function buildHookChanges(projectRoot: string, runtime: RuntimeName): ProjectOnboardingChange[] {
   const hookPath = join(projectRoot, '.claude', 'hooks', 'code-memory-pretooluse.mjs');
   const settingsPath = join(projectRoot, '.claude', 'settings.json');
   const scriptBefore = readText(hookPath);
-  const scriptAfter = buildPreToolUseHookScript();
+  const scriptAfter = buildPreToolUseHookScript(runtime);
   const settingsBefore = readText(settingsPath);
   const settingsAfter = applyHookSettings(settingsBefore);
 
@@ -211,10 +226,18 @@ function buildHookChanges(projectRoot: string): ProjectOnboardingChange[] {
   ];
 }
 
-function buildPreToolUseHookScript(): string {
+function buildPreToolUseHookScript(runtime: RuntimeName): string {
+  const launch = getHookLaunchSpec(runtime);
   return [
     '#!/usr/bin/env node',
     "import { spawnSync } from 'node:child_process';",
+    '',
+    'const HOOK_TIMEOUT_MS = ' + HOOK_TIMEOUT_MS + ';',
+    'const MAX_OUTPUT_CHARS = ' + HOOK_MAX_OUTPUT_CHARS + ';',
+    'const CODE_MEMORY_COMMAND = ' + JSON.stringify(launch.command) + ';',
+    'const CODE_MEMORY_BASE_ARGS = ' + JSON.stringify(launch.args) + ';',
+    '',
+    "if (process.env.CODE_MEMORY_HOOK_DISABLED === '1' || process.env.CODE_MEMORY_PRETOOLUSE === '1') process.exit(0);",
     '',
     'const input = await readStdin();',
     'const event = safeParse(input);',
@@ -228,7 +251,7 @@ function buildPreToolUseHookScript(): string {
     '',
     'const additionalContext = [',
     "  '[Code Memory PreToolUse context]',",
-    "  'A broad search tool is about to run. Prefer indexed project evidence first when relevant.',",
+    "  'A broad search tool is about to run. Indexed project evidence may help when relevant.',",
     "  'Query: ' + query,",
     "  'Top indexed results:',",
     '  result,',
@@ -243,20 +266,26 @@ function buildPreToolUseHookScript(): string {
     '}));',
     '',
     'function runCodeMemoryQuery(query, projectRoot) {',
-    "  const args = ['-y', 'code-memory@latest', 'query', query, '--project', projectRoot, '--limit', '5', '--json'];",
-    "  const run = spawnSync('npx', args, { encoding: 'utf-8', timeout: 15000, shell: process.platform === 'win32' });",
+    "  const args = [...CODE_MEMORY_BASE_ARGS, 'query', query, '--project', projectRoot, '--limit', '5', '--json'];",
+    "  const run = spawnSync(CODE_MEMORY_COMMAND, args, {",
+    "    encoding: 'utf-8',",
+    '    timeout: HOOK_TIMEOUT_MS,',
+    "    shell: process.platform === 'win32',",
+    "    env: { ...process.env, CODE_MEMORY_PRETOOLUSE: '1' },",
+    '  });',
     '  if (run.status !== 0 || !run.stdout.trim()) return null;',
     '  try {',
     '    const parsed = JSON.parse(run.stdout);',
     '    if (!Array.isArray(parsed) || parsed.length === 0) return null;',
-    '    return parsed.slice(0, 5).map((item) => {',
+    '    const formatted = parsed.slice(0, 5).map((item) => {',
     "      const name = item.name || '(unknown)';",
     "      const kind = item.kind || 'item';",
     "      const filePath = item.filePath || '(unknown file)';",
     "      return '- ' + name + ' (' + kind + ') - ' + filePath;",
     "    }).join('\\n');",
+    '    return formatted.slice(0, MAX_OUTPUT_CHARS);',
     '  } catch {',
-    '    return run.stdout.slice(0, 2000);',
+    '    return run.stdout.slice(0, MAX_OUTPUT_CHARS);',
     '  }',
     '}',
     '',
@@ -290,6 +319,15 @@ function buildPreToolUseHookScript(): string {
   ].join('\n') + '\n';
 }
 
+function getHookLaunchSpec(runtime: RuntimeName): { command: string; args: string[] } {
+  if (runtime === 'global') return { command: 'code-memory', args: [] };
+  if (runtime === 'local') {
+    const distIndexPath = join(dirname(dirname(fileURLToPath(import.meta.url))), 'index.js');
+    return { command: 'node', args: [distIndexPath] };
+  }
+  return { command: 'npx', args: ['-y', 'code-memory@latest'] };
+}
+
 function applyHookSettings(text: string): string {
   const config = parseJsonObject(text);
   const hooks = isRecord(config.hooks) ? config.hooks : {};
@@ -319,7 +357,8 @@ function isCodeMemoryHook(value: unknown): boolean {
 }
 
 function applyManagedBlock(text: string, block: string, start: string, end: string): string {
-  const cleaned = removeManagedBlock(text, start, end).trimEnd();
+  const withoutLegacy = removeManagedBlock(text, LEGACY_PROJECT_MARKER_START, LEGACY_PROJECT_MARKER_END);
+  const cleaned = removeManagedBlock(withoutLegacy, start, end).trimEnd();
   return (cleaned ? cleaned + '\n\n' : '') + block + '\n';
 }
 

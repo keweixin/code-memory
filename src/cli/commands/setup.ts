@@ -12,6 +12,7 @@ import {
   setupProjectOnboarding,
 } from '../project-onboarding.js';
 import { bootstrapProject } from './bootstrap.js';
+import { runDoctor } from './doctor.js';
 
 const log = createLogger('setup');
 
@@ -31,6 +32,7 @@ export function registerSetupCommand(program: Command): void {
     .action(async (options) => {
       try {
         const projectRoot = resolveProjectPath(options);
+        const runtime = options.runtime as RuntimeName;
         if (options.bootstrap !== false && !options.dryRun) {
           await bootstrapProject({ project: projectRoot, embedding: 'none', workers: 'auto' });
         }
@@ -38,7 +40,7 @@ export function registerSetupCommand(program: Command): void {
           agent: options.agent as AgentName,
           all: Boolean(options.all),
           projectRoot,
-          runtime: options.runtime as RuntimeName,
+          runtime,
           dryRun: Boolean(options.dryRun),
         });
         const onboardingChanges = setupProjectOnboarding({
@@ -47,13 +49,44 @@ export function registerSetupCommand(program: Command): void {
           writeContext: options.context !== false,
           writeSkills: options.skills !== false,
           writeHooks: options.hooks !== false,
+          runtime,
         });
         console.log(formatAgentChanges(changes, Boolean(options.dryRun)));
         console.log('');
         console.log(formatProjectOnboardingChanges(onboardingChanges, Boolean(options.dryRun)));
+        if (!options.dryRun && options.bootstrap === false) {
+          console.log('');
+          console.log('Code Memory configuration was written.');
+          console.log('');
+          console.log('Project: ' + projectRoot);
+          console.log('Agent: ' + (options.all ? 'all supported agents' : options.agent) + ' configured');
+          console.log('MCP: ' + formatMcpCommand(runtime, projectRoot));
+          console.log('Bootstrap: skipped');
+          console.log('Next: run `code-memory bootstrap --project ' + JSON.stringify(projectRoot) + '` when you want to initialize or refresh the index.');
+        } else if (!options.dryRun) {
+          console.log('');
+          await runDoctor(false, false, false, projectRoot);
+          console.log('');
+          console.log('Code Memory is ready.');
+          console.log('');
+          console.log('Project: ' + projectRoot);
+          console.log('Agent: ' + (options.all ? 'all supported agents' : options.agent) + ' configured');
+          console.log('MCP: ' + formatMcpCommand(runtime, projectRoot));
+          console.log('Context files: ' + (options.context === false ? 'skipped' : 'AGENTS.md, CLAUDE.md'));
+          console.log('Skills: ' + (options.skills === false ? 'skipped' : 'installed'));
+          console.log('Hooks: ' + (options.hooks === false ? 'skipped' : 'installed for Claude Code when supported'));
+          console.log('Next: reload your IDE, then run `code-memory doctor --project ' + JSON.stringify(projectRoot) + '` if the MCP server does not appear.');
+        }
       } catch (err) {
         log.error('Setup failed', err);
         process.exit(1);
       }
     });
+}
+
+function formatMcpCommand(runtime: RuntimeName, projectRoot: string): string {
+  const args = ['serve', '--watch', '--project', projectRoot];
+  if (runtime === 'global') return ['code-memory', ...args].join(' ');
+  if (runtime === 'local') return ['node', '<local dist/index.js>', ...args].join(' ');
+  return ['npx', '-y', 'code-memory@latest', ...args].join(' ');
 }

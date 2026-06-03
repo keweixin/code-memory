@@ -48,6 +48,27 @@ describe('agent setup and uninstall', () => {
     expect(changes[0].after).not.toContain('code-memory@latest');
   });
 
+  it('can generate local runtime MCP config for development builds', () => {
+    const changes = setupAgents({
+      agent: 'cursor',
+      dryRun: true,
+      projectRoot: tempRoot,
+      homeDir,
+      runtime: 'local',
+    });
+
+    const configured = JSON.parse(changes[0].after);
+    expect(configured.mcpServers['code-memory'].command).toBe('node');
+    expect(configured.mcpServers['code-memory'].args[0]).toContain('index.js');
+    expect(configured.mcpServers['code-memory'].args).toEqual(expect.arrayContaining([
+      'serve',
+      '--watch',
+      '--project',
+      tempRoot,
+    ]));
+    expect(configured.mcpServers['code-memory'].args).not.toContain('code-memory@latest');
+  });
+
   it('is idempotent for markdown marker blocks and uninstall only removes code-memory content', () => {
     writeFileSync(join(tempRoot, 'CLAUDE.md'), '# Project\n\nKeep this line.\n', 'utf-8');
 
@@ -105,20 +126,70 @@ describe('agent setup and uninstall', () => {
     expect(second.every((change) => !change.changed)).toBe(true);
 
     const agents = readFileSync(join(tempRoot, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('CODE_MEMORY_PROJECT_CONTEXT_START');
-    expect(agents).toContain('plan_context -> get_context_pack/search_code');
+    expect(agents).toContain('CODE_MEMORY_CONTEXT_START');
+    expect(agents).toContain('plan_context -> get_context_pack/search_code -> search_symbols');
     expect(agents).toContain('Keep this line.');
+    expect(agents.match(/CODE_MEMORY_CONTEXT_START/g)).toHaveLength(1);
 
     const skill = readFileSync(
       join(tempRoot, '.claude', 'skills', 'code-memory', 'code-memory-impact-analysis.md'),
       'utf-8',
     );
-    expect(skill).toContain('Use before editing a shared symbol');
+    expect(skill).toContain('## When to use');
+    expect(skill).toContain('## Tool Order');
+    expect(skill).toContain('## Done checklist');
 
     const hook = readFileSync(join(tempRoot, '.claude', 'hooks', 'code-memory-pretooluse.mjs'), 'utf-8');
     expect(hook).toContain('hookSpecificOutput');
+    expect(hook).toContain('CODE_MEMORY_HOOK_DISABLED');
+    expect(hook).toContain('CODE_MEMORY_PRETOOLUSE');
+    expect(hook).toContain('HOOK_TIMEOUT_MS = 5000');
+    expect(hook).toContain('MAX_OUTPUT_CHARS = 4000');
+    expect(hook).toContain("CODE_MEMORY_COMMAND = \"npx\"");
 
     const settings = JSON.parse(readFileSync(join(tempRoot, '.claude', 'settings.json'), 'utf-8'));
     expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash|Grep|Glob');
+  });
+
+  it('upgrades legacy project context marker without removing user content or duplicating blocks', () => {
+    writeFileSync(
+      join(tempRoot, 'AGENTS.md'),
+      [
+        '# Project',
+        '',
+        'User-owned introduction.',
+        '',
+        '<!-- CODE_MEMORY_PROJECT_CONTEXT_START -->',
+        'old generated block',
+        '<!-- CODE_MEMORY_PROJECT_CONTEXT_END -->',
+        '',
+        'User-owned footer.',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    setupProjectOnboarding({ projectRoot: tempRoot });
+    setupProjectOnboarding({ projectRoot: tempRoot });
+
+    const agents = readFileSync(join(tempRoot, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('User-owned introduction.');
+    expect(agents).toContain('User-owned footer.');
+    expect(agents).not.toContain('CODE_MEMORY_PROJECT_CONTEXT_START');
+    expect(agents).not.toContain('old generated block');
+    expect(agents.match(/CODE_MEMORY_CONTEXT_START/g)).toHaveLength(1);
+  });
+
+  it('writes Claude hook with the selected runtime', () => {
+    setupProjectOnboarding({ projectRoot: tempRoot, runtime: 'global' });
+    let hook = readFileSync(join(tempRoot, '.claude', 'hooks', 'code-memory-pretooluse.mjs'), 'utf-8');
+    expect(hook).toContain("CODE_MEMORY_COMMAND = \"code-memory\"");
+    expect(hook).not.toContain('code-memory@latest');
+
+    setupProjectOnboarding({ projectRoot: tempRoot, runtime: 'local' });
+    hook = readFileSync(join(tempRoot, '.claude', 'hooks', 'code-memory-pretooluse.mjs'), 'utf-8');
+    expect(hook).toContain("CODE_MEMORY_COMMAND = \"node\"");
+    expect(hook).toContain('index.js');
+    expect(hook).not.toContain("CODE_MEMORY_COMMAND = \"npx\"");
   });
 });
