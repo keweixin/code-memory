@@ -19,7 +19,13 @@ Add this to your IDE's MCP settings, then reload:
 }
 ```
 
-Done. No `npm install`, no `cwd` path — `npx` auto-downloads and runs in whatever project you have open.
+First time in a project?
+
+```bash
+npx code-memory@latest bootstrap
+```
+
+That's it. `bootstrap` checks if `.code-memory/index.db` exists, and if not runs `init` + `index --full` automatically.
 
 ---
 
@@ -118,6 +124,7 @@ Clean context, fresh facts, zero human intervention
 ## CLI Commands (via npx)
 
 ```bash
+npx code-memory@latest bootstrap         # Auto-init: detect + init + index
 npx code-memory@latest init              # Initialize project
 npx code-memory@latest index --full      # Full re-index
 npx code-memory@latest query "auth"      # Ad-hoc search
