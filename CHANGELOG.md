@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.6] - 2026-06-03
+
+### Fixed
+- Add the missing shared/module benchmark fixture files to the context benchmark so task definitions match the indexed project
+- Add the auth/user benchmark fixture files to the agent benchmark so all published tasks are measured against real indexed files
+- Improve no-embedding natural-language search recall with an FTS5 relaxed query fallback after strict matching
+- Measure agent hallucinated symbols against the actual SQLite `symbols` table instead of a broad search approximation
+
+### Changed
+- Make benchmark quality gates fail on agent `taskSuccess=false` instead of emitting a warning
+- Raise default release/CI quality floors to production targets: context and agent key-file recall >= 0.90 and evidence coverage >= 0.95
+- Gate context quality on primary production modes (`hybrid` and `hybrid_ledger`) while still reporting all ablation-mode metrics
+
 ## [0.3.5] - 2026-06-03
 
 ### Fixed

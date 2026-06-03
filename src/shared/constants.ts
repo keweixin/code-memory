@@ -3,7 +3,7 @@
  */
 
 // Version
-export const VERSION = '0.3.5';
+export const VERSION = '0.3.6';
 
 // Published npm package spec used by generated npx commands.
 export const NPM_PACKAGE_SPEC = '@keweixin/code-memory@latest';

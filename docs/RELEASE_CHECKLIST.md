@@ -18,7 +18,7 @@ Use this checklist before publishing a public Code Memory release.
 - [ ] Run `npx gitnexus detect-changes --repo code-memory --scope all`.
 - [ ] Run `codegraph sync . && codegraph status .`.
 - [ ] Confirm `npm whoami --registry=https://registry.npmjs.org` locally, or configure repository secret `NPM_TOKEN`.
-- [ ] Create a signed or annotated release tag matching `package.json`, for example `git tag v0.3.5`.
+- [ ] Create a signed or annotated release tag matching `package.json`, for example `git tag v0.3.6`.
 - [ ] Push tag and verify GitHub Actions are green.
 - [ ] Confirm GitHub Release exists.
 - [ ] Confirm npm latest: `npm view @keweixin/code-memory version`.

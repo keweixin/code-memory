@@ -1,6 +1,6 @@
 {
   "name": "@keweixin/code-memory",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "type": "module",
   "description": "Context Ledger and evidence-backed code graph for AI coding agents",
   "author": "keweixin",

@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliPath = join(repoRoot, 'dist', 'index.js');
@@ -265,32 +266,17 @@ function isCommonKeyword(name) {
 async function getIndexSymbolNames(projectRoot) {
   const names = new Set();
   try {
-    const statusRun = await runCli(['status', '--json'], projectRoot);
-    // We can't get symbol names from status, so query broadly
-    const queryRun = await runCli(['query', 'Service normalize save validate Payload', '--json', '--limit', '50'], projectRoot);
-    const stdout = queryRun.stdout;
+    const db = new Database(join(projectRoot, '.code-memory', 'index.db'), { readonly: true, fileMustExist: true });
     try {
-      const jsonStart = stdout.indexOf('[');
-      const jsonEnd = stdout.lastIndexOf(']');
-      if (jsonStart !== -1 && jsonEnd > jsonStart) {
-        const parsed = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
-        for (const item of parsed) {
-          if (item.name) names.add(item.name);
-        }
+      const rows = db.prepare('SELECT DISTINCT name FROM symbols').all();
+      for (const row of rows) {
+        if (row.name) names.add(String(row.name));
       }
-    } catch { /* ignore */ }
-  } catch { /* ignore */ }
-
-  // Also add the known symbols from the benchmark project
-  names.add('Payload');
-  names.add('normalizeEmail');
-  names.add('saveRecord');
-  names.add('validate');
-  names.add('save');
-  names.add('svc');  // local variable in run* functions
-  for (let i = 0; i < 20; i++) {
-    names.add(`Service${i}`);
-    names.add(`run${i}`);
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    console.error(`[agent-bench] Failed to read indexed symbol names: ${err.message}`);
   }
 
   return names;
@@ -394,10 +380,191 @@ function loadTasks(dir, filter) {
 
 function createBenchmarkProject(root, files) {
   mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(join(root, 'src', 'auth'), { recursive: true });
+  mkdirSync(join(root, 'src', 'users'), { recursive: true });
+  mkdirSync(join(root, 'src', 'middleware'), { recursive: true });
+  mkdirSync(join(root, 'src', 'utils'), { recursive: true });
+  mkdirSync(join(root, 'src', 'config'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({
     name: 'code-memory-benchmark-project',
     type: 'module',
   }, null, 2));
+
+  writeFileSync(join(root, 'src', 'auth', 'auth-token.ts'), [
+    "import { verifySignature, generateSecret } from '../utils/crypto.js';",
+    "import { getConfig } from '../config/index.js';",
+    '',
+    'export interface AuthToken {',
+    '  userId: string;',
+    '  expiresAt: number;',
+    '  scope: string[];',
+    '  signature: string;',
+    '}',
+    '',
+    'export function createAuthToken(userId: string, scope: string[] = []): AuthToken {',
+    '  const config = getConfig();',
+    '  const expiresAt = Date.now() + config.tokenTtlMs;',
+    '  const signature = generateSecret(`${userId}:${expiresAt}`);',
+    '  return { userId, expiresAt, scope, signature };',
+    '}',
+    '',
+    'export function validateAuthToken(token: AuthToken): boolean {',
+    '  if (Date.now() > token.expiresAt) return false;',
+    '  const expected = generateSecret(`${token.userId}:${token.expiresAt}`);',
+    '  return verifySignature(token.signature, expected);',
+    '}',
+    '',
+    'export function refreshAuthToken(token: AuthToken): AuthToken | null {',
+    '  if (!validateAuthToken(token)) return null;',
+    '  return createAuthToken(token.userId, token.scope);',
+    '}',
+    '',
+    'export function revokeAuthToken(token: AuthToken): void {',
+    '  token.expiresAt = 0;',
+    '  token.signature = "";',
+    '}',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'auth', 'auth-service.ts'), [
+    "import { createAuthToken, validateAuthToken, refreshAuthToken, revokeAuthToken, type AuthToken } from './auth-token.js';",
+    "import { findUserById, updateUserLastLogin } from '../users/user-service.js';",
+    '',
+    'export class AuthService {',
+    '  private revokedTokens = new Set<string>();',
+    '',
+    '  async login(userId: string, password: string): Promise<AuthToken | null> {',
+    '    const user = await findUserById(userId);',
+    '    if (!user || user.passwordHash !== this.hashPassword(password)) return null;',
+    '    const token = createAuthToken(userId, user.roles);',
+    '    await updateUserLastLogin(userId);',
+    '    return token;',
+    '  }',
+    '',
+    '  async verify(token: AuthToken): Promise<boolean> {',
+    '    if (this.revokedTokens.has(token.signature)) return false;',
+    '    return validateAuthToken(token);',
+    '  }',
+    '',
+    '  async refresh(token: AuthToken): Promise<AuthToken | null> {',
+    '    if (this.revokedTokens.has(token.signature)) return null;',
+    '    return refreshAuthToken(token);',
+    '  }',
+    '',
+    '  async revoke(token: AuthToken): Promise<void> {',
+    '    this.revokedTokens.add(token.signature);',
+    '    revokeAuthToken(token);',
+    '  }',
+    '',
+    '  private hashPassword(password: string): string {',
+    '    return password.split("").reverse().join("");',
+    '  }',
+    '}',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'middleware', 'auth-middleware.ts'), [
+    "import { validateAuthToken, type AuthToken } from '../auth/auth-token.js';",
+    '',
+    'export interface RequestContext {',
+    '  token: AuthToken | null;',
+    '  userId: string | null;',
+    '  path: string;',
+    '  method: string;',
+    '}',
+    '',
+    'export function authMiddleware(ctx: RequestContext): boolean {',
+    '  if (!ctx.token) return false;',
+    '  if (!validateAuthToken(ctx.token)) return false;',
+    '  ctx.userId = ctx.token.userId;',
+    '  return true;',
+    '}',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'utils', 'crypto.ts'), [
+    'export function generateSecret(input: string): string {',
+    '  return Buffer.from(input).toString("base64");',
+    '}',
+    '',
+    'export function verifySignature(signature: string, expected: string): boolean {',
+    '  return signature === expected;',
+    '}',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'config', 'index.ts'), [
+    'export interface AppConfig { tokenTtlMs: number }',
+    'const defaultConfig: AppConfig = { tokenTtlMs: 3600000 };',
+    'export function getConfig(): AppConfig { return defaultConfig; }',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'users', 'user-model.ts'), [
+    'export interface User {',
+    '  id: string;',
+    '  email: string;',
+    '  name: string;',
+    '  roles: string[];',
+    '  passwordHash: string;',
+    '  lastLogin: number | null;',
+    '}',
+    '',
+    'export interface CreateUserDTO { email: string; name: string; password: string; roles?: string[] }',
+    'export interface UpdateUserDTO { email?: string; name?: string; roles?: string[] }',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'users', 'user-repository.ts'), [
+    "import type { User, CreateUserDTO, UpdateUserDTO } from './user-model.js';",
+    '',
+    'const users = new Map<string, User>();',
+    'export function findUserById(id: string): User | undefined { return users.get(id); }',
+    'export function findUserByEmail(email: string): User | undefined { return [...users.values()].find((u) => u.email === email); }',
+    'export function createUser(dto: CreateUserDTO): User {',
+    '  const user: User = { id: crypto.randomUUID(), email: dto.email, name: dto.name, roles: dto.roles || ["user"], passwordHash: dto.password.split("").reverse().join(""), lastLogin: null };',
+    '  users.set(user.id, user);',
+    '  return user;',
+    '}',
+    'export function updateUser(id: string, dto: UpdateUserDTO): User | null {',
+    '  const user = users.get(id);',
+    '  if (!user) return null;',
+    '  Object.assign(user, dto);',
+    '  return user;',
+    '}',
+    'export function deleteUser(id: string): boolean { return users.delete(id); }',
+    'export function listUsers(): User[] { return [...users.values()]; }',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'users', 'user-service.ts'), [
+    "import type { User, CreateUserDTO } from './user-model.js';",
+    "import { findUserById, findUserByEmail, createUser, updateUser, deleteUser, listUsers } from './user-repository.js';",
+    '',
+    'export { findUserById, findUserByEmail, createUser, updateUser, deleteUser, listUsers };',
+    'export async function updateUserLastLogin(userId: string): Promise<void> {',
+    '  const user = findUserById(userId);',
+    '  if (user) updateUser(userId, { name: user.name });',
+    '}',
+    'export function getUserProfile(userId: string): Omit<User, "passwordHash"> | null {',
+    '  const user = findUserById(userId);',
+    '  if (!user) return null;',
+    '  const { passwordHash, ...profile } = user;',
+    '  return profile;',
+    '}',
+    'export function registerUser(dto: CreateUserDTO): User | null {',
+    '  const existing = findUserByEmail(dto.email);',
+    '  if (existing) return null;',
+    '  return createUser(dto);',
+    '}',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'users', 'index.ts'), [
+    "export { findUserById, findUserByEmail, createUser, updateUser, deleteUser, listUsers, updateUserLastLogin, getUserProfile, registerUser } from './user-service.js';",
+    "export type { User, CreateUserDTO, UpdateUserDTO } from './user-model.js';",
+    '',
+  ].join('\n'));
 
   writeFileSync(join(root, 'src', 'shared.ts'), [
     'export interface Payload { id: string; email: string }',

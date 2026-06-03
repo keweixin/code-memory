@@ -18,11 +18,12 @@ describe('benchmark quality gate', () => {
 
   it('passes benchmark outputs that meet minimum quality thresholds', () => {
     const files = writeBenchmarkFiles({
-      contextKeyFileRecall: 0.375,
-      contextEvidenceCoverage: 0.4,
-      contextSymbolRecall: 0.5,
-      agentKeyFileRecall: 0.6,
-      agentEvidenceCoverage: 0.6,
+      contextKeyFileRecall: 0.95,
+      contextEvidenceCoverage: 0.98,
+      contextSymbolRecall: 0.85,
+      agentTaskSuccess: true,
+      agentKeyFileRecall: 0.95,
+      agentEvidenceCoverage: 0.98,
     });
 
     const output = execFileSync(process.execPath, [
@@ -38,10 +39,29 @@ describe('benchmark quality gate', () => {
   it('fails when context or agent recall regresses below the floor', () => {
     const files = writeBenchmarkFiles({
       contextKeyFileRecall: 0.1,
-      contextEvidenceCoverage: 0.4,
-      contextSymbolRecall: 0.5,
+      contextEvidenceCoverage: 0.98,
+      contextSymbolRecall: 0.85,
+      agentTaskSuccess: true,
       agentKeyFileRecall: 0.2,
-      agentEvidenceCoverage: 0.6,
+      agentEvidenceCoverage: 0.98,
+    });
+
+    expect(() => execFileSync(process.execPath, [
+      'tools/benchmark-quality-gate.mjs',
+      '--index', files.index,
+      '--context', files.context,
+      '--agent', files.agent,
+    ], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' })).toThrow();
+  });
+
+  it('fails when the agent benchmark does not complete every task', () => {
+    const files = writeBenchmarkFiles({
+      contextKeyFileRecall: 0.95,
+      contextEvidenceCoverage: 0.98,
+      contextSymbolRecall: 0.85,
+      agentTaskSuccess: false,
+      agentKeyFileRecall: 1,
+      agentEvidenceCoverage: 1,
     });
 
     expect(() => execFileSync(process.execPath, [
@@ -56,6 +76,7 @@ describe('benchmark quality gate', () => {
     contextKeyFileRecall: number;
     contextEvidenceCoverage: number;
     contextSymbolRecall: number;
+    agentTaskSuccess: boolean;
     agentKeyFileRecall: number;
     agentEvidenceCoverage: number;
   }): { index: string; context: string; agent: string } {
@@ -72,6 +93,12 @@ describe('benchmark quality gate', () => {
       benchmark: 'context',
       status: 'complete',
       metrics: {
+        keyFileRecall: 0.1,
+        evidenceCoverage: 0.1,
+        symbolRecall: 0.1,
+        tokenWasteRatio: 0,
+      },
+      primaryMetrics: {
         keyFileRecall: metrics.contextKeyFileRecall,
         evidenceCoverage: metrics.contextEvidenceCoverage,
         symbolRecall: metrics.contextSymbolRecall,
@@ -82,7 +109,7 @@ describe('benchmark quality gate', () => {
       benchmark: 'agent',
       status: 'measured',
       metrics: {
-        taskSuccess: true,
+        taskSuccess: metrics.agentTaskSuccess,
         keyFileRecall: metrics.agentKeyFileRecall,
         evidenceCoverage: metrics.agentEvidenceCoverage,
         hallucinatedSymbolRate: 0,

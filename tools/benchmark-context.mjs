@@ -83,6 +83,9 @@ try {
     modeCount: modesToRun.length,
     results: allResults,
     metrics: aggregateMetrics(allResults),
+    primaryMetrics: aggregateMetrics(allResults.filter((result) =>
+      result.mode === 'hybrid' || result.mode === 'hybrid_ledger',
+    )),
   };
 
   console.log(JSON.stringify(output, null, 2));
@@ -370,6 +373,41 @@ function createBenchmarkProject(root) {
     name: 'benchmark-context-project',
     type: 'module',
   }, null, 2));
+
+  // ── Shared/module flow used by the generic benchmark tasks ──
+  writeFileSync(join(root, 'src', 'shared.ts'), [
+    'export interface Payload { id: string; email: string }',
+    '',
+    'export function normalizeEmail(email: string): string {',
+    '  return email.trim().toLowerCase();',
+    '}',
+    '',
+    'export function saveRecord(id: string): string {',
+    '  return `saved:${id}`;',
+    '}',
+    '',
+  ].join('\n'));
+
+  writeFileSync(join(root, 'src', 'module-0.ts'), [
+    "import { normalizeEmail, saveRecord, type Payload } from './shared.js';",
+    '',
+    'export class Service0 {',
+    '  validate(payload: Payload): boolean {',
+    '    return normalizeEmail(payload.email).includes("@");',
+    '  }',
+    '',
+    '  save(payload: Payload): string {',
+    '    if (!this.validate(payload)) throw new Error("invalid payload");',
+    '    return saveRecord(payload.id);',
+    '  }',
+    '}',
+    '',
+    'export function run0(payload: Payload): string {',
+    '  const svc = new Service0();',
+    '  return svc.save(payload);',
+    '}',
+    '',
+  ].join('\n'));
 
   // ── Auth module ──
   writeFileSync(join(root, 'src', 'auth', 'auth-token.ts'), [

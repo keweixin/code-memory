@@ -4,7 +4,7 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
-Current source version: `0.3.5`.
+Current source version: `0.3.6`.
 
 Published npm status can lag the repository. Check before using `@latest`:
 
@@ -12,7 +12,7 @@ Published npm status can lag the repository. Check before using `@latest`:
 npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.3.5`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP router, unified tool routing, and benchmark gate fixes yet.
+If npm reports a version older than `0.3.6`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP router, unified tool routing, and benchmark gate fixes yet.
 
 Run this from the project you want an agent to understand:
 
@@ -227,13 +227,17 @@ These are local benchmark results from this repository on Windows with Node 22 a
 |---|---:|
 | 2000-file index throughput | 91.6 files/s |
 | 2000-file peak RSS | 446.5 MB |
-| Agent benchmark key file recall | 0.60 |
-| Agent benchmark evidence coverage | 0.60 |
+| Agent benchmark task success | true |
+| Agent benchmark key file recall | 1.00 |
+| Agent benchmark evidence coverage | 1.00 |
 | Agent benchmark hallucinated symbol rate | 0.00 |
 | Agent benchmark stale failure rate | 0.00 |
-| Context benchmark key file recall | 0.375 |
-| Context benchmark evidence coverage | 0.400 |
-| Context benchmark average search latency | 167 ms |
+| Context primary key file recall | 1.00 |
+| Context primary evidence coverage | 1.00 |
+| Context primary symbol recall | 0.825 |
+| Context primary average search latency | 131 ms |
+
+The context benchmark also reports ablation modes (`keyword_only`, `graph_only`) for diagnostics. Release gates enforce the primary production modes (`hybrid`, `hybrid_ledger`) plus the agent workflow.
 
 Reproduce:
 

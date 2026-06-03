@@ -4,17 +4,15 @@ import { readFileSync } from 'node:fs';
 
 const options = parseArgs(process.argv.slice(2));
 const failures = [];
-const warnings = [];
-
 const thresholds = {
   indexMinThroughput: numberEnv('CODE_MEMORY_GATE_INDEX_MIN_THROUGHPUT', 5),
   indexMaxRssMb: numberEnv('CODE_MEMORY_GATE_INDEX_MAX_RSS_MB', 1200),
-  contextMinKeyFileRecall: numberEnv('CODE_MEMORY_GATE_CONTEXT_MIN_KEY_FILE_RECALL', 0.30),
-  contextMinEvidenceCoverage: numberEnv('CODE_MEMORY_GATE_CONTEXT_MIN_EVIDENCE_COVERAGE', 0.30),
-  contextMinSymbolRecall: numberEnv('CODE_MEMORY_GATE_CONTEXT_MIN_SYMBOL_RECALL', 0.25),
+  contextMinKeyFileRecall: numberEnv('CODE_MEMORY_GATE_CONTEXT_MIN_KEY_FILE_RECALL', 0.90),
+  contextMinEvidenceCoverage: numberEnv('CODE_MEMORY_GATE_CONTEXT_MIN_EVIDENCE_COVERAGE', 0.95),
+  contextMinSymbolRecall: numberEnv('CODE_MEMORY_GATE_CONTEXT_MIN_SYMBOL_RECALL', 0.80),
   contextMaxTokenWasteRatio: numberEnv('CODE_MEMORY_GATE_CONTEXT_MAX_TOKEN_WASTE_RATIO', 0.50),
-  agentMinKeyFileRecall: numberEnv('CODE_MEMORY_GATE_AGENT_MIN_KEY_FILE_RECALL', 0.50),
-  agentMinEvidenceCoverage: numberEnv('CODE_MEMORY_GATE_AGENT_MIN_EVIDENCE_COVERAGE', 0.50),
+  agentMinKeyFileRecall: numberEnv('CODE_MEMORY_GATE_AGENT_MIN_KEY_FILE_RECALL', 0.90),
+  agentMinEvidenceCoverage: numberEnv('CODE_MEMORY_GATE_AGENT_MIN_EVIDENCE_COVERAGE', 0.95),
   agentMaxHallucinatedSymbolRate: numberEnv('CODE_MEMORY_GATE_AGENT_MAX_HALLUCINATED_SYMBOL_RATE', 0.05),
   agentMaxStaleFailureRate: numberEnv('CODE_MEMORY_GATE_AGENT_MAX_STALE_FAILURE_RATE', 0),
 };
@@ -27,10 +25,6 @@ if (options.context) {
 }
 if (options.agent) {
   checkAgent(readJsonFile(options.agent));
-}
-
-for (const warning of warnings) {
-  console.log('::warning::' + warning);
 }
 
 if (failures.length > 0) {
@@ -58,7 +52,7 @@ function checkIndex(json) {
 }
 
 function checkContext(json) {
-  const metrics = json.metrics || {};
+  const metrics = json.primaryMetrics || json.metrics || {};
   assertMin(metrics.keyFileRecall, thresholds.contextMinKeyFileRecall, 'context keyFileRecall');
   assertMin(metrics.evidenceCoverage, thresholds.contextMinEvidenceCoverage, 'context evidenceCoverage');
   assertMin(metrics.symbolRecall, thresholds.contextMinSymbolRecall, 'context symbolRecall');
@@ -71,7 +65,7 @@ function checkAgent(json) {
     failures.push(`agent benchmark status is ${json.status ?? 'missing'}, expected measured`);
   }
   if (metrics.taskSuccess === false) {
-    warnings.push('agent benchmark did not pass every synthetic task; enforcing recall/coverage floors instead');
+    failures.push('agent benchmark taskSuccess is false');
   }
   assertMin(metrics.keyFileRecall, thresholds.agentMinKeyFileRecall, 'agent keyFileRecall');
   assertMin(metrics.evidenceCoverage, thresholds.agentMinEvidenceCoverage, 'agent evidenceCoverage');
