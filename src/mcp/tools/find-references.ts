@@ -17,7 +17,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:find-references");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -32,7 +33,7 @@ function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
 }
 
 export function registerFindReferencesTool(server: McpServer, db: SqlJsDatabase): void {
-  const graphEngine = new GraphEngine(db);
+  const graphEngine = db ? new GraphEngine(db) : null;
 
   server.tool(
     "find_references",
@@ -48,7 +49,7 @@ export function registerFindReferencesTool(server: McpServer, db: SqlJsDatabase)
     async ({ symbolName, maxResults, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb) => {
-          const activeGraphEngine = repo ? new GraphEngine(activeDb) : graphEngine;
+          const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const symbolIds = findSymbolIds(activeDb, symbolName);
           if (symbolIds.length === 0) {
             return {

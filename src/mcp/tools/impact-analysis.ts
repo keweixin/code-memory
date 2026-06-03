@@ -17,7 +17,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:impact-analysis");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -32,7 +33,7 @@ function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
 }
 
 export function registerImpactAnalysisTool(server: McpServer, db: SqlJsDatabase): void {
-  const analyzer = new ImpactAnalyzer(db);
+  const analyzer = db ? new ImpactAnalyzer(db) : null;
 
   server.tool(
     "impact_analysis",
@@ -47,7 +48,7 @@ export function registerImpactAnalysisTool(server: McpServer, db: SqlJsDatabase)
     async ({ target, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb) => {
-          const activeAnalyzer = repo ? new ImpactAnalyzer(activeDb) : analyzer;
+          const activeAnalyzer = analyzer && activeDb === db ? analyzer : new ImpactAnalyzer(activeDb);
           const result = activeAnalyzer.analyze(target);
 
           if (result.affectedFiles.length === 0 && result.affectedSymbols.length === 0) {

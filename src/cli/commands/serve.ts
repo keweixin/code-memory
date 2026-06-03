@@ -20,6 +20,8 @@ export function registerServeCommand(program: Command): void {
     .option('--mcp', 'Use MCP stdio transport (default)', true)
     .option('--no-mcp', 'Fail clearly; alternate transports are not supported yet')
     .option('--watch', 'Keep the index synchronized while serving MCP')
+    .option('--auto-project', 'Start a global MCP router and resolve projects per tool call')
+    .option('--auto-bootstrap', 'Auto-initialize or index before fixed-project serving')
     .option('--no-bootstrap', 'Do not auto-initialize or index before serving')
     .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .action(async (options) => {
@@ -39,6 +41,7 @@ export function registerServeCommand(program: Command): void {
 interface ServeOptions {
   mcp?: boolean;
   watch?: boolean;
+  autoProject?: boolean;
   bootstrap?: boolean;
   project?: string;
 }
@@ -68,14 +71,12 @@ export interface ServeDependencies {
   bootstrapProject?: (options: { project: string; embedding?: string; workers?: string }) => Promise<void>;
   startIndexWatcher?: (projectPath: string, config: CodeMemoryConfig) => unknown;
   startMcpServer?: (
-    projectPath: string,
+    projectPath?: string,
     options?: { installSignalHandlers?: boolean; onShutdownComplete?: (signal: string) => void },
   ) => Promise<void>;
 }
 
 export async function startServer(options: ServeOptions, deps: ServeDependencies = {}): Promise<void> {
-  const projectPath = resolveProjectPath(options);
-
   if (options.mcp === false) {
     throw new ServeCommandError(
       'UNSUPPORTED_TRANSPORT',
@@ -83,10 +84,16 @@ export async function startServer(options: ServeOptions, deps: ServeDependencies
     );
   }
 
-  if (options.watch) {
-    if (options.bootstrap !== false) {
-      await bootstrapBeforeServe(projectPath, deps);
-    }
+  if (options.autoProject) {
+    log.info('Starting global MCP server with auto-project routing...');
+    await startMcp(undefined, deps);
+    return;
+  }
+
+  const projectPath = resolveProjectPath(options);
+
+  if (options.watch && options.bootstrap !== false) {
+    await bootstrapBeforeServe(projectPath, deps);
   }
 
   const config = loadServeConfig(projectPath);
@@ -97,9 +104,13 @@ export async function startServer(options: ServeOptions, deps: ServeDependencies
 
   log.info('Starting MCP server...');
 
+  await startMcp(projectPath, deps);
+}
+
+async function startMcp(projectPath: string | undefined, deps: ServeDependencies): Promise<void> {
   try {
-    const startMcp = deps.startMcpServer ?? (await import('../../mcp/server.js')).startServer;
-    await startMcp(projectPath, {
+    const startMcpServer = deps.startMcpServer ?? (await import('../../mcp/server.js')).startServer;
+    await startMcpServer(projectPath, {
       installSignalHandlers: true,
       onShutdownComplete: () => process.exit(0),
     });

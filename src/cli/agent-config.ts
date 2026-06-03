@@ -9,6 +9,7 @@ import {
 } from '../mcp/server-instructions.js';
 
 export type AgentName = 'claude' | 'cursor' | 'codex' | 'gemini' | 'opencode';
+export type AgentSelector = AgentName | 'auto';
 export type RuntimeName = 'npx' | 'global' | 'local';
 
 interface McpLaunchSpec {
@@ -26,12 +27,13 @@ export interface AgentConfigChange {
 }
 
 export interface AgentConfigOptions {
-  agent?: AgentName;
+  agent?: AgentSelector;
   all?: boolean;
   dryRun?: boolean;
   projectRoot?: string;
   homeDir?: string;
   runtime?: RuntimeName;
+  bindProject?: boolean;
 }
 
 export const SUPPORTED_AGENTS: AgentName[] = ['claude', 'cursor', 'codex', 'gemini', 'opencode'];
@@ -71,7 +73,13 @@ export function formatAgentChanges(changes: AgentConfigChange[], dryRun: boolean
 
 function getTargetAgents(options: AgentConfigOptions): AgentName[] {
   if (options.all) return SUPPORTED_AGENTS;
+  if (options.agent === 'auto') return detectAgents(options);
   return [options.agent || 'codex'];
+}
+
+function detectAgents(options: AgentConfigOptions): AgentName[] {
+  const detected = SUPPORTED_AGENTS.filter((agent) => existsSync(getAgentConfigPath(agent, options)));
+  return detected.length > 0 ? detected : ['codex'];
 }
 
 function getHomeDir(options: AgentConfigOptions): string {
@@ -88,8 +96,10 @@ function getRuntime(options: AgentConfigOptions): RuntimeName {
   throw new Error('--runtime must be one of: npx, global, local');
 }
 
-function getMcpLaunchSpec(projectRoot: string, runtime: RuntimeName): McpLaunchSpec {
-  const serveArgs = ['serve', '--watch', '--project', projectRoot];
+function getMcpLaunchSpec(projectRoot: string, runtime: RuntimeName, bindProject = false): McpLaunchSpec {
+  const serveArgs = bindProject
+    ? ['serve', '--watch', '--project', projectRoot]
+    : ['serve', '--watch', '--auto-project'];
   if (runtime === 'global') {
     return { command: 'code-memory', args: serveArgs };
   }
@@ -104,7 +114,7 @@ function buildSetupChange(agent: AgentName, options: AgentConfigOptions): AgentC
   const filePath = getAgentConfigPath(agent, options);
   const before = readText(filePath);
   const projectRoot = getProjectRoot(options);
-  const launch = getMcpLaunchSpec(projectRoot, getRuntime(options));
+  const launch = getMcpLaunchSpec(projectRoot, getRuntime(options), Boolean(options.bindProject));
   const after = isJsonAgent(agent)
     ? applyJsonMcpConfig(before, launch)
     : applyManagedBlock(before, getAgentBlock(agent, launch));

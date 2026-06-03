@@ -45,7 +45,8 @@ export function prependIndexDiagnostics(text: string, db: SqlJsDatabase, project
   return formatIndexDiagnostics(db, projectRoot) + '\n\n' + text;
 }
 
-export function withIndexDiagnostics(server: McpServer, db: SqlJsDatabase): McpServer {
+export function withIndexDiagnostics(server: McpServer, db?: SqlJsDatabase): McpServer {
+  if (!db) return server;
   const originalTool = server.tool.bind(server) as (...args: unknown[]) => unknown;
   const diagnosticServer = Object.create(server) as McpServer;
 

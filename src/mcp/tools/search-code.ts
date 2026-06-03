@@ -34,7 +34,7 @@ export function registerSearchCodeTool(
   vectorSearchProvider?: VectorSearchProvider | null,
   vectorSearchProviderResolver: VectorSearchProviderResolver = loadVectorSearchProviderForRepo,
 ): void {
-  const searchEngine = new HybridSearchEngine(db, undefined, vectorSearchProvider || undefined);
+  const searchEngine = db ? new HybridSearchEngine(db, undefined, vectorSearchProvider || undefined) : null;
 
   server.tool(
     "search_code",
@@ -55,12 +55,12 @@ export function registerSearchCodeTool(
     async ({ query, limit, fileFilter, searchMode, intent, sessionId, avoidRepeated, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb, projectRoot) => {
-          const activeVectorSearchProvider = repo
+          const activeVectorSearchProvider = repo || activeDb !== db
             ? await vectorSearchProviderResolver(projectRoot)
             : vectorSearchProvider || null;
-          const activeSearchEngine = repo
-            ? new HybridSearchEngine(activeDb, undefined, activeVectorSearchProvider || undefined)
-            : searchEngine;
+          const activeSearchEngine = searchEngine && activeDb === db
+            ? searchEngine
+            : new HybridSearchEngine(activeDb, undefined, activeVectorSearchProvider || undefined);
           const results = await activeSearchEngine.searchCode(query, {
             limit: Math.min(limit, 50),
             fileFilter: fileFilter || undefined,
@@ -122,7 +122,8 @@ export function registerSearchCodeTool(
 
 // ── Formatting ───────────────────────────────────────────────
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {

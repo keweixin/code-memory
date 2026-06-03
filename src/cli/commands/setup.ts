@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import {
   formatAgentChanges,
   setupAgents,
-  type AgentName,
+  type AgentSelector,
   type RuntimeName,
 } from '../agent-config.js';
 import { createLogger } from '../../shared/logger.js';
@@ -20,10 +20,13 @@ export function registerSetupCommand(program: Command): void {
   program
     .command('setup')
     .description('Configure an AI agent to use the code-memory MCP server')
-    .option('--agent <agent>', 'Agent: claude | cursor | codex | gemini | opencode', 'codex')
+    .option('--agent <agent>', 'Agent: auto | claude | cursor | codex | gemini | opencode', 'auto')
     .option('--all', 'Configure all supported agents')
-    .option('--project <path>', 'Project root path to write into MCP args')
+    .option('--project <path>', 'Project root path for onboarding and registration')
+    .option('--bind-project', 'Bind generated MCP config to --project instead of global --auto-project routing')
     .option('--runtime <runtime>', 'Runtime: npx | global | local', 'npx')
+    .option('--print-config <agent>', 'Print the generated MCP config for one agent without writing files')
+    .option('--yes', 'Accept planned writes without prompting')
     .option('--no-bootstrap', 'Only write agent/project files; do not initialize or index')
     .option('--no-context', 'Do not write AGENTS.md / CLAUDE.md Code Memory context block')
     .option('--no-skills', 'Do not write .claude/skills/code-memory skill files')
@@ -33,16 +36,22 @@ export function registerSetupCommand(program: Command): void {
       try {
         const projectRoot = resolveProjectPath(options);
         const runtime = options.runtime as RuntimeName;
-        if (options.bootstrap !== false && !options.dryRun) {
+        const printConfig = options.printConfig as AgentSelector | undefined;
+        if (options.bootstrap !== false && !options.dryRun && !printConfig) {
           await bootstrapProject({ project: projectRoot, embedding: 'none', workers: 'auto' });
         }
         const changes = setupAgents({
-          agent: options.agent as AgentName,
+          agent: (printConfig ?? options.agent) as AgentSelector,
           all: Boolean(options.all),
           projectRoot,
           runtime,
-          dryRun: Boolean(options.dryRun),
+          bindProject: Boolean(options.bindProject),
+          dryRun: Boolean(options.dryRun) || Boolean(printConfig),
         });
+        if (printConfig) {
+          console.log(formatAgentChanges(changes, true));
+          return;
+        }
         const onboardingChanges = setupProjectOnboarding({
           projectRoot,
           dryRun: Boolean(options.dryRun),
@@ -60,7 +69,7 @@ export function registerSetupCommand(program: Command): void {
           console.log('');
           console.log('Project: ' + projectRoot);
           console.log('Agent: ' + (options.all ? 'all supported agents' : options.agent) + ' configured');
-          console.log('MCP: ' + formatMcpCommand(runtime, projectRoot));
+          console.log('MCP: ' + formatMcpCommand(runtime, projectRoot, Boolean(options.bindProject)));
           console.log('Bootstrap: skipped');
           console.log('Next: run `code-memory bootstrap --project ' + JSON.stringify(projectRoot) + '` when you want to initialize or refresh the index.');
         } else if (!options.dryRun) {
@@ -71,7 +80,7 @@ export function registerSetupCommand(program: Command): void {
           console.log('');
           console.log('Project: ' + projectRoot);
           console.log('Agent: ' + (options.all ? 'all supported agents' : options.agent) + ' configured');
-          console.log('MCP: ' + formatMcpCommand(runtime, projectRoot));
+          console.log('MCP: ' + formatMcpCommand(runtime, projectRoot, Boolean(options.bindProject)));
           console.log('Context files: ' + (options.context === false ? 'skipped' : 'AGENTS.md, CLAUDE.md'));
           console.log('Skills: ' + (options.skills === false ? 'skipped' : 'installed'));
           console.log('Hooks: ' + (options.hooks === false ? 'skipped' : 'installed for Claude Code when supported'));
@@ -84,8 +93,10 @@ export function registerSetupCommand(program: Command): void {
     });
 }
 
-function formatMcpCommand(runtime: RuntimeName, projectRoot: string): string {
-  const args = ['serve', '--watch', '--project', projectRoot];
+function formatMcpCommand(runtime: RuntimeName, projectRoot: string, bindProject = false): string {
+  const args = bindProject
+    ? ['serve', '--watch', '--project', projectRoot]
+    : ['serve', '--watch', '--auto-project'];
   if (runtime === 'global') return ['code-memory', ...args].join(' ');
   if (runtime === 'local') return ['node', '<local dist/index.js>', ...args].join(' ');
   return ['npx', '-y', 'code-memory@latest', ...args].join(' ');

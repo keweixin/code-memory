@@ -129,6 +129,27 @@ describe('CLI serve command', () => {
     expect(existsSync(join(tempRoot, '.code-memory', 'config.json'))).toBe(true);
   });
 
+  it('starts global auto-project MCP without requiring a project config', async () => {
+    let startedProject: string | undefined = 'not-called';
+
+    await expect(startServer(
+      { watch: true, autoProject: true },
+      {
+        bootstrapProject: async () => {
+          throw new Error('should not bootstrap in global mode');
+        },
+        startIndexWatcher: () => {
+          throw new Error('should not watch a fixed project in global mode');
+        },
+        startMcpServer: async (project) => {
+          startedProject = project;
+        },
+      },
+    )).resolves.toBeUndefined();
+
+    expect(startedProject).toBeUndefined();
+  });
+
   it('keeps --no-bootstrap strict for cold serve startup', async () => {
     await expect(startServer(
       { watch: true, bootstrap: false },

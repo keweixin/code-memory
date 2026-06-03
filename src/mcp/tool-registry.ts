@@ -32,6 +32,7 @@ import { registerInvalidateMemoryTool } from "./tools/invalidate-memory.js";
 import { registerExplainModuleTool } from "./tools/explain-module.js";
 import { registerContextLedgerTools } from "./tools/context-ledger.js";
 import { registerGetUnifiedRepoMapTool } from "./tools/get-unified-repo-map.js";
+import { registerResolveProjectTool } from "./tools/resolve-project.js";
 
 const log = createLogger("mcp:tool-registry");
 
@@ -90,7 +91,10 @@ function appendToolDescriptionGuidance(toolName: string, description: string): s
 
 function getToolWorkflowGuidance(toolName: string): string {
   if (toolName === 'plan_context') {
-    return 'WHEN TO USE: first call for a new task or repo switch. AFTER THIS: call get_context_pack or search_code.';
+    return 'WHEN TO USE: after resolve_project confirms the repo is ready. AFTER THIS: call get_context_pack or search_code.';
+  }
+  if (toolName === 'resolve_project') {
+    return 'WHEN TO USE: first call for a new task, repo switch, missing index, or cwd mismatch. AFTER THIS: call plan_context if ready, otherwise run the returned bootstrap/index command.';
   }
   if (toolName === 'get_context_pack' || toolName === 'search_code') {
     return 'WHEN TO USE: understand a feature or find code after plan_context. AFTER THIS: call search_symbols, then find_definition or find_references for exact symbols.';
@@ -113,6 +117,9 @@ function getToolWorkflowGuidance(toolName: string): string {
 function getNextStepHint(toolName: string): string {
   if (toolName === 'plan_context') {
     return '[Next: call get_context_pack for bounded evidence, or search_code if you only need ranked matches.]';
+  }
+  if (toolName === 'resolve_project') {
+    return '[Next: if status is ready call plan_context; otherwise run the returned bootstrap/index command.]';
   }
   if (toolName === 'get_context_pack' || toolName === 'search_code') {
     return '[Next: pick a symbol/file from the results, then call search_symbols -> find_definition/find_references.]';
@@ -143,65 +150,67 @@ export interface ToolRegistryOptions {
 /**
  * Register all MCP tools on the given server instance.
  *
- * The database must already be initialized (via getDatabase()).
- * Each tool receives the database instance for direct queries.
+ * In fixed-project mode, the database is initialized before registration.
+ * In global auto-project mode, tools resolve and open project databases lazily.
  */
 export function registerAllTools(
   server: McpServer,
-  db: SqlJsDatabase,
+  db?: SqlJsDatabase,
   options: ToolRegistryOptions = {},
 ): void {
   log.info("Registering MCP tools...");
   const diagnosticServer = withIndexDiagnostics(server, db);
   const timedServer = withResponseTiming(diagnosticServer);
+  const routedDb = db as SqlJsDatabase;
 
   // ---- Navigation & Discovery ----
-  registerGetProjectCardTool(timedServer, db);
-  registerGetRepoMapTool(timedServer, db);
+  registerResolveProjectTool(timedServer);
+  registerGetProjectCardTool(timedServer, routedDb);
+  registerGetRepoMapTool(timedServer, routedDb);
 
   // ---- Search ----
   registerSearchCodeTool(
     timedServer,
-    db,
+    routedDb,
     options.vectorSearchProvider,
     options.vectorSearchProviderResolver,
   );
-  registerSearchSymbolsTool(timedServer, db);
+  registerSearchSymbolsTool(timedServer, routedDb);
 
   // ---- Symbol Navigation ----
-  registerFindDefinitionTool(timedServer, db);
-  registerFindReferencesTool(timedServer, db);
+  registerFindDefinitionTool(timedServer, routedDb);
+  registerFindReferencesTool(timedServer, routedDb);
 
   // ---- Graph Analysis ----
-  registerGetCallGraphTool(timedServer, db);
-  registerGetDependencyGraphTool(timedServer, db);
-  registerImpactAnalysisTool(timedServer, db);
-  registerGetRouteMapTool(timedServer, db);
-  registerGetCommunityTool(timedServer, db);
-  registerGetProcessTool(timedServer, db);
+  registerGetCallGraphTool(timedServer, routedDb);
+  registerGetDependencyGraphTool(timedServer, routedDb);
+  registerImpactAnalysisTool(timedServer, routedDb);
+  registerGetRouteMapTool(timedServer, routedDb);
+  registerGetCommunityTool(timedServer, routedDb);
+  registerGetProcessTool(timedServer, routedDb);
 
   // ---- Testing ----
-  registerGetRelatedTestsTool(timedServer, db);
+  registerGetRelatedTestsTool(timedServer, routedDb);
 
   // ---- Context ----
-  registerPlanContextTool(timedServer, db);
+  registerPlanContextTool(timedServer, routedDb);
   registerGetContextPackTool(
     timedServer,
-    db,
+    routedDb,
     options.vectorSearchProvider,
     options.vectorSearchProviderResolver,
   );
 
   // ---- Memory ----
-  registerRememberProjectFactTool(timedServer, db);
-  registerInvalidateMemoryTool(timedServer, db);
-  registerContextLedgerTools(timedServer, db);
+  registerRememberProjectFactTool(timedServer, routedDb);
+  registerInvalidateMemoryTool(timedServer, routedDb);
+  registerContextLedgerTools(timedServer, routedDb);
 
   // ---- Understanding ----
-  registerExplainModuleTool(timedServer, db);
+  registerExplainModuleTool(timedServer, routedDb);
 
   // ---- Multi-Repo ----
   registerGetUnifiedRepoMapTool(timedServer, db);
 
-  log.info("All 25 MCP tools registered");
+  log.info("All 26 MCP tools registered");
 }

@@ -30,7 +30,8 @@ describe('agent setup and uninstall', () => {
     expect(changes[0].changed).toBe(true);
     expect(changes[0].after).toContain('CODE_MEMORY_START');
     expect(changes[0].after).toContain('command = "npx"');
-    expect(changes[0].after).toContain(`"code-memory@latest","serve","--watch","--project","${tempRoot.replace(/\\/g, '\\\\')}"`);
+    expect(changes[0].after).toContain('"code-memory@latest","serve","--watch","--auto-project"');
+    expect(changes[0].after).not.toContain('--project');
     expect(existsSync(changes[0].filePath)).toBe(false);
   });
 
@@ -44,7 +45,8 @@ describe('agent setup and uninstall', () => {
     });
 
     expect(changes[0].after).toContain('command = "code-memory"');
-    expect(changes[0].after).toContain(`"serve","--watch","--project","${tempRoot.replace(/\\/g, '\\\\')}"`);
+    expect(changes[0].after).toContain('"serve","--watch","--auto-project"');
+    expect(changes[0].after).not.toContain('--project');
     expect(changes[0].after).not.toContain('code-memory@latest');
   });
 
@@ -63,10 +65,22 @@ describe('agent setup and uninstall', () => {
     expect(configured.mcpServers['code-memory'].args).toEqual(expect.arrayContaining([
       'serve',
       '--watch',
-      '--project',
-      tempRoot,
+      '--auto-project',
     ]));
     expect(configured.mcpServers['code-memory'].args).not.toContain('code-memory@latest');
+  });
+
+  it('can bind generated MCP config to a fixed project when requested', () => {
+    const changes = setupAgents({
+      agent: 'codex',
+      dryRun: true,
+      projectRoot: tempRoot,
+      homeDir,
+      bindProject: true,
+    });
+
+    expect(changes[0].after).toContain(`"serve","--watch","--project","${tempRoot.replace(/\\/g, '\\\\')}"`);
+    expect(changes[0].after).not.toContain('--auto-project');
   });
 
   it('is idempotent for markdown marker blocks and uninstall only removes code-memory content', () => {
@@ -106,7 +120,7 @@ describe('agent setup and uninstall', () => {
     expect(configured.mcpServers.other.command).toBe('other-mcp');
     expect(configured.mcpServers['code-memory']).toEqual({
       command: 'npx',
-      args: ['-y', 'code-memory@latest', 'serve', '--watch', '--project', tempRoot],
+      args: ['-y', 'code-memory@latest', 'serve', '--watch', '--auto-project'],
     });
 
     uninstallAgents({ agent: 'cursor', projectRoot: tempRoot, homeDir });
@@ -127,7 +141,7 @@ describe('agent setup and uninstall', () => {
 
     const agents = readFileSync(join(tempRoot, 'AGENTS.md'), 'utf-8');
     expect(agents).toContain('CODE_MEMORY_CONTEXT_START');
-    expect(agents).toContain('plan_context -> get_context_pack/search_code -> search_symbols');
+    expect(agents).toContain('resolve_project -> plan_context -> get_context_pack/search_code -> search_symbols');
     expect(agents).toContain('Keep this line.');
     expect(agents.match(/CODE_MEMORY_CONTEXT_START/g)).toHaveLength(1);
 

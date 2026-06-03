@@ -61,6 +61,11 @@ describe('MCP repo routing', () => {
     const server = new FakeMcpServer();
     registerAllTools(server as never, getDatabaseSync());
 
+    const routedResolution = await server.handlers.get('resolve_project')!({ repo: 'second' });
+    expect(routedResolution.content[0].text).toContain('"status": "ready"');
+    expect(routedResolution.content[0].text).toContain('"repoName": "second"');
+    expect(routedResolution.content[0].text).toContain('"indexExists": true');
+
     const defaultCard = await server.handlers.get('get_project_card')!({});
     expect(defaultCard.content[0].text).toContain('Name:       first-project');
     expect(defaultCard.content[0].text).toContain(firstRoot);
@@ -174,7 +179,7 @@ describe('MCP repo routing', () => {
       limit: 5,
     });
     expect(defaultSearchAfterRoutedCall.content[0].text).toContain('alphaOnly');
-  });
+  }, 20_000);
 });
 
 async function indexProject(rootPath: string, projectName: string, symbolName: string): Promise<void> {

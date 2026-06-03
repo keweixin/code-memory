@@ -26,7 +26,7 @@ Then verify the installation:
 npx -y code-memory@latest doctor --project .
 ```
 
-Reload your IDE after setup. The generated MCP config uses an absolute project path, so it does not depend on the IDE's current working directory.
+Reload your IDE after setup. The generated MCP config starts a global router, so the MCP server can start even when the IDE current working directory is not an initialized project.
 
 ## Supported Agents
 
@@ -45,8 +45,14 @@ The default runtime is `npx`, which avoids global installs:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "code-memory@latest", "serve", "--watch", "--project", "/absolute/path/to/project"]
+  "args": ["-y", "code-memory@latest", "serve", "--watch", "--auto-project"]
 }
+```
+
+Use a fixed project server only when you explicitly want the MCP process bound to one repository:
+
+```bash
+npx -y code-memory@latest setup --agent cursor --project . --bind-project
 ```
 
 Advanced runtime choices:
@@ -92,6 +98,7 @@ If the MCP server is started directly, `serve --watch` also performs safe cold-s
 
 ```bash
 npx -y code-memory@latest serve --watch --project .
+npx -y code-memory@latest serve --watch --auto-project
 ```
 
 Strict mode for CI or debugging:
@@ -105,6 +112,7 @@ npx -y code-memory@latest serve --watch --project . --no-bootstrap
 | Command | Purpose |
 |---|---|
 | `setup --project .` | Full AI onboarding: bootstrap, MCP config, context files, skills, hooks, doctor |
+| `setup --project . --bind-project` | Full onboarding with MCP config fixed to this project |
 | `analyze --project .` | Bootstrap plus project AI context files, without agent MCP config |
 | `bootstrap --project .` | Safe init/index lifecycle for MCP and first-run use |
 | `init --project .` | Create `.code-memory/config.json` only |
@@ -126,7 +134,7 @@ Recommended tool order:
 
 ```text
 New task / new repo
--> plan_context
+-> resolve_project -> plan_context
 
 Understand feature / find code
 -> get_context_pack or search_code
@@ -158,6 +166,7 @@ Core tools:
 
 | Tool | Purpose |
 |---|---|
+| `resolve_project` | Verify project identity, db path, index readiness, and next bootstrap/index command |
 | `plan_context` | Classify the task and choose the retrieval path |
 | `get_context_pack` | Bounded evidence package for a task |
 | `search_code` | Hybrid search across indexed snippets |

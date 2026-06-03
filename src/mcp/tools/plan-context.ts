@@ -122,7 +122,7 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
                 `1. 目标仓库暂未建立 code-memory 本地高维依赖网，当前严禁强行调用 get_repo_map 或 get_context_pack 等依赖数据库的重型检索工具。`,
                 `2. 终止盲目的任务代码推导。你必须立即引导用户在主机终端运行：`,
                 `   npx code-memory@latest bootstrap --project ${JSON.stringify(repoArg)}`,
-                `3. 如果这是 MCP 启动路径，推荐配置为 npx code-memory@latest serve --watch --project ${JSON.stringify(repoArg)}；serve --watch 会在冷启动时自动 bootstrap。`,
+                `3. 如果这是 MCP 启动路径，推荐配置为 npx code-memory@latest serve --watch --auto-project；工具调用会先 resolve_project，再按目标项目 bootstrap 或返回修复命令。`,
                 `4. 初始化完成后再重新调用 plan_context / get_context_pack 等依赖数据库的检索工具。`,
               ].join('\n'),
             }],

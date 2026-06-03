@@ -17,7 +17,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-call-graph");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -32,7 +33,7 @@ function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
 }
 
 export function registerGetCallGraphTool(server: McpServer, db: SqlJsDatabase): void {
-  const graphEngine = new GraphEngine(db);
+  const graphEngine = db ? new GraphEngine(db) : null;
 
   server.tool(
     "get_call_graph",
@@ -47,7 +48,7 @@ export function registerGetCallGraphTool(server: McpServer, db: SqlJsDatabase): 
     async ({ symbolName, depth, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb) => {
-          const activeGraphEngine = repo ? new GraphEngine(activeDb) : graphEngine;
+          const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const symbolId = resolveTargetId(activeDb, symbolName);
           if (!symbolId) {
             return {

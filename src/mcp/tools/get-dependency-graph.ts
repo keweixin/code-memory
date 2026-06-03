@@ -16,7 +16,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-dependency-graph");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -31,7 +32,7 @@ function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
 }
 
 export function registerGetDependencyGraphTool(server: McpServer, db: SqlJsDatabase): void {
-  const graphEngine = new GraphEngine(db);
+  const graphEngine = db ? new GraphEngine(db) : null;
 
   server.tool(
     "get_dependency_graph",
@@ -47,7 +48,7 @@ export function registerGetDependencyGraphTool(server: McpServer, db: SqlJsDatab
     async ({ filePath, depth, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb) => {
-          const activeGraphEngine = repo ? new GraphEngine(activeDb) : graphEngine;
+          const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const fileId = findFileId(activeDb, filePath);
           if (!fileId) {
             // Try as partial path match

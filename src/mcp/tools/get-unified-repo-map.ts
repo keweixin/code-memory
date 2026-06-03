@@ -28,7 +28,7 @@ const CROSS_REPO_THRESHOLD = 3;
 
 export function registerGetUnifiedRepoMapTool(
   server: McpServer,
-  _db: SqlJsDatabase,
+  _db?: SqlJsDatabase,
 ): void {
   server.tool(
     "get_unified_repo_map",

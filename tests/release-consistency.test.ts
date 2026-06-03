@@ -57,18 +57,25 @@ describe('release consistency', () => {
     expect(optionFlags('setup')).toEqual(expect.arrayContaining([
       '--project',
       '--runtime',
+      '--bind-project',
+      '--print-config',
+      '--yes',
       '--no-bootstrap',
       '--dry-run',
     ]));
     expect(optionFlags('serve')).toEqual(expect.arrayContaining([
       '--watch',
       '--project',
+      '--auto-project',
+      '--auto-bootstrap',
       '--no-bootstrap',
     ]));
 
     expect(readme).toContain('setup --agent cursor --project .');
+    expect(readme).toContain('setup --agent cursor --project . --bind-project');
     expect(readme).toContain('setup --agent cursor --project . --runtime npx');
     expect(readme).toContain('setup --agent cursor --project . --no-bootstrap');
+    expect(readme).toContain('serve --watch --auto-project');
     expect(readme).toContain('serve --watch --project . --no-bootstrap');
   });
 });

@@ -8,6 +8,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { join } from "node:path";
 import type { SqlJsDatabase } from "../../storage/database.js";
 import { HybridSearchEngine } from "../../search/hybrid-search.js";
 import type { VectorSearchProvider } from "../../search/vector-search.js";
@@ -20,7 +21,8 @@ import {
 } from "../../search/context-budget.js";
 import { collectPackContext, omitRepeatedContext } from "../../search/context-ledger-filter.js";
 import { getContextDeltaForDb, markContextUsed } from "../../memory/context-ledger.js";
-import type { ContextDelta } from "../../shared/types.js";
+import type { ContextDelta, ContextPack } from "../../shared/types.js";
+import { CONFIG_DIR, DATABASE_FILE } from "../../shared/constants.js";
 import { estimateTokens } from "../../shared/token-counter.js";
 import { createLogger } from "../../shared/logger.js";
 import { prependIndexDiagnostics } from "../index-diagnostics.js";
@@ -30,6 +32,7 @@ import {
   partitionPending,
 } from "./_stale-banner.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
+import { getIndexStaleness } from "../../indexer/staleness.js";
 import {
   loadVectorSearchProviderForRepo,
   type VectorSearchProviderResolver,
@@ -43,8 +46,8 @@ export function registerGetContextPackTool(
   vectorSearchProvider?: VectorSearchProvider | null,
   vectorSearchProviderResolver: VectorSearchProviderResolver = loadVectorSearchProviderForRepo,
 ): void {
-  const searchEngine = new HybridSearchEngine(db, undefined, vectorSearchProvider || undefined);
-  const packer = new ContextPacker(db);
+  const searchEngine = db ? new HybridSearchEngine(db, undefined, vectorSearchProvider || undefined) : null;
+  const packer = db ? new ContextPacker(db) : null;
 
   server.tool(
     "get_context_pack",
@@ -63,13 +66,15 @@ export function registerGetContextPackTool(
     async ({ query, tokenBudget, levels, sessionId, avoidRepeated, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb, projectRoot) => {
-          const activeVectorSearchProvider = repo
+          const activeVectorSearchProvider = repo || activeDb !== db
             ? await vectorSearchProviderResolver(projectRoot)
             : vectorSearchProvider || null;
-          const activeSearchEngine = repo
-            ? new HybridSearchEngine(activeDb, undefined, activeVectorSearchProvider || undefined)
-            : searchEngine;
-          const activePacker = repo ? new ContextPacker(activeDb) : packer;
+          const activeSearchEngine = searchEngine && activeDb === db
+            ? searchEngine
+            : new HybridSearchEngine(activeDb, undefined, activeVectorSearchProvider || undefined);
+          const activePacker = packer && activeDb === db
+            ? packer
+            : new ContextPacker(activeDb);
           const budget = Math.min(tokenBudget, 12000);
 
           // Phase 1: Search
@@ -127,7 +132,7 @@ export function registerGetContextPackTool(
 
           // Phase 3: Format
           const baseText = prependIndexDiagnostics(
-            [ledgerText, activePacker.formatAsText(pack)].filter(Boolean).join("\n\n"),
+            [ledgerText, formatToolTrustContract(pack, projectRoot, activeDb), activePacker.formatAsText(pack)].filter(Boolean).join("\n\n"),
             activeDb,
             projectRoot,
           );
@@ -162,6 +167,51 @@ export function registerGetContextPackTool(
   );
 }
 
+function formatToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJsDatabase): string {
+  const freshness = getIndexStaleness(projectRoot, db);
+  const exactSnippets = pack.codeSnippets.slice(0, 5).map((snippet) => ({
+    file: snippet.filePath,
+    lines: snippet.lineRange[0] + "-" + snippet.lineRange[1],
+    symbol: snippet.symbolName,
+    why: snippet.reason,
+  }));
+  const whyIncluded = pack.files.slice(0, 8).map((file) => ({
+    file: file.path,
+    reason: file.reason,
+    confidence: Number(file.confidence.toFixed(2)),
+  }));
+  const nextAllowedReads = pack.codeSnippets.length > 0
+    ? unique(pack.codeSnippets.map((snippet) => snippet.filePath)).slice(0, 5)
+    : pack.files.slice(0, 5).map((file) => file.path);
+  const confidence = freshness.indexStatus === "fresh" && (pack.codeSnippets.length > 0 || pack.files.length > 0)
+    ? "ready"
+    : freshness.indexStatus === "stale" || freshness.indexStatus === "failed"
+      ? "stale"
+      : "low";
+
+  return [
+    "=== Tool Trust Contract ===",
+    JSON.stringify({
+      confidence,
+      projectRoot,
+      dbPath: join(projectRoot, CONFIG_DIR, DATABASE_FILE),
+      indexStatus: freshness.indexStatus,
+      exactSnippets,
+      whyIncluded,
+      nextAllowedReads,
+      freshness: {
+        changedFiles: freshness.changedFiles,
+        watchPendingCount: freshness.watchPendingCount,
+        recommendedAction: freshness.recommendedAction,
+      },
+    }, null, 2),
+  ].join("\n");
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
 function formatLedgerSection(
   sessionId: string,
   delta: ContextDelta,
@@ -188,7 +238,8 @@ function formatLedgerSection(
   return lines.join("\n");
 }
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {

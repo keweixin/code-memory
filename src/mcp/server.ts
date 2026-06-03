@@ -2,7 +2,7 @@
  * Code Memory Graph -- MCP Server
  *
  * Main entry point for the MCP (Model Context Protocol) server.
- * Initializes the database, creates an McpServer instance,
+ * Creates an McpServer instance,
  * registers all tools, and connects via stdio transport.
  *
  * IMPORTANT: All logging uses console.error() -- NEVER console.log()
@@ -27,18 +27,25 @@ export interface McpServerLifecycleOptions {
   onShutdownComplete?: (signal: string) => void;
 }
 
+export interface CreateMcpServerOptions {
+  projectRoot?: string;
+  autoProject?: boolean;
+}
+
 /**
  * Create an McpServer instance with all tools registered.
  *
- * This is the factory function -- it initializes the database,
- * creates the server, and registers tools. It does NOT connect
+ * This is the factory function -- it creates the server and registers tools.
+ * In fixed-project mode it initializes that project's database. In global
+ * auto-project mode tools resolve and open project databases lazily.
+ * It does NOT connect
  * the transport. Useful for testing.
  *
  * @param dbPath Optional path to the database directory.
  *               Defaults to process.cwd() + "/.code-memory/index.db".
  * @returns A fully configured McpServer instance.
  */
-export async function createMcpServer(dbPath?: string): Promise<McpServer> {
+export async function createMcpServer(optionsOrProjectRoot?: string | CreateMcpServerOptions): Promise<McpServer> {
   // Set default log level -- can be overridden via CLAUDE_LOG_LEVEL env
   const envLevel = process.env.CLAUDE_LOG_LEVEL;
   if (envLevel) {
@@ -47,12 +54,17 @@ export async function createMcpServer(dbPath?: string): Promise<McpServer> {
 
   log.info("Creating MCP server v" + VERSION);
 
-  const projectRoot = dbPath || process.cwd();
-
-  // Initialize database (async WASM bootstrap)
-  const db = await getDatabase(projectRoot);
-  log.info("Database ready: " + projectRoot);
-  const vectorSearchProvider = await loadVectorSearchProviderForRepo(projectRoot);
+  const options = typeof optionsOrProjectRoot === "string"
+    ? { projectRoot: optionsOrProjectRoot, autoProject: false }
+    : optionsOrProjectRoot ?? {};
+  const projectRoot = options.projectRoot;
+  const autoProject = options.autoProject === true || !projectRoot;
+  const db = autoProject ? undefined : await getDatabase(projectRoot);
+  if (db && projectRoot) log.info("Database ready: " + projectRoot);
+  if (autoProject) log.info("Global auto-project routing enabled");
+  const vectorSearchProvider = projectRoot && db
+    ? await loadVectorSearchProviderForRepo(projectRoot)
+    : null;
 
   // Create McpServer
   const server = new McpServer({
@@ -63,7 +75,7 @@ export async function createMcpServer(dbPath?: string): Promise<McpServer> {
   });
 
   // Register all tools
-  registerCodeMemoryResources(server, db);
+  if (db) registerCodeMemoryResources(server, db);
   registerAllTools(server, db, {
     vectorSearchProvider,
     vectorSearchProviderResolver: loadVectorSearchProviderForRepo,
@@ -80,14 +92,14 @@ export async function createMcpServer(dbPath?: string): Promise<McpServer> {
  * It initializes the database, creates the McpServer,
  * connects the stdio transport, and handles graceful shutdown.
  *
- * @param dbPath Optional path to the database directory.
+ * @param dbPath Optional path to the project root.
  */
 export async function startServer(
   dbPath?: string,
   options: McpServerLifecycleOptions = {},
 ): Promise<void> {
   try {
-    const server = await createMcpServer(dbPath);
+    const server = await createMcpServer({ projectRoot: dbPath, autoProject: !dbPath });
 
     // Create stdio transport
     const transport = new StdioServerTransport();
@@ -139,7 +151,7 @@ export async function startServer(
     // Note: We do NOT call console.log() here -- stdout is reserved
     // for the JSON-RPC protocol. All status messages go to stderr.
     log.info("Code Memory MCP Server v" + VERSION + " is running on stdio");
-    log.info("Database: " + (isInitialized() ? "initialized" : "NOT initialized"));
+    log.info("Database: " + (isInitialized() ? "initialized" : "lazy/global"));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error("Failed to start MCP server: " + msg, err instanceof Error ? err : undefined);

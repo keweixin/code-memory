@@ -15,12 +15,14 @@ import {
   updateContextFeedback,
 } from "../../memory/context-ledger.js";
 import type { ContextFeedback } from "../../shared/types.js";
-import { getDatabaseSync, type SqlJsDatabase } from "../../storage/database.js";
+import { getDatabaseSync, isInitialized, type SqlJsDatabase } from "../../storage/database.js";
 import { withRepoDatabase } from "../repo-router.js";
 
 const FEEDBACK_VALUES = ["useful", "irrelevant", "stale"] as const;
 
-export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase = getDatabaseSync()): void {
+export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase): void {
+  const routedDb = db ?? (isInitialized() ? getDatabaseSync() : undefined);
+
   server.tool(
     "mark_context_used",
     "Record files, symbols, chunks, token estimate, and evidence already returned to an agent session. " +
@@ -46,7 +48,7 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
     },
     async (input) => {
       try {
-        return await withRepoDatabase(input.repo, db, async (activeDb, projectRoot) => {
+        return await withRepoDatabase(input.repo, routedDb, async (activeDb, projectRoot) => {
           const id = markContextUsed({
             sessionId: input.sessionId,
             taskId: input.taskId,
@@ -103,7 +105,7 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
     },
     async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
           const delta = getContextDeltaForDb(sessionId, {
             files: candidateFiles,
             symbols: candidateSymbols,
@@ -147,7 +149,7 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
     },
     async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
           const delta = getContextDeltaForDb(sessionId, {
             files: candidateFiles,
             symbols: candidateSymbols,
@@ -204,7 +206,7 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
     },
     async ({ sessionId, contextId, contextType, feedback, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
           let entries = getContextLedgerEntriesForDb(sessionId, activeDb);
           let seenIn = entries.filter((entry) => {
             if (contextType === "file") return entry.returnedFiles.includes(contextId);
@@ -261,7 +263,7 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
     },
     async ({ sessionId, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
           const summary = compactSessionContext(sessionId, activeDb);
           const lines = [
             "Compact session context",
@@ -306,7 +308,7 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
     },
     async ({ sessionId, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
           const removed = resetContextSession(sessionId, activeDb);
           return { content: [{ type: "text" as const, text: "Removed ledger entries: " + removed }] };
         });

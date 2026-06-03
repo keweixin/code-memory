@@ -4,6 +4,8 @@ import { CONFIG_DIR, DATABASE_FILE } from '../shared/constants.js';
 import type { SqlJsDatabase } from '../storage/database.js';
 import { getDbFilePath, openExistingDatabase } from '../storage/database.js';
 import { findRepo } from '../cli/registry.js';
+import { DatabaseRouter, ProjectNotReadyError } from './database-router.js';
+import { formatProjectResolution, type ProjectResolution } from './project-resolver.js';
 
 export interface RoutedDatabase {
   db: SqlJsDatabase;
@@ -14,14 +16,18 @@ export interface RoutedDatabase {
 
 export async function withRepoDatabase<T>(
   repo: string | undefined,
-  defaultDb: SqlJsDatabase,
+  defaultDb: SqlJsDatabase | undefined,
   callback: (db: SqlJsDatabase, projectRoot: string) => Promise<T> | T,
 ): Promise<T> {
-  const routed = openRoutedDatabase(repo, defaultDb);
+  const router = new DatabaseRouter(defaultDb);
   try {
-    return await callback(routed.db, routed.projectRoot);
-  } finally {
-    routed.close();
+    return await router.withResolvedProject({ repo }, async (routed) =>
+      callback(routed.db, routed.projectRoot));
+  } catch (err) {
+    if (err instanceof ProjectNotReadyError) {
+      return createBootstrapProtocolResult(err.resolution) as T;
+    }
+    throw err;
   }
 }
 
@@ -46,6 +52,26 @@ export function openRoutedDatabase(repo: string | undefined, defaultDb: SqlJsDat
     close() {
       db.close();
     },
+  };
+}
+
+export function createBootstrapProtocolResult(resolution: ProjectResolution): {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+} {
+  return {
+    content: [{
+      type: 'text',
+      text: [
+        '[CODE-MEMORY BOOTSTRAP PROTOCOL]',
+        formatProjectResolution(resolution),
+        '',
+        resolution.command
+          ? 'Next command: ' + resolution.command
+          : 'Next action: ' + resolution.nextAction,
+      ].join('\n'),
+    }],
+    isError: resolution.status === 'unknown',
   };
 }
 

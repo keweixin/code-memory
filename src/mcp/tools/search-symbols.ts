@@ -18,7 +18,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:search-symbols");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -40,7 +41,7 @@ const SYMBOL_KINDS = [
 ] as const;
 
 export function registerSearchSymbolsTool(server: McpServer, db: SqlJsDatabase): void {
-  const searchEngine = new HybridSearchEngine(db);
+  const searchEngine = db ? new HybridSearchEngine(db) : null;
 
   server.tool(
     "search_symbols",
@@ -59,9 +60,9 @@ export function registerSearchSymbolsTool(server: McpServer, db: SqlJsDatabase):
     async ({ query, kind, limit, repo }) => {
       try {
         return await withRepoDatabase(repo, db, async (activeDb) => {
-          const activeSearchEngine = repo
-            ? new HybridSearchEngine(activeDb)
-            : searchEngine;
+          const activeSearchEngine = searchEngine && activeDb === db
+            ? searchEngine
+            : new HybridSearchEngine(activeDb);
           const results = await activeSearchEngine.searchSymbols(query, {
             kind: kind as SymbolKind | undefined,
             limit: Math.min(limit, 50),

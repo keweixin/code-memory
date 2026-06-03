@@ -37,8 +37,13 @@ try {
 
   const cursorConfig = JSON.parse(readFileSync(join(temp, '.cursor', 'mcp.json'), 'utf-8'));
   const server = cursorConfig.mcpServers?.['code-memory'];
-  if (server?.command !== 'npx' || !server.args?.includes('code-memory@latest') || !server.args?.includes(temp)) {
-    throw new Error('Packed setup smoke failed to write an npx MCP config with absolute --project.');
+  if (
+    server?.command !== 'npx' ||
+    !server.args?.includes('code-memory@latest') ||
+    !server.args?.includes('--auto-project') ||
+    server.args?.includes('--project')
+  ) {
+    throw new Error('Packed setup smoke failed to write the default npx global MCP config.');
   }
   if (!readFileSync(join(temp, 'AGENTS.md'), 'utf-8').includes('CODE_MEMORY_CONTEXT_START')) {
     throw new Error('Packed setup smoke failed to write AGENTS.md Code Memory context.');
