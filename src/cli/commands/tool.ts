@@ -52,10 +52,10 @@ export function registerToolCommand(program: Command): void {
 }
 
 export async function runMcpToolFromCli(name: string | undefined, options: ToolOptions): Promise<void> {
-  const projectRoot = resolveProjectPath(options);
   setLogLevel('silent');
 
   try {
+    const projectRoot = shouldUseGlobalToolMirror(name, options) ? undefined : resolveProjectPath(options);
     const tools = await collectMcpTools(projectRoot);
 
     if (options.list) {
@@ -75,6 +75,9 @@ export async function runMcpToolFromCli(name: string | undefined, options: ToolO
     }
 
     const rawArgs = parseToolArgs(options);
+    if (name === 'resolve_project' && options.project && !rawArgs.project && !rawArgs.repo) {
+      rawArgs.project = resolveProjectPath(options);
+    }
     const args = parseWithToolSchema(tool, rawArgs);
     const result = await tool.handler(args);
 
@@ -89,9 +92,15 @@ export async function runMcpToolFromCli(name: string | undefined, options: ToolO
   }
 }
 
-async function collectMcpTools(projectRoot: string): Promise<Map<string, CollectedTool>> {
-  const db = await getDatabase(projectRoot);
-  const vectorSearchProvider = await loadVectorSearchProviderForRepo(projectRoot);
+function shouldUseGlobalToolMirror(name: string | undefined, options: ToolOptions): boolean {
+  return Boolean(options.list) || name === 'resolve_project';
+}
+
+async function collectMcpTools(projectRoot?: string): Promise<Map<string, CollectedTool>> {
+  const db = projectRoot ? await getDatabase(projectRoot) : undefined;
+  const vectorSearchProvider = projectRoot
+    ? await loadVectorSearchProviderForRepo(projectRoot)
+    : null;
   const tools = new Map<string, CollectedTool>();
   const collector = {
     tool: (...args: unknown[]) => {

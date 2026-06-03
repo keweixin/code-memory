@@ -2,9 +2,11 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE } from '../shared/constants.js';
 import { findRepo, readRegistry, type RegistryEntry } from '../cli/registry.js';
+import { getIndexStaleness, type IndexFreshness } from '../indexer/staleness.js';
 
-export type ProjectResolutionStatus = 'ready' | 'needs_bootstrap' | 'needs_index' | 'unknown';
-export type ProjectResolutionNextAction = 'use_code_memory' | 'bootstrap' | 'index' | 'register_or_pass_project';
+export type ProjectResolutionStatus = 'ready' | 'stale' | 'needs_bootstrap' | 'needs_index' | 'unknown';
+export type ProjectResolutionIndexStatus = IndexFreshness | 'needs_bootstrap' | 'needs_index' | 'unknown';
+export type ProjectResolutionNextAction = 'use_code_memory' | 'bootstrap' | 'index' | 'sync' | 'register_or_pass_project';
 
 export interface ResolveProjectInput {
   repo?: string;
@@ -21,7 +23,7 @@ export interface ProjectResolution {
   configExists: boolean;
   indexExists: boolean;
   dbPath: string | null;
-  indexStatus: ProjectResolutionStatus;
+  indexStatus: ProjectResolutionIndexStatus;
   status: ProjectResolutionStatus;
   nextAction: ProjectResolutionNextAction;
   command: string | null;
@@ -96,14 +98,21 @@ function buildResolution(projectRoot: string, registered: RegistryEntry | null, 
   const configExists = existsSync(configPath);
   const indexExists = existsSync(dbPath);
   const gitRoot = findNearestGitRoot(root);
+  const freshness = configExists && indexExists ? getIndexStaleness(root) : null;
   const status: ProjectResolutionStatus = configExists && indexExists
-    ? 'ready'
+    ? freshness?.indexStatus === 'fresh'
+      ? 'ready'
+      : 'stale'
     : configExists
       ? 'needs_index'
       : 'needs_bootstrap';
+  const indexStatus: ProjectResolutionIndexStatus = freshness?.indexStatus ??
+    (configExists ? 'needs_index' : 'needs_bootstrap');
   const nextAction: ProjectResolutionNextAction = status === 'ready'
     ? 'use_code_memory'
-    : status === 'needs_index'
+    : status === 'stale'
+      ? 'sync'
+      : status === 'needs_index'
       ? 'index'
       : 'bootstrap';
 
@@ -115,7 +124,7 @@ function buildResolution(projectRoot: string, registered: RegistryEntry | null, 
     configExists,
     indexExists,
     dbPath,
-    indexStatus: status,
+    indexStatus,
     status,
     nextAction,
     command: getCommand(nextAction, root),
@@ -144,6 +153,9 @@ function getCommand(action: ProjectResolutionNextAction, projectRoot: string): s
   if (action === 'use_code_memory') return null;
   if (action === 'index') {
     return 'npx -y code-memory@latest index --full --project ' + JSON.stringify(projectRoot);
+  }
+  if (action === 'sync') {
+    return 'npx -y code-memory@latest sync --project ' + JSON.stringify(projectRoot);
   }
   if (action === 'bootstrap') {
     return 'npx -y code-memory@latest bootstrap --project ' + JSON.stringify(projectRoot);

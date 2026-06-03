@@ -3,12 +3,15 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SqlJsDatabase } from '../storage/database.js';
 import { readRegistry } from '../cli/registry.js';
 import { SCHEMA_VERSION } from '../storage/schema.js';
-import { openRoutedDatabase } from './repo-router.js';
+import { createBootstrapProtocolResult } from './repo-router.js';
 import { getIndexStaleness } from '../indexer/staleness.js';
+import { DatabaseRouter, ProjectNotReadyError } from './database-router.js';
 
 type ResourceVariables = Record<string, string | string[]>;
 
-export function registerCodeMemoryResources(server: McpServer, db: SqlJsDatabase): void {
+export function registerCodeMemoryResources(server: McpServer, db?: SqlJsDatabase): void {
+  const router = new DatabaseRouter(db);
+
   server.registerResource(
     'code-memory-repos',
     'code-memory://repos',
@@ -26,20 +29,20 @@ export function registerCodeMemoryResources(server: McpServer, db: SqlJsDatabase
     }),
   );
 
-  registerRepoResource(server, db, 'code-memory-repo-context', 'code-memory://repo/{name}/context', 'text/markdown', readRepoContext);
-  registerRepoResource(server, db, 'code-memory-repo-symbols', 'code-memory://repo/{name}/symbols', 'application/json', readRepoSymbols);
-  registerRepoResource(server, db, 'code-memory-repo-flows', 'code-memory://repo/{name}/flows', 'application/json', readRepoFlows);
-  registerRepoResource(server, db, 'code-memory-repo-schema', 'code-memory://repo/{name}/schema', 'text/markdown', readRepoSchema);
-  registerRepoResource(server, db, 'code-memory-repo-staleness', 'code-memory://repo/{name}/staleness', 'application/json', readRepoStaleness);
-  registerRepoResource(server, db, 'code-memory-repo-routes', 'code-memory://repo/{name}/routes', 'application/json', readRepoRoutes);
-  registerRepoResource(server, db, 'code-memory-repo-tests', 'code-memory://repo/{name}/tests', 'application/json', readRepoTests);
-  registerRepoResource(server, db, 'code-memory-repo-communities', 'code-memory://repo/{name}/communities', 'application/json', readRepoCommunities);
-  registerRepoResource(server, db, 'code-memory-repo-memories', 'code-memory://repo/{name}/memories', 'application/json', readRepoMemories);
+  registerRepoResource(server, router, 'code-memory-repo-context', 'code-memory://repo/{name}/context', 'text/markdown', readRepoContext);
+  registerRepoResource(server, router, 'code-memory-repo-symbols', 'code-memory://repo/{name}/symbols', 'application/json', readRepoSymbols);
+  registerRepoResource(server, router, 'code-memory-repo-flows', 'code-memory://repo/{name}/flows', 'application/json', readRepoFlows);
+  registerRepoResource(server, router, 'code-memory-repo-schema', 'code-memory://repo/{name}/schema', 'text/markdown', readRepoSchema);
+  registerRepoResource(server, router, 'code-memory-repo-staleness', 'code-memory://repo/{name}/staleness', 'application/json', readRepoStaleness);
+  registerRepoResource(server, router, 'code-memory-repo-routes', 'code-memory://repo/{name}/routes', 'application/json', readRepoRoutes);
+  registerRepoResource(server, router, 'code-memory-repo-tests', 'code-memory://repo/{name}/tests', 'application/json', readRepoTests);
+  registerRepoResource(server, router, 'code-memory-repo-communities', 'code-memory://repo/{name}/communities', 'application/json', readRepoCommunities);
+  registerRepoResource(server, router, 'code-memory-repo-memories', 'code-memory://repo/{name}/memories', 'application/json', readRepoMemories);
 }
 
 function registerRepoResource(
   server: McpServer,
-  db: SqlJsDatabase,
+  router: DatabaseRouter,
   name: string,
   template: string,
   mimeType: string,
@@ -54,9 +57,10 @@ function registerRepoResource(
       mimeType,
     },
     async (uri, variables: ResourceVariables) => {
-      const repoName = firstVariable(variables.name);
-      const routed = openRoutedDatabase(repoName, db);
+      const repoName = normalizeResourceRepoName(firstVariable(variables.name));
+      let routed: ReturnType<DatabaseRouter['open']> | null = null;
       try {
+        routed = router.open({ repo: repoName });
         return {
           contents: [{
             uri: uri.href,
@@ -64,8 +68,19 @@ function registerRepoResource(
             text: reader(routed.db, routed.projectRoot),
           }],
         };
+      } catch (err) {
+        if (err instanceof ProjectNotReadyError) {
+          return {
+            contents: [{
+              uri: uri.href,
+              mimeType: resourceFallbackMimeType(mimeType),
+              text: formatUnavailableResource(err, mimeType),
+            }],
+          };
+        }
+        throw err;
       } finally {
-        routed.close();
+        routed?.close();
       }
     },
   );
@@ -233,4 +248,26 @@ function queryRows(db: SqlJsDatabase, sql: string): Array<Record<string, unknown
 function firstVariable(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
   return value;
+}
+
+function normalizeResourceRepoName(value: string | undefined): string | undefined {
+  if (!value || value === 'current') return undefined;
+  return value;
+}
+
+function resourceFallbackMimeType(mimeType: string): string {
+  return mimeType === 'application/json' ? 'application/json' : 'text/markdown';
+}
+
+function formatUnavailableResource(err: ProjectNotReadyError, mimeType: string): string {
+  const toolResult = createBootstrapProtocolResult(err.resolution);
+  const text = toolResult.content.map((item) => item.text).join('\n\n');
+  if (mimeType === 'application/json') {
+    return JSON.stringify({
+      error: err.resolution.status === 'unknown' ? 'project_not_resolved' : 'project_not_ready',
+      resolution: err.resolution,
+      message: text,
+    }, null, 2);
+  }
+  return text;
 }

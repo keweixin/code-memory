@@ -75,7 +75,7 @@ export async function createMcpServer(optionsOrProjectRoot?: string | CreateMcpS
   });
 
   // Register all tools
-  if (db) registerCodeMemoryResources(server, db);
+  registerCodeMemoryResources(server, db);
   registerAllTools(server, db, {
     vectorSearchProvider,
     vectorSearchProviderResolver: loadVectorSearchProviderForRepo,

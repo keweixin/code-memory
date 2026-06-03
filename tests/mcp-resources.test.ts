@@ -128,4 +128,42 @@ describe('MCP resources', () => {
     expect(communities.contents[0].mimeType).toBe('application/json');
     expect(communities.contents[0].text).toContain('"communities"');
   });
+
+  it('registers repo map resources without an active database for global MCP mode', async () => {
+    const server = new FakeMcpServer();
+    registerCodeMemoryResources(server as never);
+
+    expect(server.resources.has('code-memory-repos')).toBe(true);
+    expect(server.resources.has('code-memory-repo-context')).toBe(true);
+
+    const context = await server.resources.get('code-memory-repo-context')!(
+      new URL('code-memory://repo/current/context'),
+      { name: 'current' },
+    );
+
+    expect(context.contents[0].mimeType).toBe('text/markdown');
+    expect(context.contents[0].text).toContain('Code Memory Repo Context');
+    expect(context.contents[0].text).toContain('- Project root: ' + tempRoot);
+  });
+
+  it('returns bootstrap protocol from global resources when the project is not indexed', async () => {
+    const missingRoot = mkdtempSync(join(tmpdir(), 'code-memory-resources-missing-'));
+    const server = new FakeMcpServer();
+    registerCodeMemoryResources(server as never);
+
+    try {
+      process.chdir(missingRoot);
+      const symbols = await server.resources.get('code-memory-repo-symbols')!(
+        new URL('code-memory://repo/current/symbols'),
+        { name: 'current' },
+      );
+
+      expect(symbols.contents[0].mimeType).toBe('application/json');
+      expect(symbols.contents[0].text).toContain('project_not_ready');
+      expect(symbols.contents[0].text).toContain('bootstrap --project');
+    } finally {
+      process.chdir(tempRoot);
+      rmSync(missingRoot, { recursive: true, force: true });
+    }
+  });
 });

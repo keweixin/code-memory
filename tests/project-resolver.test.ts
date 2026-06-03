@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -69,6 +70,20 @@ describe('ProjectResolver', () => {
     expect(resolution.nextAction).toBe('bootstrap');
     expect(resolution.command).toContain('npx -y code-memory@latest bootstrap --project');
     expect(resolution.projectRoot).toBe(projectRoot);
+  });
+
+  it('reports stale when a ready git project has changed files', () => {
+    const projectRoot = readyProject('stale-target');
+    execSync('git init', { cwd: projectRoot, stdio: 'ignore' });
+    mkdirSync(join(projectRoot, 'src'), { recursive: true });
+    writeFileSync(join(projectRoot, 'src', 'changed.ts'), 'export const changed = true;\n', 'utf-8');
+
+    const resolution = resolveProject({ project: projectRoot });
+
+    expect(resolution.status).toBe('stale');
+    expect(resolution.indexStatus).toBe('stale');
+    expect(resolution.nextAction).toBe('sync');
+    expect(resolution.command).toContain('npx -y code-memory@latest sync --project');
   });
 
   function readyProject(name: string): string {

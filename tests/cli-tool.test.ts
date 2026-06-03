@@ -85,4 +85,23 @@ describe('CLI MCP tool mirror', () => {
     expect(output).toContain('AuthService');
     expect(output).toContain('[Next:');
   });
+
+  it('runs resolve_project for a missing project without requiring an index first', async () => {
+    const missingRoot = mkdtempSync(join(tmpdir(), 'code-memory-cli-tool-missing-'));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runMcpToolFromCli('resolve_project', {
+        project: missingRoot,
+        args: '{}',
+      });
+
+      const output = logSpy.mock.calls.map(([line]) => String(line)).join('\n');
+      expect(output).toContain('"status": "needs_bootstrap"');
+      expect(output).toContain('bootstrap --project');
+      expect(output).toContain(missingRoot.replace(/\\/g, '\\\\'));
+    } finally {
+      rmSync(missingRoot, { recursive: true, force: true });
+    }
+  });
 });
