@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1] - 2026-06-03
+
+### Fixed
+- Global MCP resources can lazy-open project databases and return bootstrap protocol responses when no index exists
+- `resolve_project` reports stale indexes with an actionable `sync --project` command
+- Context Ledger MCP workflow hints now guide agents through `mark_context_used`, `get_context_delta`, and repeated-context avoidance
+- `remember_project_fact` and `invalidate_memory` now route memory writes/deletes to the requested repo database instead of the default DB
+- `get_context_pack` Tool Trust Contract now includes exact snippet code, not just file and line metadata
+- README, MCP docs, generated project context, skills, and resources now share the same Ledger-aware workflow
+
 ## [0.3.0] - 2026-06-02
 
 ### Added
