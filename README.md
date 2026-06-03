@@ -4,6 +4,16 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
+Current source version: `0.3.0`.
+
+Published npm status can lag the repository. Check before using `@latest`:
+
+```bash
+npm view code-memory version
+```
+
+If npm reports a version older than `0.3.0`, the GitHub source is ahead of the published package and `npx code-memory@latest` will not include the setup/bootstrap/tool mirror flow yet.
+
 Run this from the project you want an agent to understand:
 
 ```bash
@@ -178,6 +188,30 @@ Resources are read-only project maps. Tools are actions.
 | `code-memory://repo/{name}/communities` | Detected code communities |
 | `code-memory://repo/{name}/memories` | Stored project facts |
 
+## Benchmarks
+
+These are local benchmark results from this repository on Windows with Node 22 and embedding provider `none`. Treat them as regression baselines, not marketing claims.
+
+| Metric | Result |
+|---|---:|
+| 2000-file index throughput | 91.6 files/s |
+| 2000-file peak RSS | 446.5 MB |
+| Agent benchmark key file recall | 0.60 |
+| Agent benchmark evidence coverage | 0.60 |
+| Agent benchmark hallucinated symbol rate | 0.00 |
+| Agent benchmark stale failure rate | 0.00 |
+| Context benchmark key file recall | 0.375 |
+| Context benchmark evidence coverage | 0.400 |
+| Context benchmark average search latency | 167 ms |
+
+Reproduce:
+
+```bash
+npm run benchmark:index -- --files 2000 --workers auto --embedding none
+npm run benchmark:context
+npm run benchmark:agent
+```
+
 ## Language Support
 
 | Language | Symbols | Imports | Calls | Routes | Tests | Status |
@@ -227,7 +261,7 @@ npx -y code-memory@latest uninstall --agent cursor --project .
 npx -y code-memory@latest uninstall --all --project .
 ```
 
-Uninstall removes managed MCP config entries only. It does not delete user-owned content.
+Uninstall removes managed MCP config entries plus Code Memory managed project onboarding artifacts: generated context blocks, `.claude/skills/code-memory/`, and the generated Claude Code PreToolUse hook. It preserves user-owned content outside those managed blocks.
 
 ## Development
 

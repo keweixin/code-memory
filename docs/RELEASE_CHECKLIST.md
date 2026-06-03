@@ -2,7 +2,7 @@
 
 Use this checklist before publishing a public Code Memory release.
 
-- [ ] Update `package.json` version and `src/shared/constants.ts`.
+- [ ] Update `package.json`, `package-lock.json`, and `src/shared/constants.ts`.
 - [ ] Update `CHANGELOG.md`.
 - [ ] Run `npm run lint`.
 - [ ] Run `npm run build`.
@@ -14,6 +14,8 @@ Use this checklist before publishing a public Code Memory release.
 - [ ] Run `npx gitnexus analyze`.
 - [ ] Run `npx gitnexus detect-changes --repo code-memory --scope all`.
 - [ ] Run `codegraph sync . && codegraph status .`.
-- [ ] Create a signed or annotated release tag, for example `git tag v0.2.0`.
+- [ ] Confirm `npm whoami --registry=https://registry.npmjs.org` locally, or configure repository secret `NPM_TOKEN`.
+- [ ] Create a signed or annotated release tag matching `package.json`, for example `git tag v0.3.0`.
 - [ ] Push tag and verify GitHub Actions are green.
-- [ ] Publish to npm only after package contents are verified.
+- [ ] Confirm GitHub Release exists.
+- [ ] Confirm npm latest: `npm view code-memory version`.

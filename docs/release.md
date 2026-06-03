@@ -1,5 +1,7 @@
 # Release
 
+Current source release target: `0.3.0`.
+
 Release readiness checks:
 
 ```bash
@@ -13,5 +15,27 @@ npm run audit:official
 npm run benchmark:index -- --files 2000 --workers auto --embedding none
 ```
 
-The package should support real `npx` usage through the published npm package and packed tarball smoke tests before a v1.0 release.
+Version consistency is enforced by tests:
 
+- `package.json`
+- `package-lock.json`
+- `src/shared/constants.ts`
+- top `CHANGELOG.md` entry
+- README command table vs registered CLI commands
+
+Publishing is tag-driven:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+The release workflow verifies the tag matches `package.json`, runs the full release gate, creates a GitHub Release, and publishes to npm only when repository secret `NPM_TOKEN` is configured.
+
+Before telling users to rely on `npx -y code-memory@latest`, verify:
+
+```bash
+npm view code-memory version
+```
+
+It must report the release version.

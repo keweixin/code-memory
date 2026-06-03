@@ -3,6 +3,14 @@
 ## [0.3.0] - 2026-06-02
 
 ### Added
+- First-run `setup --project <path>` workflow that bootstraps the index, writes MCP config, installs project context files, installs generated Code Memory skills, and runs `doctor`
+- `bootstrap --project <path>` command for safe init/index lifecycle recovery
+- `analyze --project <path>` command for index plus project AI context without agent MCP config
+- `tool` CLI mirror for running MCP tools without an MCP client
+- `serve --watch` cold-start bootstrap by default, with `--no-bootstrap` strict mode
+- Runtime-aware MCP setup: `--runtime npx | global | local`
+- Project onboarding uninstall for generated context blocks, Code Memory skills, and Claude Code hook artifacts
+- Doctor checks for setup context, generated skills, and Claude Code hook readiness
 - Process Detection: trace execution flows from HTTP routes / `main` / `export default` through the call graph to terminal nodes (throw, process.exit, SQL writes)
 - Community Detection: lightweight Louvain modularity algorithm grouping related symbols by call/import/extends graph connectivity
 - Adaptive Output Budget: 5-tier dynamic sizing (tiny/small/medium/large/huge) for `get_context_pack`, `plan_context`, and `explain_module` based on indexed node count
@@ -12,6 +20,8 @@
 - Schema v7: `processes`, `process_steps`, `communities`, `community_members` tables
 
 ### Changed
+- README now includes current release status, exact first-run commands, and measured benchmark baselines
+- Release workflow now validates tag/package version consistency and can publish npm when `NPM_TOKEN` is configured
 - `get_repo_map` now groups files by community when communities exist
 - `get_unified_repo_map` repos filter now uses case-insensitive substring matching
 - `watch-service.getPendingFiles().indexing` now reflects per-file indexing state instead of global run state

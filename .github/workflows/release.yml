@@ -5,18 +5,61 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
-  release-check:
+  release:
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Verify tag matches package version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "Tag v$TAG does not match package.json version $VERSION" >&2
+            exit 1
+          fi
       - run: npm ci --registry=https://registry.npmjs.org
       - run: npm run lint
       - run: npm run build
-      - run: npm test
+      - run: npm test -- --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - run: npm run test:coverage -- --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - run: npm run pack:check
+      - run: npm run test:smoke
       - run: npm run audit:official
+      - run: npm run benchmark:index -- --files 2000 --workers auto --embedding none
+      - name: Publish to npm
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          VERSION="$VERSION" node - <<'NODE'
+            const fs = require('fs');
+            const version = process.env.VERSION;
+            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const lines = changelog.split(/\r?\n/);
+            const start = lines.findIndex((line) => line.startsWith(`## [${version}]`) || line.startsWith(`## ${version}`));
+            const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && line.startsWith('## '));
+            const notes = start < 0 ? changelog : lines.slice(start, end < 0 ? lines.length : end).join('\n');
+            fs.writeFileSync('RELEASE_NOTES.md', notes.trim() + '\n');
+          NODE
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "v$VERSION" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag
