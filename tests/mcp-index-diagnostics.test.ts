@@ -117,7 +117,8 @@ describe('MCP registry index diagnostics', () => {
 
     expectDiagnostics(text);
     expect(text.match(/=== Index Diagnostics ===/g)).toHaveLength(1);
-    expect(text).toContain('Search results for: "login"');
+    const structured = JSON.parse(text) as { display: string };
+    expect(structured.display).toContain('Search results for: "login"');
   });
 
   it('surfaces watch sync failures in MCP index diagnostics until the next successful watch sync', async () => {

@@ -1,0 +1,118 @@
+[
+  {
+    "name": "nextjs",
+    "repo": "https://github.com/vercel/next.js.git",
+    "commit": "02953dc208ca611e16a2026979b84131f5baf0a9",
+    "languageProfile": ["typescript", "javascript"],
+    "minimumMetrics": {
+      "realRepoKeyFileRecall": 0.85,
+      "realRepoEvidenceCoverage": 0.9,
+      "relatedTestRecall": 0.75,
+      "wrongProjectRouteRate": 0,
+      "staleFailureRate": 0
+    },
+    "tasks": [
+      {
+        "id": "nextjs-app-router-route-handler",
+        "type": "architecture_understanding",
+        "query": "Explain how App Router route handlers are discovered and executed.",
+        "expectedFiles": ["packages/next/src/server/route-modules/app-route/module.ts"],
+        "expectedSymbols": ["AppRouteRouteModule"]
+      },
+      {
+        "id": "nextjs-related-tests",
+        "type": "related_tests",
+        "query": "Find tests related to route handler behavior.",
+        "expectedFiles": ["test/e2e/app-dir/app-routes/app-custom-routes.test.ts"],
+        "expectedSymbols": []
+      }
+    ]
+  },
+  {
+    "name": "fastapi",
+    "repo": "https://github.com/fastapi/fastapi.git",
+    "commit": "3d2aace42fdfe34077647e47f3ee9688161e2651",
+    "languageProfile": ["python"],
+    "minimumMetrics": {
+      "realRepoKeyFileRecall": 0.85,
+      "realRepoEvidenceCoverage": 0.9,
+      "relatedTestRecall": 0.75,
+      "wrongProjectRouteRate": 0,
+      "staleFailureRate": 0
+    },
+    "tasks": [
+      {
+        "id": "fastapi-apirouter-include-router",
+        "type": "architecture_understanding",
+        "query": "Trace how APIRouter include_router composes routes.",
+        "expectedFiles": ["fastapi/routing.py"],
+        "expectedSymbols": ["APIRouter", "include_router"]
+      },
+      {
+        "id": "fastapi-new-api-parameter",
+        "type": "new_api_parameter",
+        "query": "Assess impact of adding a parameter to APIRouter.include_router.",
+        "expectedFiles": ["fastapi/routing.py"],
+        "expectedSymbols": ["include_router"]
+      }
+    ]
+  },
+  {
+    "name": "express",
+    "repo": "https://github.com/expressjs/express.git",
+    "commit": "dae209ae6559c29cfca2a1f4414c51d89ea643d5",
+    "languageProfile": ["javascript"],
+    "minimumMetrics": {
+      "realRepoKeyFileRecall": 0.85,
+      "realRepoEvidenceCoverage": 0.9,
+      "relatedTestRecall": 0.75,
+      "wrongProjectRouteRate": 0,
+      "staleFailureRate": 0
+    },
+    "tasks": [
+      {
+        "id": "express-router-chain",
+        "type": "impact_analysis",
+        "query": "Find blast radius for changes to router route registration.",
+        "expectedFiles": ["lib/application.js", "lib/router/index.js"],
+        "expectedSymbols": ["route", "use"]
+      },
+      {
+        "id": "express-bug-location",
+        "type": "bug_location",
+        "query": "Locate where request handlers are dispatched through middleware.",
+        "expectedFiles": ["lib/router/index.js", "lib/router/layer.js"],
+        "expectedSymbols": ["handle", "Layer"]
+      }
+    ]
+  },
+  {
+    "name": "axios",
+    "repo": "https://github.com/axios/axios.git",
+    "commit": "6bb12c191f5380fad321322fb90216ae0dc36985",
+    "languageProfile": ["javascript"],
+    "minimumMetrics": {
+      "realRepoKeyFileRecall": 0.85,
+      "realRepoEvidenceCoverage": 0.9,
+      "relatedTestRecall": 0.75,
+      "wrongProjectRouteRate": 0,
+      "staleFailureRate": 0
+    },
+    "tasks": [
+      {
+        "id": "axios-follow-up-delta",
+        "type": "follow_up_delta",
+        "query": "After seeing request dispatch context, return only new context for interceptors.",
+        "expectedFiles": ["lib/core/Axios.js", "lib/core/InterceptorManager.js"],
+        "expectedSymbols": ["Axios", "InterceptorManager"]
+      },
+      {
+        "id": "axios-stale-sync",
+        "type": "stale_sync",
+        "query": "Detect stale evidence after modifying request dispatch files.",
+        "expectedFiles": ["lib/core/dispatchRequest.js"],
+        "expectedSymbols": ["dispatchRequest"]
+      }
+    ]
+  }
+]

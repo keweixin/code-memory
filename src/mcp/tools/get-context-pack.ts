@@ -29,6 +29,11 @@ import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
+import {
   attachStaleBanner,
   partitionPending,
 } from "./_stale-banner.js";
@@ -66,7 +71,7 @@ export function registerGetContextPackTool(
     },
     async ({ query, tokenBudget, levels, sessionId, avoidRepeated, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeVectorSearchProvider = activeDb !== db
             ? await vectorSearchProviderResolver(projectRoot)
             : vectorSearchProvider || null;
@@ -132,8 +137,9 @@ export function registerGetContextPackTool(
           }
 
           // Phase 3: Format
+          const trustContract = buildToolTrustContract(pack, projectRoot, activeDb);
           const baseText = prependIndexDiagnostics(
-            [ledgerText, formatToolTrustContract(pack, projectRoot, activeDb), activePacker.formatAsText(pack)].filter(Boolean).join("\n\n"),
+            [ledgerText, formatToolTrustContract(trustContract), activePacker.formatAsText(pack)].filter(Boolean).join("\n\n"),
             activeDb,
             projectRoot,
           );
@@ -141,7 +147,26 @@ export function registerGetContextPackTool(
           log.info("Context pack: level=" + pack.level + ", tokens=" + pack.tokensUsed + "/" + budget);
 
           return {
-            content: [{ type: "text" as const, text }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  query,
+                  level: pack.level,
+                  tokensUsed: pack.tokensUsed,
+                  tokenBudget: budget,
+                  trustContract,
+                },
+                text,
+                {
+                  tool: "impact_analysis",
+                  reason: "Use only allowedNextReads for extra source reads unless confidence is low or freshness is stale. Run impact_analysis before editing shared code.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
@@ -149,10 +174,15 @@ export function registerGetContextPackTool(
         const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
 
         if (isUninitializedRepo) {
+          const display = `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`;
           return {
             content: [{
               type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { query },
+                display,
+              )),
             }],
             isError: false,
           };
@@ -163,7 +193,11 @@ export function registerGetContextPackTool(
         return {
           content: [{
             type: "text" as const,
-            text: wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { query },
+              wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+            )),
           }],
           isError: true,
         };
@@ -172,12 +206,47 @@ export function registerGetContextPackTool(
   );
 }
 
-function formatToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJsDatabase): string {
+interface ToolTrustContract {
+  confidence: "ready" | "stale" | "low";
+  projectRoot: string;
+  dbPath: string;
+  indexStatus: string;
+  exactSnippets: Array<{
+    file: string;
+    lines: string;
+    symbol: string;
+    code: string;
+    why: string;
+  }>;
+  whyIncluded: Array<{
+    file: string;
+    reason: string;
+    confidence: number;
+  }>;
+  nextAllowedReads: string[];
+  allowedNextReads: Array<{
+    path: string;
+    reason: string;
+    maxLines: string;
+  }>;
+  discouragedReads: Array<{
+    pattern: string;
+    reason: string;
+  }>;
+  freshness: {
+    changedFiles: number;
+    changedFilePaths: string[];
+    watchPendingCount: number;
+    recommendedAction: string | null;
+  };
+}
+
+function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJsDatabase): ToolTrustContract {
   const freshness = getIndexStaleness(projectRoot, db);
   const exactSnippets = pack.codeSnippets.slice(0, 5).map((snippet) => ({
     file: snippet.filePath,
     lines: snippet.lineRange[0] + "-" + snippet.lineRange[1],
-    symbol: snippet.symbolName,
+    symbol: snippet.symbolName ?? "",
     code: truncateSnippetCode(snippet.content),
     why: snippet.reason,
   }));
@@ -189,28 +258,49 @@ function formatToolTrustContract(pack: ContextPack, projectRoot: string, db: Sql
   const nextAllowedReads = pack.codeSnippets.length > 0
     ? unique(pack.codeSnippets.map((snippet) => snippet.filePath)).slice(0, 5)
     : pack.files.slice(0, 5).map((file) => file.path);
+  const allowedNextReads = pack.codeSnippets.length > 0
+    ? pack.codeSnippets.slice(0, 5).map((snippet) => ({
+      path: snippet.filePath,
+      reason: snippet.reason || "Code Memory returned this snippet as task evidence.",
+      maxLines: snippet.lineRange[0] + "-" + snippet.lineRange[1],
+    }))
+    : pack.files.slice(0, 5).map((file) => ({
+      path: file.path,
+      reason: file.reason,
+      maxLines: "targeted read only",
+    }));
   const confidence = freshness.indexStatus === "fresh" && (pack.codeSnippets.length > 0 || pack.files.length > 0)
     ? "ready"
     : freshness.indexStatus === "stale" || freshness.indexStatus === "failed"
       ? "stale"
       : "low";
 
+  return {
+    confidence,
+    projectRoot,
+    dbPath: join(projectRoot, CONFIG_DIR, DATABASE_FILE),
+    indexStatus: freshness.indexStatus,
+    exactSnippets,
+    whyIncluded,
+    nextAllowedReads,
+    allowedNextReads,
+    discouragedReads: [{
+      pattern: "whole repo grep",
+      reason: "Code Memory already returned bounded entry/service/test candidates. Use broad Grep/Glob only when confidence is low or stale.",
+    }],
+    freshness: {
+      changedFiles: freshness.changedFiles,
+      changedFilePaths: freshness.watchLastChangedPaths,
+      watchPendingCount: freshness.watchPendingCount,
+      recommendedAction: freshness.recommendedAction,
+    },
+  };
+}
+
+function formatToolTrustContract(contract: ToolTrustContract): string {
   return [
     "=== Tool Trust Contract ===",
-    JSON.stringify({
-      confidence,
-      projectRoot,
-      dbPath: join(projectRoot, CONFIG_DIR, DATABASE_FILE),
-      indexStatus: freshness.indexStatus,
-      exactSnippets,
-      whyIncluded,
-      nextAllowedReads,
-      freshness: {
-        changedFiles: freshness.changedFiles,
-        watchPendingCount: freshness.watchPendingCount,
-        recommendedAction: freshness.recommendedAction,
-      },
-    }, null, 2),
+    JSON.stringify(contract, null, 2),
   ].join("\n");
 }
 

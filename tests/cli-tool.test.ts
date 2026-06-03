@@ -133,7 +133,7 @@ describe('CLI MCP tool mirror', () => {
       const output = logSpy.mock.calls.map(([line]) => String(line)).join('\n');
       expect(output).toContain('register_project complete');
       expect(output).toContain('Registered repo: cli-tool-register ->');
-      expect(output).toContain(missingRoot);
+      expect(output).toContain(missingRoot.replace(/\\/g, '\\\\'));
     } finally {
       rmSync(missingRoot, { recursive: true, force: true });
     }

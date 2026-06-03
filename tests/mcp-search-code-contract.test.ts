@@ -85,7 +85,21 @@ describe('MCP search_code contract', () => {
       intent: 'debug',
     });
     const text = result.content[0].text;
+    const structured = JSON.parse(text) as {
+      status: string;
+      project: { root: string; dbPath: string };
+      data: { query: string; resultCount: number; results: unknown[] };
+      nextAction: { tool?: string; reason: string };
+      display: string;
+    };
 
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.project.dbPath).toContain('.code-memory');
+    expect(structured.data.query).toBe('login');
+    expect(structured.data.resultCount).toBeGreaterThan(0);
+    expect(structured.nextAction.tool).toBe('get_context_pack');
+    expect(structured.display).toContain('Search results for: "login"');
     expect(text).toContain('=== Index Diagnostics ===');
     expect(text).toContain('Index status:');
     expect(text).toContain('Changed files:');

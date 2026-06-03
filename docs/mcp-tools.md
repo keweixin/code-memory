@@ -20,6 +20,43 @@ index, or cwd mismatch. If it returns `needs_bootstrap`, `needs_index`, `stale`,
 or `unknown`, call `bootstrap_project`, `sync_project`, or `register_project`
 before expecting search results to be complete.
 
+Core project/retrieval tools return a structured JSON envelope:
+
+```ts
+type CodeMemoryToolResult<T> = {
+  status: 'ready' | 'needs_bootstrap' | 'needs_index' | 'stale' | 'error';
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: T;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
+```
+
+Parse `status`, `project`, `freshness`, `data`, and `nextAction` for agent control flow. Use `display` only for human-readable fallback text.
+
+After a ready `get_context_pack`, prefer `data.trustContract.allowedNextReads`:
+
+```json
+{
+  "allowedNextReads": [
+    {
+      "path": "src/auth/session.ts",
+      "reason": "contains createSession implementation",
+      "maxLines": "12-68"
+    }
+  ],
+  "discouragedReads": [
+    {
+      "pattern": "whole repo grep",
+      "reason": "context pack already found entry/service/test candidates"
+    }
+  ]
+}
+```
+
+Only read outside `allowedNextReads` when confidence is low, freshness is stale, or the returned evidence is insufficient for the task.
+
 `get_context_pack` automatically records context when you pass a stable
 `sessionId`. If you send context manually from `search_code`, resources, or CLI
 output, call `mark_context_used` with the files/symbols/chunks you returned.

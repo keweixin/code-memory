@@ -84,7 +84,8 @@ describe('MCP repo routing', () => {
       searchMode: 'keyword',
       limit: 5,
     });
-    expect(routedCode.content[0].text).toContain('Search results for: "betaOnly"');
+    const structuredRoutedCode = JSON.parse(routedCode.content[0].text) as { display: string };
+    expect(structuredRoutedCode.display).toContain('Search results for: "betaOnly"');
     expect(routedCode.content[0].text).toContain('betaOnly');
 
     const routedSymbols = await server.handlers.get('search_symbols')!({
@@ -131,6 +132,20 @@ describe('MCP repo routing', () => {
     });
     expect(routedImpact.content[0].text).toContain('Impact Analysis');
     expect(routedImpact.content[0].text).toContain('betaOnly');
+    const structuredImpact = JSON.parse(routedImpact.content[0].text) as {
+      status: string;
+      project: { root: string; repoName: string };
+      data: { target: string; affectedFiles: unknown[]; affectedSymbols: unknown[] };
+      nextAction: { tool?: string };
+      display: string;
+    };
+    expect(structuredImpact.status).toBe('ready');
+    expect(structuredImpact.project.root).toBe(secondRoot);
+    expect(structuredImpact.project.repoName).toBe('second');
+    expect(structuredImpact.data.target).toBe('betaOnlyHelper');
+    expect(structuredImpact.data.affectedFiles.length + structuredImpact.data.affectedSymbols.length).toBeGreaterThan(0);
+    expect(structuredImpact.nextAction.tool).toBe('get_related_tests');
+    expect(structuredImpact.display).toContain('=== Impact Analysis ===');
 
     const routedRelatedTests = await server.handlers.get('get_related_tests')!({
       repo: 'second',
@@ -166,6 +181,29 @@ describe('MCP repo routing', () => {
     });
     expect(routedContext.content[0].text).toContain('Context Ledger');
     expect(routedContext.content[0].text).toContain('betaOnly');
+    const structuredContext = JSON.parse(routedContext.content[0].text) as {
+      status: string;
+      project: { root: string; repoName: string; dbPath: string };
+      data: {
+        trustContract: {
+          confidence: string;
+          allowedNextReads: Array<{ path: string; reason: string; maxLines: string }>;
+          discouragedReads: Array<{ pattern: string; reason: string }>;
+        };
+      };
+      nextAction: { tool?: string; reason: string };
+      display: string;
+    };
+    expect(structuredContext.status).toBe('ready');
+    expect(structuredContext.project.root).toBe(secondRoot);
+    expect(structuredContext.project.repoName).toBe('second');
+    expect(structuredContext.data.trustContract.confidence).toBe('ready');
+    expect(structuredContext.data.trustContract.allowedNextReads[0].path).toContain('src/');
+    expect(structuredContext.data.trustContract.allowedNextReads[0].reason).toBeTruthy();
+    expect(structuredContext.data.trustContract.allowedNextReads[0].maxLines).toBeTruthy();
+    expect(structuredContext.data.trustContract.discouragedReads[0].pattern).toBe('whole repo grep');
+    expect(structuredContext.nextAction.tool).toBe('impact_analysis');
+    expect(structuredContext.display).toContain('=== Tool Trust Contract ===');
 
     const routedRepeatedContext = await server.handlers.get('get_context_pack')!({
       repo: 'second',
@@ -239,7 +277,8 @@ describe('MCP repo routing', () => {
       searchMode: 'keyword',
       limit: 5,
     });
-    expect(search.content[0].text).toContain('Search results for: "gammaOnly"');
+    const structuredSearch = JSON.parse(search.content[0].text) as { display: string };
+    expect(structuredSearch.display).toContain('Search results for: "gammaOnly"');
     expect(search.content[0].text).toContain('gammaOnly');
   }, 20_000);
 
@@ -274,7 +313,8 @@ describe('MCP repo routing', () => {
       searchMode: 'keyword',
       limit: 5,
     });
-    expect(search.content[0].text).toContain('Search results for: "deltaOnly"');
+    const structuredSearch = JSON.parse(search.content[0].text) as { display: string };
+    expect(structuredSearch.display).toContain('Search results for: "deltaOnly"');
     expect(search.content[0].text).toContain('deltaOnly');
 
     const context = await server.handlers.get('get_context_pack')!({

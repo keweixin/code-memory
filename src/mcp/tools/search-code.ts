@@ -16,6 +16,11 @@ import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
+import {
   attachStaleBanner,
   partitionPending,
 } from "./_stale-banner.js";
@@ -55,7 +60,7 @@ export function registerSearchCodeTool(
     },
     async ({ query, limit, fileFilter, searchMode, intent, sessionId, avoidRepeated, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeVectorSearchProvider = activeDb !== db
             ? await vectorSearchProviderResolver(projectRoot)
             : vectorSearchProvider || null;
@@ -77,14 +82,29 @@ export function registerSearchCodeTool(
               : searchMode === 'vector'
                 ? "\n\nVector mode only searches indexed chunk embeddings. Configure embeddings, run 'code-memory bootstrap --project .', and use 'hybrid' or 'keyword' mode if no vectors are present."
                 : "";
+            const display = wrapWithStaleBanner(prependIndexDiagnostics(
+              `No results found for "${query}".\n\nTry broadening your query, or ensure the codebase has been indexed with 'code-memory index'.${modeHint}`,
+              activeDb,
+              projectRoot,
+            ), activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner(prependIndexDiagnostics(
-                  `No results found for "${query}".\n\nTry broadening your query, or ensure the codebase has been indexed with 'code-memory index'.${modeHint}`,
-                  activeDb,
+                text: formatStructuredToolResult(toolResultFromProject(
                   projectRoot,
-                ), activeDb),
+                  resolution.repoName ?? "",
+                  activeDb,
+                  {
+                    query,
+                    resultCount: 0,
+                    results,
+                  },
+                  display,
+                  {
+                    tool: "get_context_pack",
+                    reason: "No ranked results were found. Try a broader query or call get_context_pack with a higher budget.",
+                  },
+                )),
               }],
             };
           }
@@ -94,7 +114,24 @@ export function registerSearchCodeTool(
           log.info(`Search "${query}" returned ${results.length} results`);
 
           return {
-            content: [{ type: "text" as const, text }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  query,
+                  resultCount: results.length,
+                  results,
+                },
+                text,
+                {
+                  tool: "get_context_pack",
+                  reason: "Use get_context_pack for bounded evidence before broad Read/Grep. Read only files returned by Code Memory if more detail is needed.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
@@ -102,10 +139,15 @@ export function registerSearchCodeTool(
         const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
 
         if (isUninitializedRepo) {
+          const display = `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`;
           return {
             content: [{
               type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { query },
+                display,
+              )),
             }],
             isError: false,
           };
@@ -116,7 +158,11 @@ export function registerSearchCodeTool(
         return {
           content: [{
             type: "text" as const,
-            text: wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { query },
+              wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+            )),
           }],
           isError: true,
         };

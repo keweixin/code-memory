@@ -7,6 +7,7 @@ import { findRepo } from '../cli/registry.js';
 import { DatabaseRouter, ProjectNotReadyError } from './database-router.js';
 import { formatProjectResolution, type ProjectResolution, type ResolveProjectInput } from './project-resolver.js';
 import { pickToolContextInput } from './tool-context.js';
+import { formatStructuredToolResult, toolResultFromResolution } from './tool-result.js';
 
 export interface RoutedDatabase {
   db: SqlJsDatabase;
@@ -18,12 +19,12 @@ export interface RoutedDatabase {
 export async function withRepoDatabase<T>(
   input: string | ResolveProjectInput | undefined,
   defaultDb: SqlJsDatabase | undefined,
-  callback: (db: SqlJsDatabase, projectRoot: string) => Promise<T> | T,
+  callback: (db: SqlJsDatabase, projectRoot: string, resolution: ProjectResolution) => Promise<T> | T,
 ): Promise<T> {
   const router = new DatabaseRouter(defaultDb);
   try {
     return await router.withResolvedProject(normalizeToolContextInput(input), async (routed) =>
-      callback(routed.db, routed.projectRoot));
+      callback(routed.db, routed.projectRoot, routed.resolution));
   } catch (err) {
     if (err instanceof ProjectNotReadyError) {
       return createBootstrapProtocolResult(err.resolution) as T;
@@ -65,17 +66,22 @@ export function createBootstrapProtocolResult(resolution: ProjectResolution): {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
 } {
+  const display = [
+    '[CODE-MEMORY BOOTSTRAP PROTOCOL]',
+    formatProjectResolution(resolution),
+    '',
+    resolution.command
+      ? 'Next command: ' + resolution.command
+      : 'Next action: ' + resolution.nextAction,
+  ].join('\n');
   return {
     content: [{
       type: 'text',
-      text: [
-        '[CODE-MEMORY BOOTSTRAP PROTOCOL]',
-        formatProjectResolution(resolution),
-        '',
-        resolution.command
-          ? 'Next command: ' + resolution.command
-          : 'Next action: ' + resolution.nextAction,
-      ].join('\n'),
+      text: formatStructuredToolResult(toolResultFromResolution(
+        resolution,
+        { resolution },
+        display,
+      )),
     }],
     isError: resolution.status === 'unknown',
   };

@@ -25,15 +25,31 @@ class FakeMcpServer {
 describe('global MCP server', () => {
   let tempRoot: string;
   let originalCwd: string;
+  let originalProjectEnv: string | undefined;
+  let originalGlobalHome: string | undefined;
 
   beforeEach(() => {
     originalCwd = process.cwd();
+    originalProjectEnv = process.env.CODE_MEMORY_PROJECT;
+    originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-global-mcp-'));
+    process.env.CODE_MEMORY_GLOBAL_HOME = join(tempRoot, 'home');
+    delete process.env.CODE_MEMORY_PROJECT;
     process.chdir(tempRoot);
   });
 
   afterEach(async () => {
     process.chdir(originalCwd);
+    if (originalProjectEnv === undefined) {
+      delete process.env.CODE_MEMORY_PROJECT;
+    } else {
+      process.env.CODE_MEMORY_PROJECT = originalProjectEnv;
+    }
+    if (originalGlobalHome === undefined) {
+      delete process.env.CODE_MEMORY_GLOBAL_HOME;
+    } else {
+      process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
+    }
     await closeDatabase();
     rmSync(tempRoot, { recursive: true, force: true });
   });
@@ -55,6 +71,29 @@ describe('global MCP server', () => {
     const resolution = await server.handlers.get('resolve_project')!({});
     expect(resolution.content[0].text).toContain('"status": "needs_bootstrap"');
     expect(resolution.content[0].text).toContain('bootstrap --project');
+    const structuredResolution = JSON.parse(resolution.content[0].text) as {
+      status: string;
+      project: { root: string; dbPath: string };
+      data: { resolution: { status: string; indexExists: boolean } };
+      nextAction: { tool?: string; command?: string };
+    };
+    expect(structuredResolution.status).toBe('needs_bootstrap');
+    expect(structuredResolution.project.root).toBe(tempRoot);
+    expect(structuredResolution.project.dbPath).toContain('.code-memory');
+    expect(structuredResolution.data.resolution.indexExists).toBe(false);
+    expect(structuredResolution.nextAction.tool).toBe('bootstrap_project');
+    expect(structuredResolution.nextAction.command).toContain('bootstrap --project');
+
+    const sync = await server.handlers.get('sync_project')!({ project: tempRoot });
+    const structuredSync = JSON.parse(sync.content[0].text) as {
+      status: string;
+      data: { changed: boolean; resolution: { status: string } };
+      nextAction: { tool?: string };
+    };
+    expect(structuredSync.status).toBe('needs_bootstrap');
+    expect(structuredSync.data.changed).toBe(false);
+    expect(structuredSync.data.resolution.status).toBe('needs_bootstrap');
+    expect(structuredSync.nextAction.tool).toBe('bootstrap_project');
 
     const plan = await server.handlers.get('plan_context')!({
       query: 'inspect startup flow',

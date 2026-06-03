@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.7] - 2026-06-04
+
+### Added
+- Add a shared `CodeMemoryToolResult` envelope for core MCP project/retrieval tools with machine-readable `status`, `project`, `freshness`, `data`, `nextAction`, and `display`
+- Add `benchmark/real-repos.json` with pinned public repo tasks and v1 benchmark threshold targets
+- Add contract tests for structured tool results, project management recovery, allowed reads, impact analysis, and real-repo benchmark config
+
+### Changed
+- Return structured JSON from `resolve_project`, `bootstrap_project`, `sync_project`, `register_project`, `search_code`, `get_context_pack`, and `impact_analysis`
+- Upgrade `get_context_pack` Tool Trust Contract with structured `allowedNextReads` and `discouragedReads`
+- Strengthen MCP instructions and docs so agents avoid broad Read/Grep/Glob after a ready context pack
+- Keep index diagnostics inside structured `display` instead of prefixing JSON tool results
+
 ## [0.3.6] - 2026-06-03
 
 ### Fixed

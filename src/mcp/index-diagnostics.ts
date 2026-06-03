@@ -85,7 +85,9 @@ function addIndexDiagnosticsToToolResult(result: unknown, db: SqlJsDatabase, pro
       if (!isTextContent(item)) return item;
       return {
         ...item,
-        text: prependIndexDiagnostics(item.text, db, projectRoot),
+        text: isStructuredToolResultText(item.text)
+          ? item.text
+          : prependIndexDiagnostics(item.text, db, projectRoot),
       };
     }),
   };
@@ -102,6 +104,32 @@ function isTextContent(value: unknown): value is { type: 'text'; text: string } 
     value !== null &&
     (value as { type?: unknown }).type === 'text' &&
     typeof (value as { text?: unknown }).text === 'string';
+}
+
+function isStructuredToolResultText(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith('{')) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      status?: unknown;
+      project?: unknown;
+      freshness?: unknown;
+      data?: unknown;
+      nextAction?: unknown;
+      display?: unknown;
+    };
+    return typeof parsed.status === 'string' &&
+      typeof parsed.project === 'object' &&
+      parsed.project !== null &&
+      typeof parsed.freshness === 'object' &&
+      parsed.freshness !== null &&
+      'data' in parsed &&
+      typeof parsed.nextAction === 'object' &&
+      parsed.nextAction !== null &&
+      typeof parsed.display === 'string';
+  } catch {
+    return false;
+  }
 }
 
 function getProjectRootFromDbPath(): string {

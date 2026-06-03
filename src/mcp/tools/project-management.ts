@@ -12,6 +12,7 @@ import { indexProject } from "../../cli/commands/index.js";
 import { registerRepo } from "../../cli/registry.js";
 import { createLogger } from "../../shared/logger.js";
 import { formatProjectResolution, resolveProject } from "../project-resolver.js";
+import { formatStructuredToolResult, toolResultFromResolution } from "../tool-result.js";
 
 const log = createLogger("mcp:project-management");
 
@@ -87,12 +88,23 @@ export function registerProjectManagementTools(server: McpServer): void {
       return {
         content: [{
           type: "text" as const,
-          text: [
+          text: formatStructuredToolResult(toolResultFromResolution(
+            after,
+            {
+              registered: {
+                name: entry.name,
+                rootPath: entry.rootPath,
+              },
+              resolution: after,
+            },
+            [
             "register_project complete",
             "Registered repo: " + entry.name + " -> " + entry.rootPath,
             "",
             formatProjectResolution(after),
-          ].join("\n"),
+            ].join("\n"),
+            "Project registered. Call resolve_project again, then plan_context when ready.",
+          )),
         }],
       };
     },
@@ -105,14 +117,25 @@ function resolutionResult(
   changed: boolean,
 ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
   const ready = resolution.status === "ready" || resolution.status === "stale";
+  const display = [
+    toolName + (changed ? " complete" : " skipped"),
+    "",
+    formatProjectResolution(resolution),
+  ].join("\n");
   return {
     content: [{
       type: "text" as const,
-      text: [
-        toolName + (changed ? " complete" : " skipped"),
-        "",
-        formatProjectResolution(resolution),
-      ].join("\n"),
+      text: formatStructuredToolResult(toolResultFromResolution(
+        resolution,
+        {
+          changed,
+          resolution,
+        },
+        display,
+        changed
+          ? "Project management command completed. Call resolve_project again, then plan_context when ready."
+          : "Project management command skipped. Follow nextAction before using DB-backed tools.",
+      )),
     }],
     isError: !changed && !ready,
   };

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { formatProjectResolution, resolveProject } from "../project-resolver.js";
+import { formatStructuredToolResult, toolResultFromResolution } from "../tool-result.js";
 
 export function registerResolveProjectTool(server: McpServer): void {
   server.tool(
@@ -12,10 +13,15 @@ export function registerResolveProjectTool(server: McpServer): void {
     },
     async ({ repo, project }) => {
       const resolution = resolveProject({ repo, project });
+      const display = formatProjectResolution(resolution);
       return {
         content: [{
           type: "text" as const,
-          text: formatProjectResolution(resolution),
+          text: formatStructuredToolResult(toolResultFromResolution(
+            resolution,
+            { resolution },
+            display,
+          )),
         }],
       };
     },

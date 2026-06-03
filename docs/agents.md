@@ -25,4 +25,6 @@ Agent workflow:
 1. Call `resolve_project` before Read/Grep/Glob.
 2. If the project is missing, stale, or unregistered, call `bootstrap_project`, `sync_project`, or `register_project`.
 3. Call `resolve_project` again, then `plan_context` and `get_context_pack`.
-4. Only use Read on files returned by Code Memory when extra source detail is needed.
+4. Parse core tool results as structured JSON: `status`, `project`, `freshness`, `data`, `nextAction`, `display`.
+5. After a ready `get_context_pack`, only use Read on `data.trustContract.allowedNextReads` paths and ranges unless confidence is low or freshness is stale.
+6. Do not run broad Grep/Glob after a ready context pack; use `search_code` or `search_symbols` for precision instead.

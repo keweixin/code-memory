@@ -14,6 +14,11 @@ import { ImpactAnalyzer } from "../../graph/impact-analyzer.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:impact-analysis");
@@ -48,15 +53,26 @@ export function registerImpactAnalysisTool(server: McpServer, db?: SqlJsDatabase
     },
     async ({ target, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeAnalyzer = analyzer && activeDb === db ? analyzer : new ImpactAnalyzer(activeDb);
           const result = activeAnalyzer.analyze(target);
 
           if (result.affectedFiles.length === 0 && result.affectedSymbols.length === 0) {
+            const display = wrapWithStaleBanner("No impact data found for: " + target + ". The target may not be indexed or has no relationships.", activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner("No impact data found for: " + target + ". The target may not be indexed or has no relationships.", activeDb),
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  result,
+                  display,
+                  {
+                    tool: "search_code",
+                    reason: "No impact graph was found. Search for the target or verify the symbol/file is indexed.",
+                  },
+                )),
               }],
             };
           }
@@ -65,7 +81,20 @@ export function registerImpactAnalysisTool(server: McpServer, db?: SqlJsDatabase
           log.info("Impact analysis for " + target + ": " + result.affectedFiles.length + " files, " + result.affectedSymbols.length + " symbols");
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                result,
+                wrapWithStaleBanner(text, activeDb),
+                {
+                  tool: "get_related_tests",
+                  reason: "Review related tests before editing; after changes, sync or rerun impact if freshness changes.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
@@ -73,18 +102,27 @@ export function registerImpactAnalysisTool(server: McpServer, db?: SqlJsDatabase
         const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
 
         if (isUninitializedRepo) {
+          const display = wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db);
           return {
             content: [{
               type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { target },
+                display,
+              )),
             }],
             isError: false,
           };
         }
 
         log.error("Impact analysis failed: " + errorMsg);
+        const display = wrapWithStaleBanner("Error: Impact analysis failed - " + errorMsg, db);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Impact analysis failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(errorMsg, { target }, display)),
+          }],
           isError: true,
         };
       }
