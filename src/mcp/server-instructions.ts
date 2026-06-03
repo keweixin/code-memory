@@ -28,8 +28,14 @@ export function getServerInstructions(): string {
     '6. STALE INDEX HANDLING:',
     '   Treat stale or missing index diagnostics as a reason to run code-memory sync or code-memory index --full.',
     '',
-    '7. MULTI-REPO:',
-    '   When working across registered repositories, pass repo to repo-aware tools.',
+    '7. MULTI-REPO & CROSS-DIRECTORY SWITCHING:',
+'   When switching to a new workspace or directory, you MUST call plan_context (with the correct repo path) FIRST to check index readiness. NEVER skip this and directly call get_repo_map or other heavy retrieval tools — you WILL hit a database-not-found error.',
+'',
+'8. UNINITIALIZED PROJECT HANDLING:',
+'   When plan_context returns a [CODE-MEMORY BOOTSTRAP PROTOCOL] message, the target project has NO index database. You MUST immediately stop your current task reasoning and present the initialization instructions to the user. Do NOT attempt to force-call retrieval tools on an uninitialized project.',
+'',
+'9. MEMORY-FIRST ON NEW CONVERSATIONS:',
+'   At the start of any new conversation or task, you MUST call get_context_pack to actively retrieve historical memories (facts, decisions, preferences) from the persistent store. NEVER skip this and blindly re-explore the codebase with generic search — the memories already contain what you need.',
   ].join('\n');
 }
 

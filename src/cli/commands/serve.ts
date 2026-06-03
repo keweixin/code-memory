@@ -19,6 +19,7 @@ export function registerServeCommand(program: Command): void {
     .option('--mcp', 'Use MCP stdio transport (default)', true)
     .option('--no-mcp', 'Fail clearly; alternate transports are not supported yet')
     .option('--watch', 'Keep the index synchronized while serving MCP')
+    .option('--project <path>', 'Project root path (default: cwd or CODE_MEMORY_PROJECT env)')
     .action(async (options) => {
       try {
         await startServer(options);
@@ -36,6 +37,7 @@ export function registerServeCommand(program: Command): void {
 interface ServeOptions {
   mcp?: boolean;
   watch?: boolean;
+  project?: string;
 }
 
 export type ServeErrorCode =
@@ -67,7 +69,9 @@ export interface ServeDependencies {
 }
 
 export async function startServer(options: ServeOptions, deps: ServeDependencies = {}): Promise<void> {
-  const projectPath = process.cwd();
+  const projectPath = options.project
+    ?? process.env.CODE_MEMORY_PROJECT
+    ?? process.cwd();
 
   if (options.mcp === false) {
     throw new ServeCommandError(

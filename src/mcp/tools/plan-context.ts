@@ -101,10 +101,40 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
           return { content: [{ type: "text" as const, text: wrapWithStaleBanner(baseText) }] };
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error("Plan context failed: " + msg);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+
+        // Detect uninitialized repository errors from resolveRepoRoot
+        // Pattern matches both "is not registered" and "does not contain" substrings
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          log.warn(`[Auto-Bootstrap] Trapped raw repo entry event for path "${repo || 'current'}". Injecting self-awakening guide.`);
+          const repoArg = typeof repo === 'string' ? repo : process.cwd();
+          return {
+            content: [{
+              type: "text" as const,
+              text: [
+                `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===`,
+                `Target Repository Workspace: "${repoArg}"`,
+                `Status: RAW / UNINITIALIZED (No index database found on physical disk.)`,
+                ``,
+                `CRITICAL MANDATE FOR AGENT:`,
+                `1. 目标仓库暂未建立 code-memory 本地高维依赖网，当前严禁强行调用 get_repo_map 或 get_context_pack 等依赖数据库的重型检索工具。`,
+                `2. 终止盲目的任务代码推导。你必须立即引导用户在主机的项目终端路径下拉起以下任意一项初始化破冰管线：`,
+                `   - 方案 A (推荐：实时守护监听): 运行 code-memory watch . 常驻后台`,
+                `   - 方案 B (单次全量扫描): 运行 code-memory index --full 强制编译初始化 AST`,
+                `   - 方案 C (完整初始化): 运行 code-memory init && code-memory index --full`,
+                `3. 告知用户：一旦 Watch 守卫启动，Tree-sitter 索引流水线会在后台自动完成骨架构建，届时当前阻断将自动解除，高级语义定位能力将自发恢复。`,
+              ].join('\n'),
+            }],
+            isError: false,  // Do NOT block the AI workflow — this is a guidance signal, not an error
+          };
+        }
+
+        // Other errors: keep original behavior
+        log.error("Plan context failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Plan context failed - " + msg, db)) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Plan context failed - " + errorMsg, db)) }],
           isError: true,
         };
       }
