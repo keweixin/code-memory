@@ -75,7 +75,7 @@ export async function runMcpToolFromCli(name: string | undefined, options: ToolO
     }
 
     const rawArgs = parseToolArgs(options);
-    if (name === 'resolve_project' && options.project && !rawArgs.project && !rawArgs.repo) {
+    if (isGlobalProjectTool(name) && options.project && !rawArgs.project && !rawArgs.repo) {
       rawArgs.project = resolveProjectPath(options);
     }
     const args = parseWithToolSchema(tool, rawArgs);
@@ -93,7 +93,14 @@ export async function runMcpToolFromCli(name: string | undefined, options: ToolO
 }
 
 function shouldUseGlobalToolMirror(name: string | undefined, options: ToolOptions): boolean {
-  return Boolean(options.list) || name === 'resolve_project';
+  return Boolean(options.list) || isGlobalProjectTool(name);
+}
+
+function isGlobalProjectTool(name: string | undefined): boolean {
+  return name === 'resolve_project' ||
+    name === 'bootstrap_project' ||
+    name === 'sync_project' ||
+    name === 'register_project';
 }
 
 async function collectMcpTools(projectRoot?: string): Promise<Map<string, CollectedTool>> {

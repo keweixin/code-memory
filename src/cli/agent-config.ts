@@ -16,6 +16,7 @@ export type RuntimeName = 'npx' | 'global' | 'local';
 interface McpLaunchSpec {
   command: string;
   args: string[];
+  env?: Record<string, string>;
 }
 
 export interface AgentConfigChange {
@@ -101,14 +102,15 @@ function getMcpLaunchSpec(projectRoot: string, runtime: RuntimeName, bindProject
   const serveArgs = bindProject
     ? ['serve', '--watch', '--project', projectRoot]
     : ['serve', '--watch', '--auto-project'];
+  const env = bindProject ? undefined : { CODE_MEMORY_PROJECT: projectRoot };
   if (runtime === 'global') {
-    return { command: 'code-memory', args: serveArgs };
+    return { command: 'code-memory', args: serveArgs, env };
   }
   if (runtime === 'local') {
     const distIndexPath = join(dirname(dirname(fileURLToPath(import.meta.url))), 'index.js');
-    return { command: 'node', args: [distIndexPath, ...serveArgs] };
+    return { command: 'node', args: [distIndexPath, ...serveArgs], env };
   }
-  return { command: 'npx', args: ['-y', NPM_PACKAGE_SPEC, ...serveArgs] };
+  return { command: 'npx', args: ['-y', NPM_PACKAGE_SPEC, ...serveArgs], env };
 }
 
 function buildSetupChange(agent: AgentName, options: AgentConfigOptions): AgentConfigChange {
@@ -169,6 +171,7 @@ function getAgentBlock(agent: AgentName, launch: McpLaunchSpec): string {
       '[mcp_servers.code-memory]',
       `command = ${JSON.stringify(launch.command)}`,
       `args = ${JSON.stringify(launch.args)}`,
+      ...(launch.env ? [`env = ${formatTomlInlineTable(launch.env)}`] : []),
       '# ' + CODE_MEMORY_MARKER_END,
     ].join('\n');
   }
@@ -203,6 +206,7 @@ function applyJsonMcpConfig(text: string, launch: McpLaunchSpec): string {
   mcpServers['code-memory'] = {
     command: launch.command,
     args: launch.args,
+    ...(launch.env ? { env: launch.env } : {}),
   };
   config.mcpServers = mcpServers;
   config.__codeMemoryMarkerStart = CODE_MEMORY_MARKER_START;
@@ -250,4 +254,9 @@ function writeChange(change: AgentConfigChange): void {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatTomlInlineTable(values: Record<string, string>): string {
+  const entries = Object.entries(values).map(([key, value]) => `${key} = ${JSON.stringify(value)}`);
+  return `{ ${entries.join(', ')} }`;
 }

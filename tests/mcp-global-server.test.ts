@@ -47,6 +47,9 @@ describe('global MCP server', () => {
     registerAllTools(server as never);
 
     expect(server.handlers.has('resolve_project')).toBe(true);
+    expect(server.handlers.has('bootstrap_project')).toBe(true);
+    expect(server.handlers.has('sync_project')).toBe(true);
+    expect(server.handlers.has('register_project')).toBe(true);
     expect(server.handlers.has('plan_context')).toBe(true);
 
     const resolution = await server.handlers.get('resolve_project')!({});

@@ -33,6 +33,7 @@ import { registerExplainModuleTool } from "./tools/explain-module.js";
 import { registerContextLedgerTools } from "./tools/context-ledger.js";
 import { registerGetUnifiedRepoMapTool } from "./tools/get-unified-repo-map.js";
 import { registerResolveProjectTool } from "./tools/resolve-project.js";
+import { registerProjectManagementTools } from "./tools/project-management.js";
 
 const log = createLogger("mcp:tool-registry");
 
@@ -95,7 +96,10 @@ function getToolWorkflowGuidance(toolName: string): string {
     return 'WHEN TO USE: after resolve_project confirms the repo is ready. AFTER THIS: call get_context_pack or search_code.';
   }
   if (toolName === 'resolve_project') {
-    return 'WHEN TO USE: first call for a new task, repo switch, missing index, or cwd mismatch. AFTER THIS: call plan_context if ready, otherwise run the returned bootstrap/index command.';
+    return 'WHEN TO USE: first call for a new task, repo switch, missing index, or cwd mismatch. AFTER THIS: call plan_context if ready; otherwise call bootstrap_project, sync_project, or register_project.';
+  }
+  if (toolName === 'bootstrap_project' || toolName === 'sync_project' || toolName === 'register_project') {
+    return 'WHEN TO USE: after resolve_project reports missing/stale/unregistered project state. AFTER THIS: call resolve_project again, then plan_context when ready.';
   }
   if (toolName === 'get_context_pack' || toolName === 'search_code') {
     return 'WHEN TO USE: understand a feature or find code after plan_context. AFTER THIS: call search_symbols for exact symbols; when returning context to an agent, call mark_context_used or use sessionId with get_context_pack.';
@@ -135,7 +139,10 @@ function getNextStepHint(toolName: string): string {
     return '[Next: call get_context_pack for bounded evidence, or search_code if you only need ranked matches.]';
   }
   if (toolName === 'resolve_project') {
-    return '[Next: if status is ready call plan_context; otherwise run the returned bootstrap/index command.]';
+    return '[Next: if status is ready call plan_context; otherwise call bootstrap_project, sync_project, or register_project.]';
+  }
+  if (toolName === 'bootstrap_project' || toolName === 'sync_project' || toolName === 'register_project') {
+    return '[Next: call resolve_project again to verify status, then plan_context if ready.]';
   }
   if (toolName === 'get_context_pack' || toolName === 'search_code') {
     return '[Next: pick a symbol/file from the results; call search_symbols for precision; call mark_context_used when manually returning context outside get_context_pack.]';
@@ -195,6 +202,7 @@ export function registerAllTools(
 
   // ---- Navigation & Discovery ----
   registerResolveProjectTool(timedServer);
+  registerProjectManagementTools(timedServer);
   registerGetProjectCardTool(timedServer, db);
   registerGetRepoMapTool(timedServer, db);
 

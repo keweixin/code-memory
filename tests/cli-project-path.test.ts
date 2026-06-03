@@ -12,10 +12,12 @@ describe('CLI --project routing', () => {
   let homeDir: string;
   let originalCwd: string;
   let originalHome: string | undefined;
+  let originalGlobalHome: string | undefined;
 
   beforeEach(() => {
     originalCwd = process.cwd();
     originalHome = process.env.CODE_MEMORY_HOME;
+    originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-project-path-'));
     projectRoot = join(tempRoot, 'target-project');
     otherRoot = join(tempRoot, 'other-cwd');
@@ -33,6 +35,7 @@ describe('CLI --project routing', () => {
       'utf-8',
     );
     process.env.CODE_MEMORY_HOME = homeDir;
+    process.env.CODE_MEMORY_GLOBAL_HOME = homeDir;
     process.chdir(otherRoot);
   });
 
@@ -42,6 +45,11 @@ describe('CLI --project routing', () => {
       delete process.env.CODE_MEMORY_HOME;
     } else {
       process.env.CODE_MEMORY_HOME = originalHome;
+    }
+    if (originalGlobalHome === undefined) {
+      delete process.env.CODE_MEMORY_GLOBAL_HOME;
+    } else {
+      process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
     }
     vi.restoreAllMocks();
     rmSync(tempRoot, { recursive: true, force: true });
@@ -115,16 +123,20 @@ describe('CLI --project routing', () => {
     ]);
 
     const cursorConfig = JSON.parse(readFileSync(join(projectRoot, '.cursor', 'mcp.json'), 'utf-8')) as {
-      mcpServers: Record<string, { command: string; args: string[] }>;
+      mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
     };
     expect(cursorConfig.mcpServers['code-memory']).toEqual({
       command: 'npx',
       args: ['-y', '@keweixin/code-memory@latest', 'serve', '--watch', '--auto-project'],
+      env: {
+        CODE_MEMORY_PROJECT: projectRoot,
+      },
     });
     expect(readFileSync(join(projectRoot, 'AGENTS.md'), 'utf-8')).toContain('CODE_MEMORY_CONTEXT_START');
     const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(output).toContain('Code Memory configuration was written.');
     expect(output).toContain('Bootstrap: skipped');
+    expect(output).toContain(`Registered repo: target-project -> ${projectRoot}`);
 
     await program.parseAsync(['node', 'code-memory', 'uninstall', '--agent', 'cursor', '--project', projectRoot]);
 

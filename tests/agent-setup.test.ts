@@ -31,6 +31,7 @@ describe('agent setup and uninstall', () => {
     expect(changes[0].after).toContain('CODE_MEMORY_START');
     expect(changes[0].after).toContain('command = "npx"');
     expect(changes[0].after).toContain('"@keweixin/code-memory@latest","serve","--watch","--auto-project"');
+    expect(changes[0].after).toContain(`env = { CODE_MEMORY_PROJECT = "${tempRoot.replace(/\\/g, '\\\\')}" }`);
     expect(changes[0].after).not.toContain('--project');
     expect(existsSync(changes[0].filePath)).toBe(false);
   });
@@ -46,6 +47,7 @@ describe('agent setup and uninstall', () => {
 
     expect(changes[0].after).toContain('command = "code-memory"');
     expect(changes[0].after).toContain('"serve","--watch","--auto-project"');
+    expect(changes[0].after).toContain(`env = { CODE_MEMORY_PROJECT = "${tempRoot.replace(/\\/g, '\\\\')}" }`);
     expect(changes[0].after).not.toContain('--project');
     expect(changes[0].after).not.toContain('@keweixin/code-memory@latest');
   });
@@ -67,6 +69,9 @@ describe('agent setup and uninstall', () => {
       '--watch',
       '--auto-project',
     ]));
+    expect(configured.mcpServers['code-memory'].env).toEqual({
+      CODE_MEMORY_PROJECT: tempRoot,
+    });
     expect(configured.mcpServers['code-memory'].args).not.toContain('@keweixin/code-memory@latest');
   });
 
@@ -81,6 +86,7 @@ describe('agent setup and uninstall', () => {
 
     expect(changes[0].after).toContain(`"serve","--watch","--project","${tempRoot.replace(/\\/g, '\\\\')}"`);
     expect(changes[0].after).not.toContain('--auto-project');
+    expect(changes[0].after).not.toContain('CODE_MEMORY_PROJECT');
   });
 
   it('is idempotent for markdown marker blocks and uninstall only removes code-memory content', () => {
@@ -121,6 +127,9 @@ describe('agent setup and uninstall', () => {
     expect(configured.mcpServers['code-memory']).toEqual({
       command: 'npx',
       args: ['-y', '@keweixin/code-memory@latest', 'serve', '--watch', '--auto-project'],
+      env: {
+        CODE_MEMORY_PROJECT: tempRoot,
+      },
     });
 
     uninstallAgents({ agent: 'cursor', projectRoot: tempRoot, homeDir });

@@ -45,9 +45,12 @@ async function indexFixture(rootPath: string): Promise<void> {
 
 describe('CLI MCP tool mirror', () => {
   let tempRoot: string;
+  let originalGlobalHome: string | undefined;
 
   beforeEach(async () => {
+    originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-cli-tool-'));
+    process.env.CODE_MEMORY_GLOBAL_HOME = join(tempRoot, 'global-home');
     cpSync(fixtureRoot, tempRoot, { recursive: true });
     await indexFixture(tempRoot);
   });
@@ -55,6 +58,11 @@ describe('CLI MCP tool mirror', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await closeDatabase();
+    if (originalGlobalHome === undefined) {
+      delete process.env.CODE_MEMORY_GLOBAL_HOME;
+    } else {
+      process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
+    }
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -72,6 +80,9 @@ describe('CLI MCP tool mirror', () => {
     expect(output).toContain('impact_analysis');
     expect(output).toContain('mark_context_used');
     expect(output).toContain('before sending more context');
+    expect(output).toContain('bootstrap_project');
+    expect(output).toContain('sync_project');
+    expect(output).toContain('register_project');
     expect(output.match(/resolve_project\t/g)).toHaveLength(1);
     expect(output.match(/resolve_project\t.*WHEN TO USE/g)).toHaveLength(1);
   });
@@ -104,6 +115,25 @@ describe('CLI MCP tool mirror', () => {
       expect(output).toContain('"status": "needs_bootstrap"');
       expect(output).toContain('bootstrap --project');
       expect(output).toContain(missingRoot.replace(/\\/g, '\\\\'));
+    } finally {
+      rmSync(missingRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('runs register_project without requiring an index first', async () => {
+    const missingRoot = mkdtempSync(join(tmpdir(), 'code-memory-cli-tool-register-'));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runMcpToolFromCli('register_project', {
+        project: missingRoot,
+        args: JSON.stringify({ name: 'cli-tool-register' }),
+      });
+
+      const output = logSpy.mock.calls.map(([line]) => String(line)).join('\n');
+      expect(output).toContain('register_project complete');
+      expect(output).toContain('Registered repo: cli-tool-register ->');
+      expect(output).toContain(missingRoot);
     } finally {
       rmSync(missingRoot, { recursive: true, force: true });
     }

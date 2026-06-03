@@ -4,7 +4,7 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
-Current source version: `0.3.0`.
+Current source version: `0.3.4`.
 
 Published npm status can lag the repository. Check before using `@latest`:
 
@@ -12,7 +12,7 @@ Published npm status can lag the repository. Check before using `@latest`:
 npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.3.0`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the setup/bootstrap/tool mirror flow yet.
+If npm reports a version older than `0.3.4`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP router and management-tool fixes yet.
 
 Run this from the project you want an agent to understand:
 
@@ -45,7 +45,10 @@ The default runtime is `npx`, which avoids global installs:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@keweixin/code-memory@latest", "serve", "--watch", "--auto-project"]
+  "args": ["-y", "@keweixin/code-memory@latest", "serve", "--watch", "--auto-project"],
+  "env": {
+    "CODE_MEMORY_PROJECT": "/absolute/path/to/project"
+  }
 }
 ```
 
@@ -69,12 +72,13 @@ npx -y @keweixin/code-memory@latest setup --agent cursor --project . --runtime l
 
 1. Resolves the project root to an absolute path.
 2. Runs safe bootstrap unless `--no-bootstrap` is passed.
-3. Writes the selected agent MCP config.
-4. Writes managed Code Memory blocks to `AGENTS.md` and `CLAUDE.md`.
-5. Installs Code Memory task skills under `.claude/skills/code-memory/`.
-6. Installs the minimal Claude Code PreToolUse hook when enabled.
-7. Runs `doctor`.
-8. Prints the next action.
+3. Registers the project in the global Code Memory registry for stable repo routing.
+4. Writes the selected agent MCP config with `CODE_MEMORY_PROJECT` as the default project identity.
+5. Writes managed Code Memory blocks to `AGENTS.md` and `CLAUDE.md`.
+6. Installs Code Memory task skills under `.claude/skills/code-memory/`.
+7. Installs the minimal Claude Code PreToolUse hook when enabled.
+8. Runs `doctor`.
+9. Prints the next action.
 
 Useful variants:
 

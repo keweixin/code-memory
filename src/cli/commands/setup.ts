@@ -12,6 +12,7 @@ import {
   formatProjectOnboardingChanges,
   setupProjectOnboarding,
 } from '../project-onboarding.js';
+import { registerRepo, type RegistryEntry } from '../registry.js';
 import { bootstrapProject } from './bootstrap.js';
 import { runDoctor } from './doctor.js';
 
@@ -41,6 +42,9 @@ export function registerSetupCommand(program: Command): void {
         if (options.bootstrap !== false && !options.dryRun && !printConfig) {
           await bootstrapProject({ project: projectRoot, embedding: 'none', workers: 'auto' });
         }
+        const registeredRepo = !options.dryRun && !printConfig
+          ? registerRepo(projectRoot)
+          : null;
         const changes = setupAgents({
           agent: (printConfig ?? options.agent) as AgentSelector,
           all: Boolean(options.all),
@@ -69,6 +73,7 @@ export function registerSetupCommand(program: Command): void {
           console.log('Code Memory configuration was written.');
           console.log('');
           console.log('Project: ' + projectRoot);
+          printRegisteredRepo(registeredRepo);
           console.log('Agent: ' + (options.all ? 'all supported agents' : options.agent) + ' configured');
           console.log('MCP: ' + formatMcpCommand(runtime, projectRoot, Boolean(options.bindProject)));
           console.log('Bootstrap: skipped');
@@ -80,6 +85,7 @@ export function registerSetupCommand(program: Command): void {
           console.log('Code Memory is ready.');
           console.log('');
           console.log('Project: ' + projectRoot);
+          printRegisteredRepo(registeredRepo);
           console.log('Agent: ' + (options.all ? 'all supported agents' : options.agent) + ' configured');
           console.log('MCP: ' + formatMcpCommand(runtime, projectRoot, Boolean(options.bindProject)));
           console.log('Context files: ' + (options.context === false ? 'skipped' : 'AGENTS.md, CLAUDE.md'));
@@ -98,7 +104,13 @@ function formatMcpCommand(runtime: RuntimeName, projectRoot: string, bindProject
   const args = bindProject
     ? ['serve', '--watch', '--project', projectRoot]
     : ['serve', '--watch', '--auto-project'];
-  if (runtime === 'global') return ['code-memory', ...args].join(' ');
-  if (runtime === 'local') return ['node', '<local dist/index.js>', ...args].join(' ');
-  return ['npx', '-y', NPM_PACKAGE_SPEC, ...args].join(' ');
+  const prefix = bindProject ? '' : 'CODE_MEMORY_PROJECT=' + JSON.stringify(projectRoot) + ' ';
+  if (runtime === 'global') return prefix + ['code-memory', ...args].join(' ');
+  if (runtime === 'local') return prefix + ['node', '<local dist/index.js>', ...args].join(' ');
+  return prefix + ['npx', '-y', NPM_PACKAGE_SPEC, ...args].join(' ');
+}
+
+function printRegisteredRepo(entry: RegistryEntry | null): void {
+  if (!entry) return;
+  console.log('Registered repo: ' + entry.name + ' -> ' + entry.rootPath);
 }

@@ -4,6 +4,7 @@ Recommended order:
 
 ```text
 resolve_project
+-> bootstrap_project / sync_project / register_project when needed
 -> plan_context
 -> get_context_pack or search_code
 -> search_symbols
@@ -16,8 +17,8 @@ resolve_project
 
 Use `resolve_project` first for a new task, repo switch, missing index, stale
 index, or cwd mismatch. If it returns `needs_bootstrap`, `needs_index`, `stale`,
-or `unknown`, run the returned command before expecting search results to be
-complete.
+or `unknown`, call `bootstrap_project`, `sync_project`, or `register_project`
+before expecting search results to be complete.
 
 `get_context_pack` automatically records context when you pass a stable
 `sessionId`. If you send context manually from `search_code`, resources, or CLI
@@ -38,7 +39,10 @@ Use `impact_analysis` before editing shared symbols, public contracts, routes, c
 
 | Tool | When to use | After this |
 |---|---|---|
-| `resolve_project` | First call for a new task, repo switch, missing index, stale index, or cwd mismatch | `plan_context` if ready, otherwise run the returned command |
+| `resolve_project` | First call for a new task, repo switch, missing index, stale index, or cwd mismatch | `plan_context` if ready, otherwise `bootstrap_project`, `sync_project`, or `register_project` |
+| `bootstrap_project` | Initialize or repair a project from MCP without requiring a startup database | `resolve_project`, then `plan_context` |
+| `sync_project` | Incrementally refresh a stale project from MCP without requiring a startup database | `resolve_project`, then `plan_context` |
+| `register_project` | Add the resolved project to the global registry so repo routing is stable | `resolve_project`, then `plan_context` |
 | `plan_context` | Classify a task and choose retrieval routes | `get_context_pack` or `search_code` |
 | `get_context_pack` | Return bounded evidence with trust contract and snippets | `search_symbols`, then `mark_context_used` only for context sent outside the pack |
 | `search_code` | Ranked code search when you need candidate files/snippets | `search_symbols` for exact names |

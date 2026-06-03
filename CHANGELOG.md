@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.4] - 2026-06-03
+
+### Fixed
+- Align README first-screen version messaging with the runtime/package version
+- Make release workflow idempotent when a GitHub Release already exists for the tag
+- Register projects automatically during `setup --project`
+- Include `CODE_MEMORY_PROJECT` in generated global `--auto-project` MCP configs as the default project identity
+- Add always-available MCP project management tools: `bootstrap_project`, `sync_project`, and `register_project`
+
 ## [0.3.3] - 2026-06-03
 
 ### Fixed

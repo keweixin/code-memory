@@ -18,11 +18,17 @@ describe('release consistency', () => {
     const pkg = readJson<{ version: string }>('package.json');
     const lock = readJson<{ version: string; packages: Record<string, { version?: string }> }>('package-lock.json');
     const changelog = readFileSync('CHANGELOG.md', 'utf-8');
+    const readme = readFileSync('README.md', 'utf-8');
+    const releaseDoc = readFileSync('docs/release.md', 'utf-8');
 
     expect(pkg.version).toBe(VERSION);
     expect(lock.version).toBe(VERSION);
     expect(lock.packages[''].version).toBe(VERSION);
     expect(changelog).toMatch(new RegExp(`^## \\[?${VERSION.replace(/\./g, '\\.')}\\]? - `, 'm'));
+    expect(readme).toContain(`Current source version: \`${VERSION}\`.`);
+    expect(readme).toContain(`version older than \`${VERSION}\``);
+    expect(releaseDoc).toContain(`Current source release target: \`${VERSION}\`.`);
+    expect(releaseDoc).toContain(`git tag v${VERSION}`);
   });
 
   it('keeps README command table aligned with registered CLI commands', () => {

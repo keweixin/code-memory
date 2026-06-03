@@ -58,8 +58,15 @@ jobs:
             const notes = start < 0 ? changelog : lines.slice(start, end < 0 ? lines.length : end).join('\n');
             fs.writeFileSync('RELEASE_NOTES.md', notes.trim() + '\n');
           NODE
-          gh release create "v$VERSION" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "v$VERSION" \
-            --notes-file RELEASE_NOTES.md \
-            --verify-tag
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "v$VERSION" \
+              --notes-file RELEASE_NOTES.md
+          else
+            gh release create "v$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "v$VERSION" \
+              --notes-file RELEASE_NOTES.md \
+              --verify-tag
+          fi
