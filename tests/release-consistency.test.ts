@@ -77,5 +77,23 @@ describe('release consistency', () => {
     expect(readme).toContain('setup --agent cursor --project . --no-bootstrap');
     expect(readme).toContain('serve --watch --auto-project');
     expect(readme).toContain('serve --watch --project . --no-bootstrap');
+    expect(readme).toContain('mark_context_used');
+    expect(readme).toContain('get_context_delta');
+  });
+
+  it('keeps MCP workflow docs aligned with context ledger tools', () => {
+    const readme = readFileSync('README.md', 'utf-8');
+    const mcpTools = readFileSync('docs/mcp-tools.md', 'utf-8');
+
+    for (const text of [readme, mcpTools]) {
+      expect(text).toContain('resolve_project');
+      expect(text).toContain('plan_context');
+      expect(text).toContain('get_context_pack');
+      expect(text).toContain('impact_analysis');
+      expect(text).toContain('get_related_tests');
+      expect(text).toContain('mark_context_used');
+      expect(text).toContain('get_context_delta');
+      expect(text).toContain('avoid_repeated_context');
+    }
   });
 });

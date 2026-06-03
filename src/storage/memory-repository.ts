@@ -12,7 +12,7 @@
 
 import type { MemoryRecord, MemoryType, InvalidationRule } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
-import { getDatabaseSync } from './database.js';
+import { getDatabaseSync, type SqlJsDatabase } from './database.js';
 
 const log = createLogger('memory-repo');
 
@@ -52,8 +52,7 @@ function deserializeMemory(row: Record<string, unknown>): MemoryRecord {
 
 // ── Repository methods ──────────────────────────────────────
 
-export function createMemory(memory: MemoryRecord): void {
-  const db = getDatabaseSync();
+export function createMemory(memory: MemoryRecord, db: SqlJsDatabase = getDatabaseSync()): void {
   const p = serializeMemory(memory);
 
   db.run(
@@ -68,8 +67,7 @@ export function createMemory(memory: MemoryRecord): void {
   );
 }
 
-export function getMemoryById(id: string): MemoryRecord | null {
-  const db = getDatabaseSync();
+export function getMemoryById(id: string, db: SqlJsDatabase = getDatabaseSync()): MemoryRecord | null {
   const stmt = db.prepare('SELECT * FROM memories WHERE id = ?');
   stmt.bind([id]);
 
@@ -81,8 +79,7 @@ export function getMemoryById(id: string): MemoryRecord | null {
   return result;
 }
 
-export function getMemoriesByType(type: MemoryType): MemoryRecord[] {
-  const db = getDatabaseSync();
+export function getMemoriesByType(type: MemoryType, db: SqlJsDatabase = getDatabaseSync()): MemoryRecord[] {
   const results: MemoryRecord[] = [];
   const stmt = db.prepare('SELECT * FROM memories WHERE type = ?');
   stmt.bind([type]);
@@ -168,8 +165,7 @@ export function updateMemory(id: string, updates: Partial<MemoryRecord>): void {
   db.run(sql, values);
 }
 
-export function deleteMemory(id: string): void {
-  const db = getDatabaseSync();
+export function deleteMemory(id: string, db: SqlJsDatabase = getDatabaseSync()): void {
   db.run('DELETE FROM memories WHERE id = ?', [id]);
 }
 

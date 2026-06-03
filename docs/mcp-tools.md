@@ -3,14 +3,27 @@
 Recommended order:
 
 ```text
-plan_context
+resolve_project
+-> plan_context
 -> get_context_pack or search_code
 -> search_symbols
 -> find_definition / find_references
 -> impact_analysis
 -> get_related_tests
+-> mark_context_used / get_context_delta / avoid_repeated_context
 -> remember_project_fact / invalidate_memory
 ```
+
+Use `resolve_project` first for a new task, repo switch, missing index, stale
+index, or cwd mismatch. If it returns `needs_bootstrap`, `needs_index`, `stale`,
+or `unknown`, run the returned command before expecting search results to be
+complete.
+
+`get_context_pack` automatically records context when you pass a stable
+`sessionId`. If you send context manually from `search_code`, resources, or CLI
+output, call `mark_context_used` with the files/symbols/chunks you returned.
+Before sending more context for the same session, call `get_context_delta` or
+`avoid_repeated_context` to prefer new evidence.
 
 Every MCP tool can be run from the CLI:
 
@@ -21,3 +34,27 @@ code-memory tool plan_context --project . --args "{\"query\":\"find auth flow\"}
 
 Use `impact_analysis` before editing shared symbols, public contracts, routes, config loaders, parsers, or index lifecycle code.
 
+## Core Tools
+
+| Tool | When to use | After this |
+|---|---|---|
+| `resolve_project` | First call for a new task, repo switch, missing index, stale index, or cwd mismatch | `plan_context` if ready, otherwise run the returned command |
+| `plan_context` | Classify a task and choose retrieval routes | `get_context_pack` or `search_code` |
+| `get_context_pack` | Return bounded evidence with trust contract and snippets | `search_symbols`, then `mark_context_used` only for context sent outside the pack |
+| `search_code` | Ranked code search when you need candidate files/snippets | `search_symbols` for exact names |
+| `search_symbols` | Locate named functions/classes/types | `find_definition` or `find_references` |
+| `find_definition` | Inspect an exact symbol definition | `impact_analysis` before editing |
+| `find_references` | Inspect known uses of a symbol | `impact_analysis` before editing |
+| `impact_analysis` | Estimate blast radius before changes | `get_related_tests` |
+| `get_related_tests` | Pick narrow validation commands | Run tests outside MCP |
+
+## Context Ledger Tools
+
+| Tool | When to use | After this |
+|---|---|---|
+| `mark_context_used` | Record manually returned files, symbols, chunks, tokens, or evidence for a session | `get_context_delta` before sending more context |
+| `get_context_delta` | Compare candidate context against prior session context | Return new/kept context, then mark it used if manual |
+| `avoid_repeated_context` | Get a concise keep/drop recommendation | Send kept context only |
+| `explain_why_this_context` | Explain whether one item is new or repeated and optionally apply feedback | Adjust retrieval or call `get_context_delta` |
+| `compact_session_context` | Summarize what a long session already saw | Use the summary instead of rereading snippets |
+| `reset_context_session` | Start a materially new task without old repetition penalties | Restart with `resolve_project -> plan_context` |

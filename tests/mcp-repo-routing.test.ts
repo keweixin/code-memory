@@ -6,9 +6,10 @@ import type { CodeMemoryConfig } from '../src/shared/types.js';
 import { DEFAULT_TOKEN_BUDGETS } from '../src/shared/types.js';
 import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
 import { IndexManager } from '../src/indexer/index-manager.js';
-import { closeDatabase, getDatabase, getDatabaseSync } from '../src/storage/database.js';
+import { closeDatabase, getDatabase, getDatabaseSync, openExistingDatabase } from '../src/storage/database.js';
 import { registerAllTools } from '../src/mcp/tool-registry.js';
 import { registerRepo } from '../src/cli/registry.js';
+import { getMemoriesByType } from '../src/storage/memory-repository.js';
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
@@ -179,6 +180,33 @@ describe('MCP repo routing', () => {
       limit: 5,
     });
     expect(defaultSearchAfterRoutedCall.content[0].text).toContain('alphaOnly');
+
+    const routedRemember = await server.handlers.get('remember_project_fact')!({
+      repo: 'second',
+      type: 'decision',
+      content: 'betaOnly uses the second repo memory store',
+      scope: ['src/index.ts'],
+      confidence: 0.9,
+    });
+    expect(routedRemember.content[0].text).toContain('Memory saved successfully');
+    expect(getMemoriesByType('decision')).toHaveLength(0);
+
+    const secondDb = openExistingDatabase(secondRoot);
+    try {
+      const secondMemories = getMemoriesByType('decision', secondDb);
+      expect(secondMemories).toHaveLength(1);
+      expect(secondMemories[0].content).toContain('second repo memory store');
+
+      const routedInvalidate = await server.handlers.get('invalidate_memory')!({
+        repo: 'second',
+        memoryId: secondMemories[0].id,
+      });
+      expect(routedInvalidate.content[0].text).toContain('Deleted memory: ' + secondMemories[0].id);
+      expect(getMemoriesByType('decision', secondDb)).toHaveLength(0);
+    } finally {
+      secondDb.close();
+    }
+    expect(getMemoriesByType('decision')).toHaveLength(0);
   }, 20_000);
 });
 

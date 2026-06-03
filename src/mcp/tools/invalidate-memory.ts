@@ -34,7 +34,7 @@ export function registerInvalidateMemoryTool(server: McpServer, db: SqlJsDatabas
     },
     async ({ memoryId, type, repo }) => {
       try {
-        return await withRepoDatabase(repo, db, async (_activeDb, _projectRoot) => {
+        return await withRepoDatabase(repo, db, async (activeDb, _projectRoot) => {
           if (!memoryId && !type) {
             return {
               content: [{ type: "text" as const, text: "Error: Provide either memoryId or type to invalidate." }],
@@ -45,7 +45,7 @@ export function registerInvalidateMemoryTool(server: McpServer, db: SqlJsDatabas
           const results: string[] = [];
 
           if (memoryId) {
-            const memory = getMemoryById(memoryId);
+            const memory = getMemoryById(memoryId, activeDb);
             if (!memory) {
               return {
                 content: [{
@@ -54,19 +54,19 @@ export function registerInvalidateMemoryTool(server: McpServer, db: SqlJsDatabas
                 }],
               };
             }
-            deleteMemory(memoryId);
+            deleteMemory(memoryId, activeDb);
             results.push("Deleted memory: " + memoryId + " (type: " + memory.type + ", content: " +
               memory.content.substring(0, 80) + (memory.content.length > 80 ? "..." : "") + ")");
             log.info("Deleted memory: " + memoryId);
           }
 
           if (type) {
-            const memories = getMemoriesByType(type as MemoryType);
+            const memories = getMemoriesByType(type as MemoryType, activeDb);
             if (memories.length === 0) {
               results.push("No memories found of type: " + type);
             } else {
               for (const mem of memories) {
-                deleteMemory(mem.id);
+                deleteMemory(mem.id, activeDb);
               }
               results.push("Deleted " + memories.length + " memories of type: " + type);
               log.info("Deleted " + memories.length + " memories of type: " + type);

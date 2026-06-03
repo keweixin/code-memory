@@ -148,6 +148,9 @@ Prepare edits
 Prepare verification
 -> get_related_tests
 
+Avoid repeated context in long sessions
+-> mark_context_used / get_context_delta / avoid_repeated_context
+
 Preserve durable knowledge
 -> remember_project_fact / invalidate_memory
 ```
@@ -175,6 +178,12 @@ Core tools:
 | `find_references` | Known references/callers/import sites |
 | `impact_analysis` | Blast radius before edits |
 | `get_related_tests` | Narrow validation targets |
+| `mark_context_used` | Record manually returned files/symbols/chunks for a session |
+| `get_context_delta` | Compare candidate context against what a session already saw |
+| `avoid_repeated_context` | Keep/drop recommendation for candidate context |
+| `explain_why_this_context` | Explain whether context is new/repeated and apply feedback |
+| `compact_session_context` | Summarize prior session context |
+| `reset_context_session` | Clear ledger entries when a new task starts |
 | `get_process` | Execution flow/process trace |
 | `get_repo_map` | Project map grouped by community |
 | `remember_project_fact` | Save durable project knowledge |

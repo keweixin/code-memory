@@ -173,6 +173,7 @@ function formatToolTrustContract(pack: ContextPack, projectRoot: string, db: Sql
     file: snippet.filePath,
     lines: snippet.lineRange[0] + "-" + snippet.lineRange[1],
     symbol: snippet.symbolName,
+    code: truncateSnippetCode(snippet.content),
     why: snippet.reason,
   }));
   const whyIncluded = pack.files.slice(0, 8).map((file) => ({
@@ -210,6 +211,12 @@ function formatToolTrustContract(pack: ContextPack, projectRoot: string, db: Sql
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function truncateSnippetCode(value: string): string {
+  const maxChars = 1600;
+  if (value.length <= maxChars) return value;
+  return value.slice(0, maxChars) + "\n/* truncated for Tool Trust Contract */";
 }
 
 function formatLedgerSection(

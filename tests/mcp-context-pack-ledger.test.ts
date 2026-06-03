@@ -89,6 +89,9 @@ describe('MCP context pack ledger integration', () => {
     expect(firstText).toContain('=== Index Diagnostics ===');
     expect(firstText).toContain('Last indexed commit:');
     expect(firstText).toContain('=== Context Ledger ===');
+    expect(firstText).toContain('=== Tool Trust Contract ===');
+    expect(firstText).toContain('"exactSnippets"');
+    expect(firstText).toContain('"code"');
     expect(firstText).toContain('Ledger entry:');
     expect(firstText).toContain('async login(request: LoginRequest)');
 
