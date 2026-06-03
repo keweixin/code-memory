@@ -7,10 +7,26 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
+import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-route-map");
+
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+  const pending = getActiveWatchState()?.getPendingFiles() ?? [];
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) { /* safe to ignore */ }
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
+  const { inResponse, notInResponse } = partitionPending(pending, text);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
+}
 
 interface RouteEndpointView {
   id: string;
@@ -49,13 +65,25 @@ export function registerGetRouteMapTool(server: McpServer, db: SqlJsDatabase): v
           const references = loadReferences(activeDb, route, Boolean(includeUnresolved));
           const text = formatRouteMap(endpoints, references);
           log.info("Route map: " + endpoints.length + " endpoints, " + references.length + " references");
-          return { content: [{ type: "text" as const, text }] };
+          return { content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }] };
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error("Route map failed: " + msg);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`, db),
+            }],
+            isError: false,
+          };
+        }
+
+        log.error("Route map failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: "Error: route map failed - " + msg }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: route map failed - " + errorMsg, db) }],
           isError: true,
         };
       }

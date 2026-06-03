@@ -19,7 +19,7 @@ import {
   partitionPending,
 } from "./_stale-banner.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
-import { getDatabaseSync } from "../../storage/database.js";
+
 import {
   loadVectorSearchProviderForRepo,
   type VectorSearchProviderResolver,
@@ -83,13 +83,13 @@ export function registerSearchCodeTool(
                   `No results found for "${query}".\n\nTry broadening your query, or ensure the codebase has been indexed with 'code-memory index'.${modeHint}`,
                   activeDb,
                   projectRoot,
-                )),
+                ), activeDb),
               }],
             };
           }
 
           const baseText = prependIndexDiagnostics(formatSearchResults(query, results), activeDb, projectRoot);
-          const text = wrapWithStaleBanner(baseText);
+          const text = wrapWithStaleBanner(baseText, activeDb);
           log.info(`Search "${query}" returned ${results.length} results`);
 
           return {
@@ -97,10 +97,22 @@ export function registerSearchCodeTool(
           };
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Search failed: ${msg}`);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        log.error(`Search failed: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics(`Error: Search failed - ${msg}`, db)) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics(`Error: Search failed - ${errorMsg}`, db), db) }],
           isError: true,
         };
       }
@@ -110,24 +122,18 @@ export function registerSearchCodeTool(
 
 // ── Formatting ───────────────────────────────────────────────
 
-function wrapWithStaleBanner(text: string): string {
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
-
-  // Check for stale (low-confidence) memories
   let staleMemoriesCount = 0;
   try {
-    const db = getDatabaseSync();
-    const rows = db.exec(
-      "SELECT COUNT(*) as cnt FROM memories WHERE confidence <= 0.3 AND type IN ('repo', 'decision', 'user_preference')"
-    );
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
     if (rows.length > 0 && rows[0].values.length > 0) {
       staleMemoriesCount = Number(rows[0].values[0][0]);
     }
-  } catch { /* non-critical */ }
-
+  } catch (_e) { /* safe to ignore */ }
   if (pending.length === 0 && staleMemoriesCount === 0) return text;
   const { inResponse, notInResponse } = partitionPending(pending, text);
-  return attachStaleBanner(text, inResponse, notInResponse, undefined, staleMemoriesCount);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }
 
 function formatSearchResults(

@@ -49,10 +49,22 @@ export function registerGetUnifiedRepoMapTool(
           content: [{ type: "text" as const, text }],
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Failed to get unified repo map: ${msg}`);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        log.error(`Failed to get unified repo map: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: `Error: Failed to get unified repo map - ${msg}` }],
+          content: [{ type: "text" as const, text: `Error: Failed to get unified repo map - ${errorMsg}` }],
           isError: true,
         };
       }

@@ -12,12 +12,13 @@ import type { SqlJsDatabase } from "../../storage/database.js";
 import { createMemory } from "../../storage/memory-repository.js";
 import { createLogger } from "../../shared/logger.js";
 import type { MemoryType, InvalidationRule } from "../../shared/types.js";
+import { withRepoDatabase } from "../repo-router.js";
 
 const log = createLogger("mcp:remember-project-fact");
 
 const MEMORY_TYPES = ["repo", "session", "branch", "decision", "user_preference"] as const;
 
-export function registerRememberProjectFactTool(server: McpServer, _db: SqlJsDatabase): void {
+export function registerRememberProjectFactTool(server: McpServer, db: SqlJsDatabase): void {
   server.tool(
     "remember_project_fact",
     "Save a project memory or fact for future reference. " +
@@ -36,74 +37,76 @@ export function registerRememberProjectFactTool(server: McpServer, _db: SqlJsDat
         target: z.string(),
         description: z.string().optional(),
       })).describe("Auto-invalidation rules — when these conditions are met, the memory is marked stale").optional().default([]),
+      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
-    async ({ content, type, scope, confidence, evidence, invalidateOn }) => {
+    async ({ content, type, scope, confidence, evidence, invalidateOn, repo }) => {
       try {
-        if (!content.trim()) {
-          return {
-            content: [{ type: "text" as const, text: "Error: Content cannot be empty." }],
-            isError: true,
-          };
-        }
+        return await withRepoDatabase(repo, db, async (activeDb, _projectRoot) => {
+          if (!content.trim()) {
+            return {
+              content: [{ type: "text" as const, text: "Error: Content cannot be empty." }],
+              isError: true,
+            };
+          }
 
-        // Smart fallback: if scope is provided but no invalidation rules, auto-inject file_change rules
-        const processedRules: InvalidationRule[] = (invalidateOn || []).map(r => ({
-          type: r.type,
-          target: r.target,
-          description: r.description || `${r.type} rule for ${r.target}`,
-        }));
-        if (scope && scope.length > 0) {
-          for (const scopedPath of scope) {
-            const hasChangeRule = processedRules.some(r => r.type === 'file_change' && r.target === scopedPath);
-            if (!hasChangeRule) {
-              processedRules.push({ type: 'file_change', target: scopedPath, description: `Auto-generated: invalidate when ${scopedPath} changes` });
+          // Smart fallback: if scope is provided but no invalidation rules, auto-inject file_change rules
+          const processedRules: InvalidationRule[] = (invalidateOn || []).map(r => ({
+            type: r.type,
+            target: r.target,
+            description: r.description || `${r.type} rule for ${r.target}`,
+          }));
+          if (scope && scope.length > 0) {
+            for (const scopedPath of scope) {
+              const hasChangeRule = processedRules.some(r => r.type === 'file_change' && r.target === scopedPath);
+              if (!hasChangeRule) {
+                processedRules.push({ type: 'file_change', target: scopedPath, description: `Auto-generated: invalidate when ${scopedPath} changes` });
+              }
             }
           }
-        }
 
-        // If no evidence provided but scope exists, use first scope path as evidence
-        const processedEvidence = (evidence && evidence.length > 0)
-          ? evidence
-          : (scope && scope.length > 0 ? [scope[0]] : []);
+          // If no evidence provided but scope exists, use first scope path as evidence
+          const processedEvidence = (evidence && evidence.length > 0)
+            ? evidence
+            : (scope && scope.length > 0 ? [scope[0]] : []);
 
-        const now = new Date().toISOString();
-        const id = nanoid();
+          const now = new Date().toISOString();
+          const id = nanoid();
 
-        createMemory({
-          id,
-          type: type as MemoryType,
-          content: content.trim(),
-          scope,
-          evidence: processedEvidence,
-          confidence: Math.min(Math.max(confidence, 0), 1),
-          createdCommit: null,
-          lastValidatedCommit: null,
-          invalidationRules: processedRules,
-          createdAt: now,
-          updatedAt: now,
+          createMemory({
+            id,
+            type: type as MemoryType,
+            content: content.trim(),
+            scope,
+            evidence: processedEvidence,
+            confidence: Math.min(Math.max(confidence, 0), 1),
+            createdCommit: null,
+            lastValidatedCommit: null,
+            invalidationRules: processedRules,
+            createdAt: now,
+            updatedAt: now,
+          });
+
+          log.info("Saved memory: " + id + " (type: " + type + ", rules: " + processedRules.length + ")");
+
+          return {
+            content: [{
+              type: "text" as const,
+              text: "Memory saved successfully.\n" +
+                "ID: " + id + "\n" +
+                "Type: " + type + "\n" +
+                "Content: " + content.trim() + "\n" +
+                "Scope: " + (scope?.join(', ') || 'none') + "\n" +
+                "Evidence: " + (processedEvidence.join(', ') || 'none') + "\n" +
+                "Auto-invalidation rules: " + processedRules.length + " rule(s)\n" +
+                "Confidence: " + confidence.toFixed(1) + "\n" +
+                "Saved at: " + now,
+            }],
+          };
         });
-
-        log.info("Saved memory: " + id + " (type: " + type + ", rules: " + processedRules.length + ")");
-
-        return {
-          content: [{
-            type: "text" as const,
-            text: "Memory saved successfully.\n" +
-              "ID: " + id + "\n" +
-              "Type: " + type + "\n" +
-              "Content: " + content.trim() + "\n" +
-              "Scope: " + (scope?.join(', ') || 'none') + "\n" +
-              "Evidence: " + (processedEvidence.join(', ') || 'none') + "\n" +
-              "Auto-invalidation rules: " + processedRules.length + " rule(s)\n" +
-              "Confidence: " + confidence.toFixed(1) + "\n" +
-              "Saved at: " + now,
-          }],
-        };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error("Remember project fact failed: " + msg);
+        const errorMsg = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text" as const, text: "Error: Remember project fact failed - " + msg }],
+          content: [{ type: "text" as const, text: "Error: " + errorMsg }],
           isError: true,
         };
       }

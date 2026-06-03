@@ -45,27 +45,47 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
     async (input) => {
-      return await withRepoDatabase(input.repo, db, async (activeDb, projectRoot) => {
-        const id = markContextUsed({
-          sessionId: input.sessionId,
-          taskId: input.taskId,
-          repoRoot: input.repoRoot || projectRoot,
-          branch: input.branch,
-          commit: input.commit,
-          query: input.query,
-          returnedFiles: input.returnedFiles,
-          returnedSymbols: input.returnedSymbols,
-          returnedChunks: input.returnedChunks,
-          tokenEstimate: input.tokenEstimate,
-          evidenceIds: input.evidenceIds,
-          evidenceFingerprints: input.evidenceFingerprints,
-          noveltyScore: input.noveltyScore,
-          repeatedPenalty: input.repeatedPenalty,
-          agentFeedback: input.agentFeedback as ContextFeedback | undefined,
-          feedbackReason: input.feedbackReason,
-        }, activeDb);
-        return { content: [{ type: "text" as const, text: "Context ledger entry recorded: " + id }] };
-      });
+      try {
+        return await withRepoDatabase(input.repo, db, async (activeDb, projectRoot) => {
+          const id = markContextUsed({
+            sessionId: input.sessionId,
+            taskId: input.taskId,
+            repoRoot: input.repoRoot || projectRoot,
+            branch: input.branch,
+            commit: input.commit,
+            query: input.query,
+            returnedFiles: input.returnedFiles,
+            returnedSymbols: input.returnedSymbols,
+            returnedChunks: input.returnedChunks,
+            tokenEstimate: input.tokenEstimate,
+            evidenceIds: input.evidenceIds,
+            evidenceFingerprints: input.evidenceFingerprints,
+            noveltyScore: input.noveltyScore,
+            repeatedPenalty: input.repeatedPenalty,
+            agentFeedback: input.agentFeedback as ContextFeedback | undefined,
+            feedbackReason: input.feedbackReason,
+          }, activeDb);
+          return { content: [{ type: "text" as const, text: "Context ledger entry recorded: " + id }] };
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          isError: true,
+        };
+      }
     },
   );
 
@@ -82,15 +102,35 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
     async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo }) => {
-      return await withRepoDatabase(repo, db, async (activeDb) => {
-        const delta = getContextDeltaForDb(sessionId, {
-          files: candidateFiles,
-          symbols: candidateSymbols,
-          chunks: candidateChunks,
-          evidenceIds: candidateEvidenceIds,
-        }, activeDb);
-        return { content: [{ type: "text" as const, text: formatDelta(delta) }] };
-      });
+      try {
+        return await withRepoDatabase(repo, db, async (activeDb) => {
+          const delta = getContextDeltaForDb(sessionId, {
+            files: candidateFiles,
+            symbols: candidateSymbols,
+            chunks: candidateChunks,
+            evidenceIds: candidateEvidenceIds,
+          }, activeDb);
+          return { content: [{ type: "text" as const, text: formatDelta(delta) }] };
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          isError: true,
+        };
+      }
     },
   );
 
@@ -106,29 +146,49 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
     async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo }) => {
-      return await withRepoDatabase(repo, db, async (activeDb) => {
-        const delta = getContextDeltaForDb(sessionId, {
-          files: candidateFiles,
-          symbols: candidateSymbols,
-          chunks: candidateChunks,
-          evidenceIds: candidateEvidenceIds,
-        }, activeDb);
-        const lines = [
-          "Context repetition check",
-          "Prior tokens: " + delta.totalPriorTokens,
-          "Keep files: " + formatList(delta.newFiles),
-          "Drop repeated files: " + formatList(delta.repeatedFiles),
-          "Keep symbols: " + formatList(delta.newSymbols),
-          "Drop repeated symbols: " + formatList(delta.repeatedSymbols),
-          "Keep chunks: " + formatList(delta.newChunks),
-          "Drop repeated chunks: " + formatList(delta.repeatedChunks),
-          "Keep evidence: " + formatList(delta.newEvidenceIds),
-          "Drop repeated evidence: " + formatList(delta.repeatedEvidenceIds),
-          "Novelty score: " + delta.noveltyScore.toFixed(2),
-          "Repeated penalty: " + delta.repeatedPenalty.toFixed(2),
-        ];
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      });
+      try {
+        return await withRepoDatabase(repo, db, async (activeDb) => {
+          const delta = getContextDeltaForDb(sessionId, {
+            files: candidateFiles,
+            symbols: candidateSymbols,
+            chunks: candidateChunks,
+            evidenceIds: candidateEvidenceIds,
+          }, activeDb);
+          const lines = [
+            "Context repetition check",
+            "Prior tokens: " + delta.totalPriorTokens,
+            "Keep files: " + formatList(delta.newFiles),
+            "Drop repeated files: " + formatList(delta.repeatedFiles),
+            "Keep symbols: " + formatList(delta.newSymbols),
+            "Drop repeated symbols: " + formatList(delta.repeatedSymbols),
+            "Keep chunks: " + formatList(delta.newChunks),
+            "Drop repeated chunks: " + formatList(delta.repeatedChunks),
+            "Keep evidence: " + formatList(delta.newEvidenceIds),
+            "Drop repeated evidence: " + formatList(delta.repeatedEvidenceIds),
+            "Novelty score: " + delta.noveltyScore.toFixed(2),
+            "Repeated penalty: " + delta.repeatedPenalty.toFixed(2),
+          ];
+          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          isError: true,
+        };
+      }
     },
   );
 
@@ -143,32 +203,52 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
     async ({ sessionId, contextId, contextType, feedback, repo }) => {
-      return await withRepoDatabase(repo, db, async (activeDb) => {
-        let entries = getContextLedgerEntriesForDb(sessionId, activeDb);
-        let seenIn = entries.filter((entry) => {
-          if (contextType === "file") return entry.returnedFiles.includes(contextId);
-          if (contextType === "symbol") return entry.returnedSymbols.includes(contextId);
-          return entry.returnedChunks.includes(contextId);
-        });
-        if (feedback && seenIn.length > 0) {
-          updateContextFeedback(seenIn[seenIn.length - 1].id, feedback as ContextFeedback, activeDb);
-          entries = getContextLedgerEntriesForDb(sessionId, activeDb);
-          seenIn = entries.filter((entry) => {
+      try {
+        return await withRepoDatabase(repo, db, async (activeDb) => {
+          let entries = getContextLedgerEntriesForDb(sessionId, activeDb);
+          let seenIn = entries.filter((entry) => {
             if (contextType === "file") return entry.returnedFiles.includes(contextId);
             if (contextType === "symbol") return entry.returnedSymbols.includes(contextId);
             return entry.returnedChunks.includes(contextId);
           });
+          if (feedback && seenIn.length > 0) {
+            updateContextFeedback(seenIn[seenIn.length - 1].id, feedback as ContextFeedback, activeDb);
+            entries = getContextLedgerEntriesForDb(sessionId, activeDb);
+            seenIn = entries.filter((entry) => {
+              if (contextType === "file") return entry.returnedFiles.includes(contextId);
+              if (contextType === "symbol") return entry.returnedSymbols.includes(contextId);
+              return entry.returnedChunks.includes(contextId);
+            });
+          }
+          const lines = [
+            contextId + " is " + (seenIn.length > 0 ? "repeated" : "new") + " for session " + sessionId,
+            "Seen in entries: " + seenIn.length,
+            "Prior tokens: " + entries.reduce((sum, entry) => sum + entry.tokenEstimate, 0),
+          ];
+          for (const entry of seenIn.slice(-5)) {
+            lines.push("- " + entry.createdAt + " query=\"" + entry.query + "\" feedback=" + (entry.agentFeedback || "none"));
+          }
+          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
         }
-        const lines = [
-          contextId + " is " + (seenIn.length > 0 ? "repeated" : "new") + " for session " + sessionId,
-          "Seen in entries: " + seenIn.length,
-          "Prior tokens: " + entries.reduce((sum, entry) => sum + entry.tokenEstimate, 0),
-        ];
-        for (const entry of seenIn.slice(-5)) {
-          lines.push("- " + entry.createdAt + " query=\"" + entry.query + "\" feedback=" + (entry.agentFeedback || "none"));
-        }
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      });
+
+        return {
+          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          isError: true,
+        };
+      }
     },
   );
 
@@ -180,20 +260,40 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
     async ({ sessionId, repo }) => {
-      return await withRepoDatabase(repo, db, async (activeDb) => {
-        const summary = compactSessionContext(sessionId, activeDb);
-        const lines = [
-          "Compact session context",
-          "Session: " + summary.sessionId,
-          "Entries: " + summary.entries,
-          "Total tokens: " + summary.totalTokens,
-          "Files: " + formatList(summary.files),
-          "Symbols: " + formatList(summary.symbols),
-          "Chunks: " + formatList(summary.chunks),
-          "Evidence: " + formatList(summary.evidenceIds),
-        ];
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      });
+      try {
+        return await withRepoDatabase(repo, db, async (activeDb) => {
+          const summary = compactSessionContext(sessionId, activeDb);
+          const lines = [
+            "Compact session context",
+            "Session: " + summary.sessionId,
+            "Entries: " + summary.entries,
+            "Total tokens: " + summary.totalTokens,
+            "Files: " + formatList(summary.files),
+            "Symbols: " + formatList(summary.symbols),
+            "Chunks: " + formatList(summary.chunks),
+            "Evidence: " + formatList(summary.evidenceIds),
+          ];
+          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          isError: true,
+        };
+      }
     },
   );
 
@@ -205,10 +305,30 @@ export function registerContextLedgerTools(server: McpServer, db: SqlJsDatabase 
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
     },
     async ({ sessionId, repo }) => {
-      return await withRepoDatabase(repo, db, async (activeDb) => {
-        const removed = resetContextSession(sessionId, activeDb);
-        return { content: [{ type: "text" as const, text: "Removed ledger entries: " + removed }] };
-      });
+      try {
+        return await withRepoDatabase(repo, db, async (activeDb) => {
+          const removed = resetContextSession(sessionId, activeDb);
+          return { content: [{ type: "text" as const, text: "Removed ledger entries: " + removed }] };
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          isError: true,
+        };
+      }
     },
   );
 }

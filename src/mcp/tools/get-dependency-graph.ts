@@ -8,11 +8,27 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
+import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { GraphEngine } from "../../graph/graph-engine.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-dependency-graph");
+
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+  const pending = getActiveWatchState()?.getPendingFiles() ?? [];
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) { /* safe to ignore */ }
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
+  const { inResponse, notInResponse } = partitionPending(pending, text);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
+}
 
 export function registerGetDependencyGraphTool(server: McpServer, db: SqlJsDatabase): void {
   const graphEngine = new GraphEngine(db);
@@ -40,7 +56,7 @@ export function registerGetDependencyGraphTool(server: McpServer, db: SqlJsDatab
               return {
                 content: [{
                   type: "text" as const,
-                  text: "No file found matching: " + filePath + ". Ensure the file has been indexed.",
+                  text: wrapWithStaleBanner("No file found matching: " + filePath + ". Ensure the file has been indexed.", activeDb),
                 }],
               };
             }
@@ -49,7 +65,7 @@ export function registerGetDependencyGraphTool(server: McpServer, db: SqlJsDatab
               return {
                 content: [{
                   type: "text" as const,
-                  text: "Multiple files match: " + filePath + ":\n" + list + "\n\nPlease use a more specific path.",
+                  text: wrapWithStaleBanner("Multiple files match: " + filePath + ":\n" + list + "\n\nPlease use a more specific path.", activeDb),
                 }],
               };
             }
@@ -59,10 +75,22 @@ export function registerGetDependencyGraphTool(server: McpServer, db: SqlJsDatab
           return analyzeGraph(activeDb, activeGraphEngine, fileId, filePath, Math.min(Math.max(depth, 1), 3));
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error("Get dependency graph failed: " + msg);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`, db),
+            }],
+            isError: false,
+          };
+        }
+
+        log.error("Get dependency graph failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: "Error: Get dependency graph failed - " + msg }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Get dependency graph failed - " + errorMsg, db) }],
           isError: true,
         };
       }
@@ -115,7 +143,7 @@ function analyzeGraph(
     return {
       content: [{
         type: "text" as const,
-        text: "No import dependencies found for: " + filePath + ". The file may have no imports or exports.",
+        text: wrapWithStaleBanner("No import dependencies found for: " + filePath + ". The file may have no imports or exports.", db),
       }],
     };
   }
@@ -124,7 +152,7 @@ function analyzeGraph(
   log.info("Dependency graph for " + filePath + ": " + subGraph.nodes.length + " nodes, " + subGraph.edges.length + " edges");
 
   return {
-    content: [{ type: "text" as const, text }],
+    content: [{ type: "text" as const, text: wrapWithStaleBanner(text, db) }],
   };
 }
 

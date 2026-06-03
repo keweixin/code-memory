@@ -62,10 +62,22 @@ export function registerExplainModuleTool(server: McpServer, db: SqlJsDatabase):
           };
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error("Explain module failed: " + msg);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        log.error("Explain module failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Explain module failed - " + msg, db) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Explain module failed - " + errorMsg, db) }],
           isError: true,
         };
       }

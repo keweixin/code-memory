@@ -9,12 +9,28 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
+import { getActiveWatchState } from "../../indexer/watch-service.js";
 import type { SymbolKind } from "../../shared/types.js";
 import { HybridSearchEngine } from "../../search/hybrid-search.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:search-symbols");
+
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+  const pending = getActiveWatchState()?.getPendingFiles() ?? [];
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) { /* safe to ignore */ }
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
+  const { inResponse, notInResponse } = partitionPending(pending, text);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
+}
 
 const SYMBOL_KINDS = [
   "function", "class", "method", "interface", "type",
@@ -54,7 +70,7 @@ export function registerSearchSymbolsTool(server: McpServer, db: SqlJsDatabase):
           if (results.length === 0) {
             const kindMsg = kind ? ` of kind '${kind}'` : "";
             return {
-              content: [{ type: "text" as const, text: `No symbols found for "${query}"${kindMsg}.\n\nEnsure the codebase has been indexed with 'code-memory index'.` }],
+              content: [{ type: "text" as const, text: wrapWithStaleBanner(`No symbols found for "${query}"${kindMsg}.\n\nEnsure the codebase has been indexed with 'code-memory index'.`, activeDb) }],
             };
           }
 
@@ -62,14 +78,26 @@ export function registerSearchSymbolsTool(server: McpServer, db: SqlJsDatabase):
           log.info(`Symbol search "${query}" returned ${results.length} results`);
 
           return {
-            content: [{ type: "text" as const, text }],
+            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
           };
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Symbol search failed: ${msg}`);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`, db),
+            }],
+            isError: false,
+          };
+        }
+
+        log.error(`Symbol search failed: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: `Error: Symbol search failed - ${msg}` }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Symbol search failed - ${errorMsg}`, db) }],
           isError: true,
         };
       }

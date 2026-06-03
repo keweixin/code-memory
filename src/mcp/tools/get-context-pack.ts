@@ -139,10 +139,22 @@ export function registerGetContextPackTool(
           };
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error("Get context pack failed: " + msg);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
+
+        if (isUninitializedRepo) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory watch .\` or \`code-memory index --full\` in your terminal first.`,
+            }],
+            isError: false,
+          };
+        }
+
+        log.error("Get context pack failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Get context pack failed - " + msg, db), db) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Get context pack failed - " + errorMsg, db), db) }],
           isError: true,
         };
       }
