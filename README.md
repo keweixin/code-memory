@@ -30,23 +30,26 @@ Code Memory gives AI agents **persistent memory and code understanding** that su
 
 ## Quick Start
 
-### 1. Install
+### 1. Add MCP config to your IDE
 
-```bash
-npm install -g code-memory
+```json
+{
+  "mcpServers": {
+    "code-memory": {
+      "command": "npx",
+      "args": ["code-memory@latest", "serve", "--watch"]
+    }
+  }
+}
 ```
 
-### 2. Start the MCP server (AI handles the rest)
-
-```bash
-cd your-project
-code-memory serve --watch
-```
+### 2. Reload IDE window
 
 That's it. The first time AI connects, it will:
-1. Detect no index exists → auto-guide initialization
-2. Once indexed → all 26 tools work immediately
-3. As you edit code → watcher auto-updates, stale memories get flagged
+1. `npx` auto-downloads code-memory (no `npm install` needed)
+2. Detect no index exists → auto-run `init` and `index --full`
+3. Once indexed → all 26 tools work immediately
+4. As you edit code → watcher auto-updates, stale memories get flagged
 
 ### MCP Config
 
