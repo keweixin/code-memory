@@ -24,6 +24,13 @@ import { resolveEmbeddingConfig, resolveLlmConfig } from '../../shared/provider-
 import { resolveProjectPath } from '../project-path.js';
 
 const log = createLogger('doctor');
+const PROJECT_CONTEXT_MARKER = '<!-- CODE_MEMORY_CONTEXT_START -->';
+const EXPECTED_CODE_MEMORY_SKILLS = [
+  'code-memory-exploring.md',
+  'code-memory-debugging.md',
+  'code-memory-impact-analysis.md',
+  'code-memory-refactoring.md',
+];
 
 const LANGUAGE_MATURITY: Record<string, string> = {
   typescript: 'stable',
@@ -122,6 +129,7 @@ export async function runDoctor(asJson: boolean, fix = false, deep = false, proj
     status: 'ok',
     message: '.code-memory stores local snippets, metadata, call evidence, memories, ledger history, and optional vectors. Keep it out of git and backups that should not contain code snippets.',
   });
+  checks.push(...collectOnboardingChecks(projectPath));
 
   let parsedConfig: DoctorConfig | null = null;
   let configuredLanguages: string[] = [];
@@ -317,6 +325,72 @@ export async function runDoctor(asJson: boolean, fix = false, deep = false, proj
       console.log('      Suggestion: ' + check.suggestion);
     }
   }
+}
+
+function collectOnboardingChecks(projectPath: string): CheckResult[] {
+  const contextFiles = ['AGENTS.md', 'CLAUDE.md'];
+  const contextReady = contextFiles.filter((fileName) => {
+    const filePath = join(projectPath, fileName);
+    return existsSync(filePath) && readFileSync(filePath, 'utf-8').includes(PROJECT_CONTEXT_MARKER);
+  });
+  const skillRoot = join(projectPath, '.claude', 'skills', 'code-memory');
+  const installedSkills = EXPECTED_CODE_MEMORY_SKILLS.filter((fileName) => existsSync(join(skillRoot, fileName)));
+  const hookPath = join(projectPath, '.claude', 'hooks', 'code-memory-pretooluse.mjs');
+  const settingsPath = join(projectPath, '.claude', 'settings.json');
+
+  return [
+    {
+      name: 'setup-context',
+      status: contextReady.length === contextFiles.length ? 'ok' : 'warn',
+      count: contextReady.length,
+      message: contextReady.length === contextFiles.length
+        ? 'AI project context is installed in AGENTS.md and CLAUDE.md.'
+        : 'AI project context is incomplete. Run "code-memory setup --project .".',
+    },
+    {
+      name: 'setup-skills',
+      status: installedSkills.length === EXPECTED_CODE_MEMORY_SKILLS.length ? 'ok' : 'warn',
+      count: installedSkills.length,
+      message: installedSkills.length === EXPECTED_CODE_MEMORY_SKILLS.length
+        ? 'Claude Code skills for Code Memory are installed.'
+        : 'Claude Code skills are incomplete. Run "code-memory setup --project ." or disable with --no-skills.',
+    },
+    {
+      name: 'setup-hook-script',
+      status: existsSync(hookPath) ? 'ok' : 'warn',
+      message: existsSync(hookPath)
+        ? 'Claude Code PreToolUse hook script is installed.'
+        : 'Claude Code PreToolUse hook script is missing. Run "code-memory setup --project ." or disable with --no-hooks.',
+    },
+    {
+      name: 'setup-hook-settings',
+      status: hasCodeMemoryHookSettings(settingsPath) ? 'ok' : 'warn',
+      message: hasCodeMemoryHookSettings(settingsPath)
+        ? 'Claude Code PreToolUse hook is registered in .claude/settings.json.'
+        : 'Claude Code PreToolUse hook is not registered. Run "code-memory setup --project ." or disable with --no-hooks.',
+    },
+  ];
+}
+
+function hasCodeMemoryHookSettings(settingsPath: string): boolean {
+  if (!existsSync(settingsPath)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8')) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.hooks) || !Array.isArray(parsed.hooks.PreToolUse)) {
+      return false;
+    }
+    return parsed.hooks.PreToolUse.some((entry) => isCodeMemoryHookEntry(entry));
+  } catch {
+    return false;
+  }
+}
+
+function isCodeMemoryHookEntry(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.hooks)) return false;
+  return value.hooks.some((hook) => isRecord(hook) &&
+    String(hook.command || '') === 'node' &&
+    Array.isArray(hook.args) &&
+    hook.args.some((arg) => String(arg).includes('code-memory-pretooluse.mjs')));
 }
 
 async function runPerfDiagnostics(projectPath: string): Promise<void> {
@@ -568,6 +642,10 @@ function compareStringSets(expected: string[], actual: string[]): { missing: str
     missing: expected.filter((id) => !actualSet.has(id)),
     orphaned: actual.filter((id) => !expectedSet.has(id)),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function collectDeepPerformanceChecks(db: SqlJsDatabase): CheckResult[] {

@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RuntimeName } from './agent-config.js';
 
@@ -21,7 +21,7 @@ export interface ProjectOnboardingOptions {
 
 export interface ProjectOnboardingChange {
   filePath: string;
-  action: 'create' | 'update' | 'noop';
+  action: 'create' | 'update' | 'remove' | 'noop';
   changed: boolean;
   before: string;
   after: string;
@@ -37,6 +37,25 @@ export function setupProjectOnboarding(options: ProjectOnboardingOptions): Proje
   }
   if (options.writeHooks !== false) {
     changes.push(...buildHookChanges(options.projectRoot, options.runtime || 'npx'));
+  }
+
+  if (!options.dryRun) {
+    for (const change of changes) writeChange(change);
+  }
+
+  return changes;
+}
+
+export function uninstallProjectOnboarding(options: ProjectOnboardingOptions): ProjectOnboardingChange[] {
+  const changes: ProjectOnboardingChange[] = [];
+  if (options.writeContext !== false) {
+    changes.push(...buildContextRemovalChanges(options.projectRoot));
+  }
+  if (options.writeSkills !== false) {
+    changes.push(...buildSkillRemovalChanges(options.projectRoot));
+  }
+  if (options.writeHooks !== false) {
+    changes.push(...buildHookRemovalChanges(options.projectRoot));
   }
 
   if (!options.dryRun) {
@@ -66,6 +85,17 @@ function buildContextChanges(projectRoot: string): ProjectOnboardingChange[] {
     const filePath = join(projectRoot, fileName);
     const before = readText(filePath);
     const after = applyManagedBlock(before, block, PROJECT_MARKER_START, PROJECT_MARKER_END);
+    return toChange(filePath, before, after);
+  });
+}
+
+function buildContextRemovalChanges(projectRoot: string): ProjectOnboardingChange[] {
+  return ['AGENTS.md', 'CLAUDE.md'].map((fileName) => {
+    const filePath = join(projectRoot, fileName);
+    const before = readText(filePath);
+    const withoutLegacy = removeManagedBlock(before, LEGACY_PROJECT_MARKER_START, LEGACY_PROJECT_MARKER_END);
+    const cleaned = removeManagedBlock(withoutLegacy, PROJECT_MARKER_START, PROJECT_MARKER_END).trimEnd();
+    const after = cleaned ? cleaned + '\n' : '';
     return toChange(filePath, before, after);
   });
 }
@@ -116,6 +146,11 @@ function buildSkillChanges(projectRoot: string): ProjectOnboardingChange[] {
     const before = readText(filePath);
     return toChange(filePath, before, content);
   });
+}
+
+function buildSkillRemovalChanges(projectRoot: string): ProjectOnboardingChange[] {
+  const skillRoot = join(projectRoot, '.claude', 'skills', 'code-memory');
+  return [toRemoveChange(skillRoot, existsSync(skillRoot))];
 }
 
 function buildExploringSkill(): string {
@@ -223,6 +258,21 @@ function buildHookChanges(projectRoot: string, runtime: RuntimeName): ProjectOnb
   return [
     toChange(hookPath, scriptBefore, scriptAfter),
     toChange(settingsPath, settingsBefore, settingsAfter),
+  ];
+}
+
+function buildHookRemovalChanges(projectRoot: string): ProjectOnboardingChange[] {
+  const hookPath = join(projectRoot, '.claude', 'hooks', 'code-memory-pretooluse.mjs');
+  const settingsPath = join(projectRoot, '.claude', 'settings.json');
+  const settingsBefore = readText(settingsPath);
+  const settingsAfter = removeHookSettings(settingsBefore);
+  const settingsChange = settingsAfter === '' && settingsBefore
+    ? toRemoveChange(settingsPath, true)
+    : toChange(settingsPath, settingsBefore, settingsAfter);
+
+  return [
+    toRemoveChange(hookPath, existsSync(hookPath)),
+    settingsChange,
   ];
 }
 
@@ -347,6 +397,32 @@ function applyHookSettings(text: string): string {
   return JSON.stringify(config, null, 2) + '\n';
 }
 
+function removeHookSettings(text: string): string {
+  if (!text.trim()) return '';
+  const config = tryParseJsonObject(text);
+  if (!config || !isRecord(config.hooks)) return text;
+
+  const hooks = { ...config.hooks };
+  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
+  const filtered = preToolUse.filter((item) => !isCodeMemoryHook(item));
+  if (filtered.length === preToolUse.length) return text;
+
+  if (filtered.length > 0) {
+    hooks.PreToolUse = filtered;
+  } else {
+    delete hooks.PreToolUse;
+  }
+  if (Object.keys(hooks).length > 0) {
+    config.hooks = hooks;
+  } else {
+    delete config.hooks;
+  }
+
+  return Object.keys(config).length > 0
+    ? JSON.stringify(config, null, 2) + '\n'
+    : '';
+}
+
 function isCodeMemoryHook(value: unknown): boolean {
   if (!isRecord(value)) return false;
   const hooks = Array.isArray(value.hooks) ? value.hooks : [];
@@ -378,6 +454,15 @@ function parseJsonObject(text: string): Record<string, unknown> {
   }
 }
 
+function tryParseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function toChange(filePath: string, before: string, after: string): ProjectOnboardingChange {
   return {
     filePath,
@@ -388,14 +473,42 @@ function toChange(filePath: string, before: string, after: string): ProjectOnboa
   };
 }
 
+function toRemoveChange(filePath: string, exists: boolean): ProjectOnboardingChange {
+  return {
+    filePath,
+    action: exists ? 'remove' : 'noop',
+    changed: exists,
+    before: exists ? '[managed artifact]' : '',
+    after: '',
+  };
+}
+
 function readText(filePath: string): string {
   return existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
 }
 
 function writeChange(change: ProjectOnboardingChange): void {
   if (!change.changed) return;
+  if (change.action === 'remove') {
+    assertSafeManagedPath(change.filePath);
+    rmSync(change.filePath, { recursive: true, force: true });
+    return;
+  }
   mkdirSync(dirname(change.filePath), { recursive: true });
   writeFileSync(change.filePath, change.after, 'utf-8');
+}
+
+function assertSafeManagedPath(filePath: string): void {
+  const resolved = resolve(filePath);
+  const normalized = resolved.toLowerCase();
+  const allowedSegments = [
+    `${sep}.claude${sep}skills${sep}code-memory`,
+    `${sep}.claude${sep}hooks${sep}code-memory-pretooluse.mjs`,
+    `${sep}.claude${sep}settings.json`,
+  ];
+  if (!allowedSegments.some((segment) => normalized.includes(segment.toLowerCase()))) {
+    throw new Error('Refusing to remove unmanaged path: ' + filePath);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -9,6 +9,7 @@ import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
 import { IndexManager } from '../src/indexer/index-manager.js';
 import { closeDatabase, getDatabaseSync } from '../src/storage/database.js';
 import { addVectors, closeVectorStore, deleteVectors } from '../src/search/vector-search.js';
+import { setupProjectOnboarding } from '../src/cli/project-onboarding.js';
 
 const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 const VECTOR_DOCTOR_TIMEOUT_MS = 20_000;
@@ -102,6 +103,39 @@ describe('CLI doctor command', () => {
       status: 'ok',
       message: 'typescript=stable, javascript=stable',
     });
+  });
+
+  it('reports setup context, skills, and hooks after project onboarding', async () => {
+    setupProjectOnboarding({ projectRoot: tempRoot });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const program = createCli();
+    program.exitOverride();
+
+    await program.parseAsync(['node', 'code-memory', 'doctor', '--json']);
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    const result = JSON.parse(output) as {
+      checks: Array<{ name: string; status: string; message: string; count?: number }>;
+    };
+
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: 'setup-context',
+      status: 'ok',
+      count: 2,
+    }));
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: 'setup-skills',
+      status: 'ok',
+      count: 4,
+    }));
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: 'setup-hook-script',
+      status: 'ok',
+    }));
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: 'setup-hook-settings',
+      status: 'ok',
+    }));
   });
 
   it('skips deep vector drift checks when embeddings are disabled', async () => {

@@ -204,7 +204,6 @@ function removeJsonMcpConfig(text: string): string {
   const config = parseJsonObject(text);
   if (isRecord(config.mcpServers)) {
     delete config.mcpServers['code-memory'];
-    if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
   }
   delete config.__codeMemoryMarkerStart;
   delete config.__codeMemoryMarkerEnd;

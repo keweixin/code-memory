@@ -125,6 +125,14 @@ describe('CLI --project routing', () => {
     const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(output).toContain('Code Memory configuration was written.');
     expect(output).toContain('Bootstrap: skipped');
+
+    await program.parseAsync(['node', 'code-memory', 'uninstall', '--agent', 'cursor', '--project', projectRoot]);
+
+    const cleanedConfig = JSON.parse(readFileSync(join(projectRoot, '.cursor', 'mcp.json'), 'utf-8')) as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    expect(cleanedConfig.mcpServers['code-memory']).toBeUndefined();
+    expect(readFileSync(join(projectRoot, 'AGENTS.md'), 'utf-8')).not.toContain('CODE_MEMORY_CONTEXT_START');
   });
 
   it('wiki --project checks the explicit project instead of cwd', async () => {

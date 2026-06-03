@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setupAgents, uninstallAgents } from '../src/cli/agent-config.js';
-import { setupProjectOnboarding } from '../src/cli/project-onboarding.js';
+import { setupProjectOnboarding, uninstallProjectOnboarding } from '../src/cli/project-onboarding.js';
 
 describe('agent setup and uninstall', () => {
   let tempRoot: string;
@@ -191,5 +191,38 @@ describe('agent setup and uninstall', () => {
     expect(hook).toContain("CODE_MEMORY_COMMAND = \"node\"");
     expect(hook).toContain('index.js');
     expect(hook).not.toContain("CODE_MEMORY_COMMAND = \"npx\"");
+  });
+
+  it('uninstalls project onboarding artifacts without removing user content', () => {
+    writeFileSync(join(tempRoot, 'AGENTS.md'), '# Project\n\nKeep this line.\n', 'utf-8');
+    mkdirSync(join(tempRoot, '.claude'), { recursive: true });
+    writeFileSync(
+      join(tempRoot, '.claude', 'settings.json'),
+      JSON.stringify({
+        customSetting: true,
+        hooks: {
+          PreToolUse: [{
+            matcher: 'Write',
+            hooks: [{ type: 'command', command: 'echo', args: ['keep'] }],
+          }],
+        },
+      }, null, 2),
+      'utf-8',
+    );
+
+    setupProjectOnboarding({ projectRoot: tempRoot });
+    const changes = uninstallProjectOnboarding({ projectRoot: tempRoot });
+
+    expect(changes.some((change) => change.action === 'remove' && change.changed)).toBe(true);
+    const agents = readFileSync(join(tempRoot, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Keep this line.');
+    expect(agents).not.toContain('CODE_MEMORY_CONTEXT_START');
+    expect(existsSync(join(tempRoot, '.claude', 'skills', 'code-memory'))).toBe(false);
+    expect(existsSync(join(tempRoot, '.claude', 'hooks', 'code-memory-pretooluse.mjs'))).toBe(false);
+
+    const settings = JSON.parse(readFileSync(join(tempRoot, '.claude', 'settings.json'), 'utf-8'));
+    expect(settings.customSetting).toBe(true);
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.hooks.PreToolUse[0].matcher).toBe('Write');
   });
 });
