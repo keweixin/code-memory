@@ -57,22 +57,23 @@ Add to your IDE's MCP settings:
   "mcpServers": {
     "code-memory": {
       "command": "npx",
-      "args": ["code-memory@latest", "serve", "--watch"],
-      "cwd": "/absolute/path/to/your/project"
+      "args": ["code-memory@latest", "serve", "--watch"]
     }
   }
 }
 ```
 
-Or if globally installed:
+No `cwd` needed — `npx` inherits the IDE workspace directory automatically. Opens in project A → serves A. Opens in project B → serves B.
+
+Or if you prefer a fixed path:
 
 ```json
 {
   "mcpServers": {
     "code-memory": {
-      "command": "code-memory",
-      "args": ["serve", "--watch"],
-      "cwd": "/absolute/path/to/your/project"
+      "command": "npx",
+      "args": ["code-memory@latest", "serve", "--watch"],
+      "cwd": "${workspaceFolder}"
     }
   }
 }
