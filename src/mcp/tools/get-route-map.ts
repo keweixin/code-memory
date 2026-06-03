@@ -14,7 +14,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-route-map");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -48,7 +49,7 @@ interface RouteReferenceView {
   resolution_status: string;
 }
 
-export function registerGetRouteMapTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerGetRouteMapTool(server: McpServer, db?: SqlJsDatabase): void {
   server.tool(
     "get_route_map",
     "Show route handlers and client route references discovered during indexing. " +

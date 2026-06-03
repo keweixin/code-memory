@@ -40,7 +40,7 @@ const SYMBOL_KINDS = [
   "route", "api_endpoint",
 ] as const;
 
-export function registerSearchSymbolsTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerSearchSymbolsTool(server: McpServer, db?: SqlJsDatabase): void {
   const searchEngine = db ? new HybridSearchEngine(db) : null;
 
   server.tool(

@@ -30,7 +30,7 @@ const SEARCH_INTENTS = ["debug", "refactor", "add_test", "explain", "route", "se
 
 export function registerSearchCodeTool(
   server: McpServer,
-  db: SqlJsDatabase,
+  db?: SqlJsDatabase,
   vectorSearchProvider?: VectorSearchProvider | null,
   vectorSearchProviderResolver: VectorSearchProviderResolver = loadVectorSearchProviderForRepo,
 ): void {
@@ -111,8 +111,12 @@ export function registerSearchCodeTool(
         }
 
         log.error(`Search failed: ${errorMsg}`);
+        const text = `Error: Search failed - ${errorMsg}`;
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics(`Error: Search failed - ${errorMsg}`, db), db) }],
+          content: [{
+            type: "text" as const,
+            text: wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+          }],
           isError: true,
         };
       }

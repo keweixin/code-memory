@@ -42,7 +42,7 @@ const log = createLogger("mcp:get-context-pack");
 
 export function registerGetContextPackTool(
   server: McpServer,
-  db: SqlJsDatabase,
+  db?: SqlJsDatabase,
   vectorSearchProvider?: VectorSearchProvider | null,
   vectorSearchProviderResolver: VectorSearchProviderResolver = loadVectorSearchProviderForRepo,
 ): void {
@@ -158,8 +158,12 @@ export function registerGetContextPackTool(
         }
 
         log.error("Get context pack failed: " + errorMsg);
+        const text = "Error: Get context pack failed - " + errorMsg;
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Get context pack failed - " + errorMsg, db), db) }],
+          content: [{
+            type: "text" as const,
+            text: wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+          }],
           isError: true,
         };
       }

@@ -32,7 +32,7 @@ function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
   return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }
 
-export function registerImpactAnalysisTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerImpactAnalysisTool(server: McpServer, db?: SqlJsDatabase): void {
   const analyzer = db ? new ImpactAnalyzer(db) : null;
 
   server.tool(

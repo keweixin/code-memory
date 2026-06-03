@@ -17,7 +17,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-community");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -31,7 +32,7 @@ function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
   return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }
 
-export function registerGetCommunityTool(server: McpServer, _db: SqlJsDatabase): void {
+export function registerGetCommunityTool(server: McpServer, _db?: SqlJsDatabase): void {
   server.tool(
     "get_community",
     "Get the details of a single functional community by name: cohesion, " +

@@ -192,53 +192,52 @@ export function registerAllTools(
   log.info("Registering MCP tools...");
   const diagnosticServer = withIndexDiagnostics(server, db);
   const timedServer = withResponseTiming(diagnosticServer);
-  const routedDb = db as SqlJsDatabase;
 
   // ---- Navigation & Discovery ----
   registerResolveProjectTool(timedServer);
-  registerGetProjectCardTool(timedServer, routedDb);
-  registerGetRepoMapTool(timedServer, routedDb);
+  registerGetProjectCardTool(timedServer, db);
+  registerGetRepoMapTool(timedServer, db);
 
   // ---- Search ----
   registerSearchCodeTool(
     timedServer,
-    routedDb,
+    db,
     options.vectorSearchProvider,
     options.vectorSearchProviderResolver,
   );
-  registerSearchSymbolsTool(timedServer, routedDb);
+  registerSearchSymbolsTool(timedServer, db);
 
   // ---- Symbol Navigation ----
-  registerFindDefinitionTool(timedServer, routedDb);
-  registerFindReferencesTool(timedServer, routedDb);
+  registerFindDefinitionTool(timedServer, db);
+  registerFindReferencesTool(timedServer, db);
 
   // ---- Graph Analysis ----
-  registerGetCallGraphTool(timedServer, routedDb);
-  registerGetDependencyGraphTool(timedServer, routedDb);
-  registerImpactAnalysisTool(timedServer, routedDb);
-  registerGetRouteMapTool(timedServer, routedDb);
-  registerGetCommunityTool(timedServer, routedDb);
-  registerGetProcessTool(timedServer, routedDb);
+  registerGetCallGraphTool(timedServer, db);
+  registerGetDependencyGraphTool(timedServer, db);
+  registerImpactAnalysisTool(timedServer, db);
+  registerGetRouteMapTool(timedServer, db);
+  registerGetCommunityTool(timedServer, db);
+  registerGetProcessTool(timedServer, db);
 
   // ---- Testing ----
-  registerGetRelatedTestsTool(timedServer, routedDb);
+  registerGetRelatedTestsTool(timedServer, db);
 
   // ---- Context ----
-  registerPlanContextTool(timedServer, routedDb);
+  registerPlanContextTool(timedServer, db);
   registerGetContextPackTool(
     timedServer,
-    routedDb,
+    db,
     options.vectorSearchProvider,
     options.vectorSearchProviderResolver,
   );
 
   // ---- Memory ----
-  registerRememberProjectFactTool(timedServer, routedDb);
-  registerInvalidateMemoryTool(timedServer, routedDb);
-  registerContextLedgerTools(timedServer, routedDb);
+  registerRememberProjectFactTool(timedServer, db);
+  registerInvalidateMemoryTool(timedServer, db);
+  registerContextLedgerTools(timedServer, db);
 
   // ---- Understanding ----
-  registerExplainModuleTool(timedServer, routedDb);
+  registerExplainModuleTool(timedServer, db);
 
   // ---- Multi-Repo ----
   registerGetUnifiedRepoMapTool(timedServer, db);

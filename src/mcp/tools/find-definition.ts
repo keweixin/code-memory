@@ -19,7 +19,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 
 const log = createLogger("mcp:find-definition");
 
-export function registerFindDefinitionTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerFindDefinitionTool(server: McpServer, db?: SqlJsDatabase): void {
   server.tool(
     "find_definition",
     "Find the exact location of a symbol's definition. " +
@@ -262,7 +262,8 @@ function formatLocation(d: DefinitionInfo): string {
   return `${d.filePath}:${d.startLine}:${d.startColumn}-${d.endLine}:${d.endColumn}`;
 }
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {

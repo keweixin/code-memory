@@ -32,7 +32,7 @@ function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
   return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }
 
-export function registerGetCallGraphTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerGetCallGraphTool(server: McpServer, db?: SqlJsDatabase): void {
   const graphEngine = db ? new GraphEngine(db) : null;
 
   server.tool(

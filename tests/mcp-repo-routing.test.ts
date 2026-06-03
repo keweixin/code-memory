@@ -208,6 +208,37 @@ describe('MCP repo routing', () => {
     }
     expect(getMemoriesByType('decision')).toHaveLength(0);
   }, 20_000);
+
+  it('routes registered repo tools without a default startup database', async () => {
+    const projectRoot = join(tempRoot, 'global-target');
+    await indexProject(projectRoot, 'global-target-project', 'gammaOnly');
+    await closeDatabase();
+    registerRepo(projectRoot, 'global-target', { homeDir });
+
+    const server = new FakeMcpServer();
+    registerAllTools(server as never);
+
+    const resolution = await server.handlers.get('resolve_project')!({ repo: 'global-target' });
+    expect(resolution.content[0].text).toContain('"status": "ready"');
+    expect(resolution.content[0].text).toContain('"repoName": "global-target"');
+
+    const plan = await server.handlers.get('plan_context')!({
+      repo: 'global-target',
+      query: 'change gammaOnly behavior',
+      tokenBudget: 1500,
+    });
+    expect(plan.content[0].text).toContain('Context retrieval plan');
+    expect(plan.content[0].text).toContain('Query: change gammaOnly behavior');
+
+    const search = await server.handlers.get('search_code')!({
+      repo: 'global-target',
+      query: 'gammaOnly',
+      searchMode: 'keyword',
+      limit: 5,
+    });
+    expect(search.content[0].text).toContain('Search results for: "gammaOnly"');
+    expect(search.content[0].text).toContain('gammaOnly');
+  }, 20_000);
 });
 
 async function indexProject(rootPath: string, projectName: string, symbolName: string): Promise<void> {

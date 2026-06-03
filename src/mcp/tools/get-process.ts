@@ -19,7 +19,8 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-process");
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {
@@ -57,7 +58,7 @@ interface ProcessStepRow {
   file_path: string | null;
 }
 
-export function registerGetProcessTool(server: McpServer, _db: SqlJsDatabase): void {
+export function registerGetProcessTool(server: McpServer, _db?: SqlJsDatabase): void {
   server.tool(
     "get_process",
     "Get an execution flow (process) by name. The name can be a URL " +

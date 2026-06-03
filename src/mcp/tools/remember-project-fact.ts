@@ -18,7 +18,7 @@ const log = createLogger("mcp:remember-project-fact");
 
 const MEMORY_TYPES = ["repo", "session", "branch", "decision", "user_preference"] as const;
 
-export function registerRememberProjectFactTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerRememberProjectFactTool(server: McpServer, db?: SqlJsDatabase): void {
   server.tool(
     "remember_project_fact",
     "Save a project memory or fact for future reference. " +

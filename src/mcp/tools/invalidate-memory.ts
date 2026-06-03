@@ -21,7 +21,7 @@ const log = createLogger("mcp:invalidate-memory");
 
 const MEMORY_TYPES = ["repo", "session", "branch", "decision", "user_preference"] as const;
 
-export function registerInvalidateMemoryTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerInvalidateMemoryTool(server: McpServer, db?: SqlJsDatabase): void {
   server.tool(
     "invalidate_memory",
     "Invalidate a stored project memory. You can delete by ID or " +

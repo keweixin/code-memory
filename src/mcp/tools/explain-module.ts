@@ -21,7 +21,7 @@ import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:explain-module");
 
-export function registerExplainModuleTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerExplainModuleTool(server: McpServer, db?: SqlJsDatabase): void {
   server.tool(
     "explain_module",
     "Explain a module's structure and role in the codebase. " +
@@ -87,7 +87,8 @@ export function registerExplainModuleTool(server: McpServer, db: SqlJsDatabase):
 
 // ---- Stale Banner ----
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
   let staleMemoriesCount = 0;
   try {

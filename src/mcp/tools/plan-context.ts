@@ -31,7 +31,7 @@ const SEARCH_INTENTS = ["debug", "refactor", "add_test", "explain", "route", "se
 const SEARCH_MODES = ["hybrid", "keyword", "vector", "graph"] as const;
 const CONTEXT_LEVELS = ["L0", "L1", "L2", "L3", "L4"] as const;
 
-export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): void {
+export function registerPlanContextTool(server: McpServer, db?: SqlJsDatabase): void {
   server.tool(
     "plan_context",
     "Plan codebase context retrieval before fetching snippets. " +
@@ -133,8 +133,12 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
 
         // Other errors: keep original behavior
         log.error("Plan context failed: " + errorMsg);
+        const text = "Error: Plan context failed - " + errorMsg;
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Plan context failed - " + errorMsg, db), db) }],
+          content: [{
+            type: "text" as const,
+            text: wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+          }],
           isError: true,
         };
       }
@@ -142,7 +146,8 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
   );
 }
 
-function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
+function wrapWithStaleBanner(text: string, activeDb?: SqlJsDatabase): string {
+  if (!activeDb) return text;
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
 
   // Audit stale memories (confidence degraded below threshold due to file changes)

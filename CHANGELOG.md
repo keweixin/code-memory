@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3] - 2026-06-03
+
+### Fixed
+- Register MCP tools with an explicit optional default database contract for global `--auto-project` mode
+- Keep `resolve_project` available when the server starts without a project index
+- Route repo-aware tools through lazy database resolution when no startup database exists
+- Return bootstrap protocol guidance for missing projects instead of failing global tool calls
+
 ## [0.3.2] - 2026-06-03
 
 ### Fixed
