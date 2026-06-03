@@ -131,7 +131,7 @@ export function registerGetContextPackTool(
             activeDb,
             projectRoot,
           );
-          const text = wrapWithStaleBanner(baseText);
+          const text = wrapWithStaleBanner(baseText, activeDb);
           log.info("Context pack: level=" + pack.level + ", tokens=" + pack.tokensUsed + "/" + budget);
 
           return {
@@ -142,7 +142,7 @@ export function registerGetContextPackTool(
         const msg = err instanceof Error ? err.message : String(err);
         log.error("Get context pack failed: " + msg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Get context pack failed - " + msg, db)) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Get context pack failed - " + msg, db), db) }],
           isError: true,
         };
       }
@@ -176,9 +176,16 @@ function formatLedgerSection(
   return lines.join("\n");
 }
 
-function wrapWithStaleBanner(text: string): string {
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
-  if (pending.length === 0) return text;
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) { /* safe to ignore */ }
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
   const { inResponse, notInResponse } = partitionPending(pending, text);
-  return attachStaleBanner(text, inResponse, notInResponse);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }

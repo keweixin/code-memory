@@ -58,14 +58,14 @@ export function registerExplainModuleTool(server: McpServer, db: SqlJsDatabase):
           log.info("Explained module: " + filePath + " (" + symbols.length + " symbols, budget=" + adaptiveBudget.tier + ")");
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text) }],
+            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
           };
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error("Explain module failed: " + msg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Explain module failed - " + msg) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Explain module failed - " + msg, db) }],
           isError: true,
         };
       }
@@ -75,11 +75,18 @@ export function registerExplainModuleTool(server: McpServer, db: SqlJsDatabase):
 
 // ---- Stale Banner ----
 
-function wrapWithStaleBanner(text: string): string {
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
-  if (pending.length === 0) return text;
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) { /* safe to ignore */ }
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
   const { inResponse, notInResponse } = partitionPending(pending, text);
-  return attachStaleBanner(text, inResponse, notInResponse);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }
 
 // ---- Data Access ----

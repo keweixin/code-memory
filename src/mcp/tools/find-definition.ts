@@ -44,13 +44,14 @@ export function registerFindDefinitionTool(server: McpServer, db: SqlJsDatabase)
                 type: "text" as const,
                 text: wrapWithStaleBanner(
                   `No definition found for "${symbolName}".\n\nPossible reasons:\n- The symbol is not indexed yet (run 'code-memory index')\n- The name might be slightly different (use search_symbols to explore)\n- The symbol might be from an external dependency`,
+                  activeDb,
                 ),
               }],
             };
           }
 
           const baseText = formatDefinitions(symbolName, definitions);
-          const text = wrapWithStaleBanner(baseText);
+          const text = wrapWithStaleBanner(baseText, activeDb);
           log.info(`Found ${definitions.length} definition(s) for "${symbolName}"`);
 
           return {
@@ -61,7 +62,7 @@ export function registerFindDefinitionTool(server: McpServer, db: SqlJsDatabase)
         const msg = err instanceof Error ? err.message : String(err);
         log.error(`Find definition failed: ${msg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Find definition failed - ${msg}`) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Find definition failed - ${msg}`, db) }],
           isError: true,
         };
       }
@@ -249,9 +250,16 @@ function formatLocation(d: DefinitionInfo): string {
   return `${d.filePath}:${d.startLine}:${d.startColumn}-${d.endLine}:${d.endColumn}`;
 }
 
-function wrapWithStaleBanner(text: string): string {
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
-  if (pending.length === 0) return text;
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) { /* safe to ignore */ }
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
   const { inResponse, notInResponse } = partitionPending(pending, text);
-  return attachStaleBanner(text, inResponse, notInResponse);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }

@@ -98,7 +98,7 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
           log.info("Planned context retrieval for: " + query);
           const planText = applyOutputCharBudget(lines.join("\n"), adaptiveBudget.maxOutputChars);
           const baseText = prependIndexDiagnostics(planText, activeDb, projectRoot);
-          return { content: [{ type: "text" as const, text: wrapWithStaleBanner(baseText) }] };
+          return { content: [{ type: "text" as const, text: wrapWithStaleBanner(baseText, activeDb) }] };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -134,7 +134,7 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
         // Other errors: keep original behavior
         log.error("Plan context failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Plan context failed - " + errorMsg, db)) }],
+          content: [{ type: "text" as const, text: wrapWithStaleBanner(prependIndexDiagnostics("Error: Plan context failed - " + errorMsg, db), db) }],
           isError: true,
         };
       }
@@ -142,11 +142,25 @@ export function registerPlanContextTool(server: McpServer, db: SqlJsDatabase): v
   );
 }
 
-function wrapWithStaleBanner(text: string): string {
+function wrapWithStaleBanner(text: string, activeDb: SqlJsDatabase): string {
   const pending = getActiveWatchState()?.getPendingFiles() ?? [];
-  if (pending.length === 0) return text;
+
+  // Audit stale memories (confidence degraded below threshold due to file changes)
+  let staleMemoriesCount = 0;
+  try {
+    const rows = activeDb.exec("SELECT COUNT(*) FROM memories WHERE confidence < 0.6");
+    if (rows.length > 0 && rows[0].values.length > 0) {
+      staleMemoriesCount = Number(rows[0].values[0][0]);
+    }
+  } catch (_e) {
+    // memories table may not exist or be empty — safe to ignore
+  }
+
+  // Only skip banner when there is nothing to report
+  if (pending.length === 0 && staleMemoriesCount === 0) return text;
+
   const { inResponse, notInResponse } = partitionPending(pending, text);
-  return attachStaleBanner(text, inResponse, notInResponse);
+  return attachStaleBanner(text, inResponse, notInResponse, Date.now(), staleMemoriesCount);
 }
 
 function getIndexMetadata(db: SqlJsDatabase): Map<string, string> {
