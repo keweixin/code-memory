@@ -13,6 +13,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { estimateTokens } from "../../shared/token-counter.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-repo-map");
@@ -50,11 +51,11 @@ export function registerGetRepoMapTool(server: McpServer, _db?: SqlJsDatabase): 
         .describe("Focus on a specific directory (e.g. 'src/'). Empty for root")
         .optional()
         .default(""),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ tokenBudget, directory, repo }) => {
+    async ({ tokenBudget, directory, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, _db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
           const mapText = buildRepoMap(activeDb, tokenBudget, directory);
           log.info(`Returned repo map (budget: ${tokenBudget}, dir: "${directory}")`);
           return {

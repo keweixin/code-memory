@@ -11,6 +11,7 @@ import type { SqlJsDatabase } from "../../storage/database.js";
 import { resolveTargetNode } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
   attachStaleBanner,
   partitionPending,
@@ -31,11 +32,11 @@ export function registerFindDefinitionTool(server: McpServer, db?: SqlJsDatabase
         .string()
         .describe("Optional file path to narrow the search scope")
         .optional(),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ symbolName, filePath, repo }) => {
+    async ({ symbolName, filePath, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const definitions = findDefinitions(activeDb, symbolName, filePath || null);
 
           if (definitions.length === 0) {

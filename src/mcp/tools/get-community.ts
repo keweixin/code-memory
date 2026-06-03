@@ -13,6 +13,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { safeJsonParse } from "../../shared/utils.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-community");
@@ -41,11 +42,11 @@ export function registerGetCommunityTool(server: McpServer, _db?: SqlJsDatabase)
     "and EXTENDS edges. Use this after get_repo_map to drill into a specific cluster.",
     {
       name: z.string().describe("The name of the community to retrieve"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ name, repo }) => {
+    async ({ name, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, _db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
           const text = loadCommunity(activeDb, name);
           log.info(`Returned community: ${name}`);
           return {

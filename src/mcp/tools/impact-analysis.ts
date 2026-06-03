@@ -13,6 +13,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { ImpactAnalyzer } from "../../graph/impact-analyzer.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:impact-analysis");
@@ -43,11 +44,11 @@ export function registerImpactAnalysisTool(server: McpServer, db?: SqlJsDatabase
     "Use this before modifying code to understand the blast radius.",
     {
       target: z.string().describe("The symbol name or file path to analyze impact for"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ target, repo }) => {
+    async ({ target, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const activeAnalyzer = analyzer && activeDb === db ? analyzer : new ImpactAnalyzer(activeDb);
           const result = activeAnalyzer.analyze(target);
 

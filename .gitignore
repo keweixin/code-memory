@@ -7,3 +7,7 @@ dist/
 .vitest/
 coverage/
 *.tsbuildinfo
+build_output.txt
+lint_output.txt
+test_full_output.txt
+test_output.txt

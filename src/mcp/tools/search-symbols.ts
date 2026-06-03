@@ -14,6 +14,7 @@ import type { SymbolKind } from "../../shared/types.js";
 import { HybridSearchEngine } from "../../search/hybrid-search.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:search-symbols");
@@ -55,11 +56,11 @@ export function registerSearchSymbolsTool(server: McpServer, db?: SqlJsDatabase)
         .describe("Filter results to a specific symbol kind (e.g. 'function', 'class', 'interface')")
         .optional(),
       limit: z.number().describe("Maximum number of results (default 20, max 50)").optional().default(20),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ query, kind, limit, repo }) => {
+    async ({ query, kind, limit, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const activeSearchEngine = searchEngine && activeDb === db
             ? searchEngine
             : new HybridSearchEngine(activeDb);

@@ -14,6 +14,7 @@ import type { VectorSearchProvider } from "../../search/vector-search.js";
 import { createLogger } from "../../shared/logger.js";
 import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
   attachStaleBanner,
   partitionPending,
@@ -50,12 +51,12 @@ export function registerSearchCodeTool(
       intent: z.enum(SEARCH_INTENTS).describe("Optional task intent used to select graph expansion edges").optional(),
       sessionId: z.string().optional().describe("Optional session/task ID used to lower-rank context already returned in this session"),
       avoidRepeated: z.boolean().optional().default(false).describe("When sessionId is set, lower-rank repeated files, symbols, and chunks before returning results"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ query, limit, fileFilter, searchMode, intent, sessionId, avoidRepeated, repo }) => {
+    async ({ query, limit, fileFilter, searchMode, intent, sessionId, avoidRepeated, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, projectRoot) => {
-          const activeVectorSearchProvider = repo || activeDb !== db
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot) => {
+          const activeVectorSearchProvider = activeDb !== db
             ? await vectorSearchProviderResolver(projectRoot)
             : vectorSearchProvider || null;
           const activeSearchEngine = searchEngine && activeDb === db

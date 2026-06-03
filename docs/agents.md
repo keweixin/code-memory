@@ -14,8 +14,15 @@ Runtime options:
 
 | Runtime | MCP command |
 |---|---|
-| `npx` | `npx -y @keweixin/code-memory@latest serve --watch --auto-project` |
-| `global` | `code-memory serve --watch --auto-project` |
-| `local` | `node <absolute dist/index.js> serve --watch --auto-project` |
+| `npx` | `CODE_MEMORY_PROJECT=<absolute project> npx -y @keweixin/code-memory@latest serve --watch --auto-project` |
+| `global` | `CODE_MEMORY_PROJECT=<absolute project> code-memory serve --watch --auto-project` |
+| `local` | `CODE_MEMORY_PROJECT=<absolute project> node <absolute dist/index.js> serve --watch --auto-project` |
 
 Add `--bind-project` during setup only when you want the generated MCP config to use `--project <absolute-path>` and stay fixed to one repository.
+
+Agent workflow:
+
+1. Call `resolve_project` before Read/Grep/Glob.
+2. If the project is missing, stale, or unregistered, call `bootstrap_project`, `sync_project`, or `register_project`.
+3. Call `resolve_project` again, then `plan_context` and `get_context_pack`.
+4. Only use Read on files returned by Code Memory when extra source detail is needed.

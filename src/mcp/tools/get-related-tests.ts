@@ -14,6 +14,7 @@ import { GraphEngine } from "../../graph/graph-engine.js";
 import { resolveTargetNode } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-related-tests");
@@ -44,11 +45,11 @@ export function registerGetRelatedTestsTool(server: McpServer, db?: SqlJsDatabas
     "Use this to know which tests to run after making changes.",
     {
       target: z.string().describe("File path or symbol name to find related tests for"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ target, repo }) => {
+    async ({ target, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const testResults = findRelatedTests(activeDb, activeGraphEngine, target);
 

@@ -27,6 +27,7 @@ import { estimateTokens } from "../../shared/token-counter.js";
 import { createLogger } from "../../shared/logger.js";
 import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
   attachStaleBanner,
   partitionPending,
@@ -61,12 +62,12 @@ export function registerGetContextPackTool(
       levels: z.enum(["L0", "L1", "L2", "L3", "L4"]).describe("Maximum context detail level to return (L0=card, L4=full snippets)").optional(),
       sessionId: z.string().optional().describe("Optional session/task ID used to track returned context and avoid repeats"),
       avoidRepeated: z.boolean().optional().default(false).describe("When sessionId is set, omit files, symbols, and snippets already returned in this session"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ query, tokenBudget, levels, sessionId, avoidRepeated, repo }) => {
+    async ({ query, tokenBudget, levels, sessionId, avoidRepeated, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, projectRoot) => {
-          const activeVectorSearchProvider = repo || activeDb !== db
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot) => {
+          const activeVectorSearchProvider = activeDb !== db
             ? await vectorSearchProviderResolver(projectRoot)
             : vectorSearchProvider || null;
           const activeSearchEngine = searchEngine && activeDb === db

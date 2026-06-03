@@ -13,6 +13,7 @@ import { GraphEngine } from "../../graph/graph-engine.js";
 import { resolveTargetId } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-call-graph");
@@ -43,11 +44,11 @@ export function registerGetCallGraphTool(server: McpServer, db?: SqlJsDatabase):
     {
       symbolName: z.string().describe("The name of the symbol to analyze (e.g. function name)"),
       depth: z.number().describe("How many levels of calls to traverse (1-5, default 2)").optional().default(2),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ symbolName, depth, repo }) => {
+    async ({ symbolName, depth, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const symbolId = resolveTargetId(activeDb, symbolName);
           if (!symbolId) {

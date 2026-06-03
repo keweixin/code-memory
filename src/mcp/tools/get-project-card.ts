@@ -7,11 +7,11 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import type { SqlJsDatabase } from "../../storage/database.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-project-card");
@@ -38,11 +38,11 @@ export function registerGetProjectCardTool(server: McpServer, _db?: SqlJsDatabas
     "symbol counts, architecture style, framework, and index status. " +
     "Use this to orient yourself when starting work in a project.",
     {
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ repo }) => {
+    async ({ repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, _db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
           const meta = getIndexMetadata(activeDb);
           const stats = getDatabaseStats(activeDb);
 

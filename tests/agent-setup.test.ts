@@ -150,7 +150,8 @@ describe('agent setup and uninstall', () => {
 
     const agents = readFileSync(join(tempRoot, 'AGENTS.md'), 'utf-8');
     expect(agents).toContain('CODE_MEMORY_CONTEXT_START');
-    expect(agents).toContain('resolve_project -> plan_context -> get_context_pack/search_code -> search_symbols');
+    expect(agents).toContain('resolve_project -> bootstrap_project/sync_project/register_project when needed -> resolve_project -> plan_context');
+    expect(agents).toContain('Before Read/Grep/Glob');
     expect(agents).toContain('mark_context_used/get_context_delta');
     expect(agents).toContain('Keep this line.');
     expect(agents.match(/CODE_MEMORY_CONTEXT_START/g)).toHaveLength(1);

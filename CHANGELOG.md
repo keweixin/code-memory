@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.5] - 2026-06-03
+
+### Fixed
+- Route all database-backed MCP tools through a shared ToolContext input contract (`repo`, `project`, `cwd`, `workspaceRoots`)
+- Keep global MCP servers usable from unrelated working directories when tools pass an explicit `project` path
+- Document `bootstrap_project`, `sync_project`, and `register_project` as first-class agent workflow tools across README, resources, generated context, and skills
+- Ignore and remove local root-level command output captures from the tracked tree
+
+### Added
+- Add a benchmark quality gate for index, context, and agent benchmark JSON outputs
+- Enforce benchmark quality gates in CI and release workflows instead of warning-only benchmark parsing
+
 ## [0.3.4] - 2026-06-03
 
 ### Fixed

@@ -5,7 +5,8 @@ import type { SqlJsDatabase } from '../storage/database.js';
 import { getDbFilePath, openExistingDatabase } from '../storage/database.js';
 import { findRepo } from '../cli/registry.js';
 import { DatabaseRouter, ProjectNotReadyError } from './database-router.js';
-import { formatProjectResolution, type ProjectResolution } from './project-resolver.js';
+import { formatProjectResolution, type ProjectResolution, type ResolveProjectInput } from './project-resolver.js';
+import { pickToolContextInput } from './tool-context.js';
 
 export interface RoutedDatabase {
   db: SqlJsDatabase;
@@ -15,13 +16,13 @@ export interface RoutedDatabase {
 }
 
 export async function withRepoDatabase<T>(
-  repo: string | undefined,
+  input: string | ResolveProjectInput | undefined,
   defaultDb: SqlJsDatabase | undefined,
   callback: (db: SqlJsDatabase, projectRoot: string) => Promise<T> | T,
 ): Promise<T> {
   const router = new DatabaseRouter(defaultDb);
   try {
-    return await router.withResolvedProject({ repo }, async (routed) =>
+    return await router.withResolvedProject(normalizeToolContextInput(input), async (routed) =>
       callback(routed.db, routed.projectRoot));
   } catch (err) {
     if (err instanceof ProjectNotReadyError) {
@@ -29,6 +30,11 @@ export async function withRepoDatabase<T>(
     }
     throw err;
   }
+}
+
+function normalizeToolContextInput(input: string | ResolveProjectInput | undefined): ResolveProjectInput {
+  if (typeof input === 'string') return { repo: input };
+  return pickToolContextInput(input ?? {});
 }
 
 export function openRoutedDatabase(repo: string | undefined, defaultDb: SqlJsDatabase): RoutedDatabase {

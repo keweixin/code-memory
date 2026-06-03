@@ -17,6 +17,7 @@ import {
 import type { ContextFeedback } from "../../shared/types.js";
 import { getDatabaseSync, isInitialized, type SqlJsDatabase } from "../../storage/database.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 
 const FEEDBACK_VALUES = ["useful", "irrelevant", "stale"] as const;
 
@@ -44,11 +45,11 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
       repeatedPenalty: z.number().optional(),
       agentFeedback: z.enum(FEEDBACK_VALUES).optional(),
       feedbackReason: z.string().optional(),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
     async (input) => {
       try {
-        return await withRepoDatabase(input.repo, routedDb, async (activeDb, projectRoot) => {
+        return await withRepoDatabase(input, routedDb, async (activeDb, projectRoot) => {
           const id = markContextUsed({
             sessionId: input.sessionId,
             taskId: input.taskId,
@@ -101,11 +102,11 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
       candidateSymbols: z.array(z.string()).optional().default([]),
       candidateChunks: z.array(z.string()).optional().default([]),
       candidateEvidenceIds: z.array(z.string()).optional().default([]),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo }) => {
+    async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
           const delta = getContextDeltaForDb(sessionId, {
             files: candidateFiles,
             symbols: candidateSymbols,
@@ -145,11 +146,11 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
       candidateSymbols: z.array(z.string()).optional().default([]),
       candidateChunks: z.array(z.string()).optional().default([]),
       candidateEvidenceIds: z.array(z.string()).optional().default([]),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo }) => {
+    async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
           const delta = getContextDeltaForDb(sessionId, {
             files: candidateFiles,
             symbols: candidateSymbols,
@@ -202,11 +203,11 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
       contextId: z.string().describe("File path, symbol name, or chunk ID to explain"),
       contextType: z.enum(["file", "symbol", "chunk"]).describe("Type of the contextId"),
       feedback: z.enum(FEEDBACK_VALUES).optional().describe("Optional feedback to apply to the latest ledger entry"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ sessionId, contextId, contextType, feedback, repo }) => {
+    async ({ sessionId, contextId, contextType, feedback, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
           let entries = getContextLedgerEntriesForDb(sessionId, activeDb);
           let seenIn = entries.filter((entry) => {
             if (contextType === "file") return entry.returnedFiles.includes(contextId);
@@ -259,11 +260,11 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     "Summarize the context already returned in a session so the agent can keep a compact ledger instead of rereading snippets.",
     {
       sessionId: z.string().describe("Stable ID for the agent/session/task"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ sessionId, repo }) => {
+    async ({ sessionId, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
           const summary = compactSessionContext(sessionId, activeDb);
           const lines = [
             "Compact session context",
@@ -304,11 +305,11 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     "Delete the context ledger entries for a session when the agent starts a materially new task.",
     {
       sessionId: z.string().describe("Stable ID for the agent/session/task"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ sessionId, repo }) => {
+    async ({ sessionId, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
           const removed = resetContextSession(sessionId, activeDb);
           return { content: [{ type: "text" as const, text: "Removed ledger entries: " + removed }] };
         });

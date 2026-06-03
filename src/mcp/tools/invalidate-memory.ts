@@ -16,6 +16,7 @@ import {
 import { createLogger } from "../../shared/logger.js";
 import type { MemoryType } from "../../shared/types.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 
 const log = createLogger("mcp:invalidate-memory");
 
@@ -30,11 +31,11 @@ export function registerInvalidateMemoryTool(server: McpServer, db?: SqlJsDataba
     {
       memoryId: z.string().describe("ID of the specific memory to invalidate").optional(),
       type: z.enum(MEMORY_TYPES).describe("Invalidate ALL memories of this type (use with caution)").optional(),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ memoryId, type, repo }) => {
+    async ({ memoryId, type, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, _projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, _projectRoot) => {
           if (!memoryId && !type) {
             return {
               content: [{ type: "text" as const, text: "Error: Provide either memoryId or type to invalidate." }],

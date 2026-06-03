@@ -98,7 +98,7 @@ describe('MCP resources', () => {
     );
     expect(context.contents[0].mimeType).toBe('text/markdown');
     expect(context.contents[0].text).toContain('Code Memory Repo Context');
-    expect(context.contents[0].text).toContain('resolve_project -> plan_context -> get_context_pack/search_code -> search_symbols');
+    expect(context.contents[0].text).toContain('resolve_project -> bootstrap_project/sync_project/register_project when needed -> resolve_project -> plan_context');
     expect(context.contents[0].text).toContain('mark_context_used/get_context_delta');
 
     const symbols = await server.resources.get('code-memory-repo-symbols')!(

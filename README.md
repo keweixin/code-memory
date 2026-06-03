@@ -4,7 +4,7 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
-Current source version: `0.3.4`.
+Current source version: `0.3.5`.
 
 Published npm status can lag the repository. Check before using `@latest`:
 
@@ -12,7 +12,7 @@ Published npm status can lag the repository. Check before using `@latest`:
 npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.3.4`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP router and management-tool fixes yet.
+If npm reports a version older than `0.3.5`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP router, unified tool routing, and benchmark gate fixes yet.
 
 Run this from the project you want an agent to understand:
 
@@ -138,10 +138,14 @@ Recommended tool order:
 
 ```text
 New task / new repo
--> resolve_project -> plan_context
+-> resolve_project
+
+Missing / stale / unregistered project
+-> bootstrap_project / sync_project / register_project
+-> resolve_project again
 
 Understand feature / find code
--> get_context_pack or search_code
+-> plan_context -> get_context_pack or search_code
 
 Locate symbols
 -> search_symbols -> find_definition / find_references
@@ -159,6 +163,8 @@ Preserve durable knowledge
 -> remember_project_fact / invalidate_memory
 ```
 
+Before using Read/Grep/Glob, call `resolve_project`, `plan_context`, and `get_context_pack`. Only use Read on files returned by Code Memory when extra source detail is needed. If `resolve_project` reports a missing, stale, or unregistered project, use `bootstrap_project`, `sync_project`, or `register_project` before falling back to shell commands or broad file scans.
+
 The same workflow appears in MCP tool descriptions, response hints, generated `AGENTS.md` / `CLAUDE.md` blocks, generated skills, and doctor/setup guidance.
 
 ## MCP Tools
@@ -173,7 +179,10 @@ Core tools:
 
 | Tool | Purpose |
 |---|---|
-| `resolve_project` | Verify project identity, db path, index readiness, and next bootstrap/index command |
+| `resolve_project` | Verify project identity, db path, index readiness, and next action |
+| `bootstrap_project` | Initialize or repair a project from MCP without requiring a startup database |
+| `sync_project` | Refresh a stale project from MCP without requiring a startup database |
+| `register_project` | Add the resolved project to the global registry for stable repo routing |
 | `plan_context` | Classify the task and choose the retrieval path |
 | `get_context_pack` | Bounded evidence package for a task |
 | `search_code` | Hybrid search across indexed snippets |
@@ -229,9 +238,10 @@ These are local benchmark results from this repository on Windows with Node 22 a
 Reproduce:
 
 ```bash
-npm run benchmark:index -- --files 2000 --workers auto --embedding none
-npm run benchmark:context
-npm run benchmark:agent
+npm run benchmark:index -- --files 2000 --workers auto --embedding none > benchmark-index.json
+npm run benchmark:context > benchmark-context.json
+npm run benchmark:agent > benchmark-agent.json
+npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json
 ```
 
 ## Language Support

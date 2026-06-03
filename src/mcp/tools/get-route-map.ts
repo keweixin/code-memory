@@ -10,6 +10,7 @@ import type { SqlJsDatabase } from "../../storage/database.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-route-map");
@@ -57,11 +58,11 @@ export function registerGetRouteMapTool(server: McpServer, db?: SqlJsDatabase): 
     {
       route: z.string().optional().describe("Optional route path filter, for example /api/users"),
       includeUnresolved: z.boolean().optional().describe("Include route references that did not resolve to a handler"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ route, includeUnresolved, repo }) => {
+    async ({ route, includeUnresolved, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const endpoints = loadEndpoints(activeDb, route);
           const references = loadReferences(activeDb, route, Boolean(includeUnresolved));
           const text = formatRouteMap(endpoints, references);

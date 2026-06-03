@@ -105,7 +105,7 @@ function readRepoContext(db: SqlJsDatabase, projectRoot: string): string {
     '',
     '## Recommended Workflow',
     '',
-    'resolve_project -> plan_context -> get_context_pack/search_code -> search_symbols -> find_definition/find_references -> impact_analysis -> get_related_tests -> mark_context_used/get_context_delta',
+    'resolve_project -> bootstrap_project/sync_project/register_project when needed -> resolve_project -> plan_context -> get_context_pack/search_code -> search_symbols -> find_definition/find_references -> impact_analysis -> get_related_tests -> mark_context_used/get_context_delta',
     '',
     '## Languages',
     '',

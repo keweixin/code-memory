@@ -15,6 +15,7 @@ import type { SqlJsDatabase } from "../../storage/database.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-process");
@@ -69,11 +70,11 @@ export function registerGetProcessTool(server: McpServer, _db?: SqlJsDatabase): 
       "reaches a terminal side-effect.",
     {
       name: z.string().describe("The process name to look up, e.g. 'GET /users/:id' or 'main'"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ name, repo }) => {
+    async ({ name, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, _db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
           const text = loadProcess(activeDb, name);
           log.info(`Returned process: ${name}`);
           return {

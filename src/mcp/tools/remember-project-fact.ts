@@ -13,6 +13,7 @@ import { createMemory } from "../../storage/memory-repository.js";
 import { createLogger } from "../../shared/logger.js";
 import type { MemoryType, InvalidationRule } from "../../shared/types.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 
 const log = createLogger("mcp:remember-project-fact");
 
@@ -37,11 +38,11 @@ export function registerRememberProjectFactTool(server: McpServer, db?: SqlJsDat
         target: z.string(),
         description: z.string().optional(),
       })).describe("Auto-invalidation rules — when these conditions are met, the memory is marked stale").optional().default([]),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ content, type, scope, confidence, evidence, invalidateOn, repo }) => {
+    async ({ content, type, scope, confidence, evidence, invalidateOn, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, _projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, _projectRoot) => {
           if (!content.trim()) {
             return {
               content: [{ type: "text" as const, text: "Error: Content cannot be empty." }],

@@ -20,6 +20,7 @@ import { createLogger } from "../../shared/logger.js";
 import { NPM_PACKAGE_SPEC } from "../../shared/constants.js";
 import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
   attachStaleBanner,
   partitionPending,
@@ -45,11 +46,11 @@ export function registerPlanContextTool(server: McpServer, db?: SqlJsDatabase): 
       levels: z.enum(CONTEXT_LEVELS).optional().describe("Optional maximum context level"),
       sessionId: z.string().optional().describe("Optional session/task ID for ledger delta planning"),
       avoidRepeated: z.boolean().optional().default(true).describe("Whether later retrieval should prefer context deltas"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ query, tokenBudget, intent, searchMode, levels, sessionId, avoidRepeated, repo }) => {
+    async ({ query, tokenBudget, intent, searchMode, levels, sessionId, avoidRepeated, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb, projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot) => {
           const classification = classifySearchIntent(query, intent as SearchIntent | undefined);
           const graphProfile = getIntentGraphProfile(classification.intent);
           const metadata = getIndexMetadata(activeDb);

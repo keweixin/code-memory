@@ -5,7 +5,7 @@ import { formatProjectResolution, resolveProject } from "../project-resolver.js"
 export function registerResolveProjectTool(server: McpServer): void {
   server.tool(
     "resolve_project",
-    "Resolve the active Code Memory project and database before any code exploration. WHEN TO USE: first call for a new task, repo switch, or when tools report missing/stale index. AFTER THIS: call plan_context if status is ready, or run the returned bootstrap/index command.",
+    "Resolve the active Code Memory project and database before any code exploration. WHEN TO USE: first call for a new task, repo switch, or when tools report missing/stale index. AFTER THIS: call plan_context if status is ready; otherwise call bootstrap_project, sync_project, or register_project before using Read/Grep/Glob.",
     {
       repo: z.string().optional().describe("Optional registered repo name or repository root path"),
       project: z.string().optional().describe("Optional explicit project root path"),

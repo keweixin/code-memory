@@ -12,6 +12,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { GraphEngine } from "../../graph/graph-engine.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-dependency-graph");
@@ -43,11 +44,11 @@ export function registerGetDependencyGraphTool(server: McpServer, db?: SqlJsData
     {
       filePath: z.string().describe("The file path to analyze dependencies for"),
       depth: z.number().describe("How many levels of imports to traverse (1-3, default 2)").optional().default(2),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ filePath, depth, repo }) => {
+    async ({ filePath, depth, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const fileId = findFileId(activeDb, filePath);
           if (!fileId) {

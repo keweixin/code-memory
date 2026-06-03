@@ -13,6 +13,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { GraphEngine } from "../../graph/graph-engine.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:find-references");
@@ -44,11 +45,11 @@ export function registerFindReferencesTool(server: McpServer, db?: SqlJsDatabase
     {
       symbolName: z.string().describe("The symbol name to find references for"),
       maxResults: z.number().describe("Max references (default 30, max 100)").optional().default(30),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ symbolName, maxResults, repo }) => {
+    async ({ symbolName, maxResults, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const symbolIds = findSymbolIds(activeDb, symbolName);
           if (symbolIds.length === 0) {

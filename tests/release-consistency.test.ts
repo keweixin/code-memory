@@ -93,6 +93,9 @@ describe('release consistency', () => {
 
     for (const text of [readme, mcpTools]) {
       expect(text).toContain('resolve_project');
+      expect(text).toContain('bootstrap_project');
+      expect(text).toContain('sync_project');
+      expect(text).toContain('register_project');
       expect(text).toContain('plan_context');
       expect(text).toContain('get_context_pack');
       expect(text).toContain('impact_analysis');

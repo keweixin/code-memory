@@ -30,9 +30,11 @@ class FakeMcpServer {
 describe('MCP repo routing', () => {
   let tempRoot: string;
   let homeDir: string;
+  let originalCwd: string;
   let originalGlobalHome: string | undefined;
 
   beforeEach(() => {
+    originalCwd = process.cwd();
     originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-mcp-repo-routing-'));
     homeDir = join(tempRoot, 'home');
@@ -45,6 +47,7 @@ describe('MCP repo routing', () => {
     } else {
       process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
     }
+    process.chdir(originalCwd);
     await closeDatabase();
     rmSync(tempRoot, { recursive: true, force: true });
   });
@@ -238,6 +241,68 @@ describe('MCP repo routing', () => {
     });
     expect(search.content[0].text).toContain('Search results for: "gammaOnly"');
     expect(search.content[0].text).toContain('gammaOnly');
+  }, 20_000);
+
+  it('routes global tools by explicit project path when server cwd is unrelated', async () => {
+    const projectRoot = join(tempRoot, 'project-arg-target');
+    const unrelatedCwd = join(tempRoot, 'unrelated-cwd');
+    mkdirSync(unrelatedCwd, { recursive: true });
+    await indexProject(projectRoot, 'project-arg-target-project', 'deltaOnly');
+    await closeDatabase();
+    process.chdir(unrelatedCwd);
+
+    const server = new FakeMcpServer();
+    registerAllTools(server as never);
+
+    const resolution = await server.handlers.get('resolve_project')!({ project: projectRoot });
+    expect(resolution.content[0].text).toContain('"status": "ready"');
+    expect(resolution.content[0].text).toContain('"repoName": "project-arg-target"');
+    expect(resolution.content[0].text).toContain(projectRoot.replace(/\\/g, '\\\\'));
+    expect(resolution.content[0].text).toContain('"indexExists": true');
+
+    const plan = await server.handlers.get('plan_context')!({
+      project: projectRoot,
+      query: 'change deltaOnly behavior',
+      tokenBudget: 1500,
+    });
+    expect(plan.content[0].text).toContain('Context retrieval plan');
+    expect(plan.content[0].text).toContain('Query: change deltaOnly behavior');
+
+    const search = await server.handlers.get('search_code')!({
+      project: projectRoot,
+      query: 'deltaOnly',
+      searchMode: 'keyword',
+      limit: 5,
+    });
+    expect(search.content[0].text).toContain('Search results for: "deltaOnly"');
+    expect(search.content[0].text).toContain('deltaOnly');
+
+    const context = await server.handlers.get('get_context_pack')!({
+      project: projectRoot,
+      query: 'deltaOnly',
+      tokenBudget: 2000,
+      levels: 'L4',
+      sessionId: 'project-arg-context',
+      avoidRepeated: false,
+    });
+    expect(context.content[0].text).toContain('Context Ledger');
+    expect(context.content[0].text).toContain('deltaOnly');
+
+    const marked = await server.handlers.get('mark_context_used')!({
+      project: projectRoot,
+      sessionId: 'project-arg-ledger',
+      query: 'deltaOnly',
+      returnedFiles: ['src/index.ts'],
+    });
+    expect(marked.content[0].text).toContain('Context ledger entry recorded');
+
+    const delta = await server.handlers.get('get_context_delta')!({
+      project: projectRoot,
+      sessionId: 'project-arg-ledger',
+      candidateFiles: ['src/index.ts', 'src/helper.ts'],
+    });
+    expect(delta.content[0].text).toContain('Repeated files: src/index.ts');
+    expect(delta.content[0].text).toContain('New files: src/helper.ts');
   }, 20_000);
 });
 

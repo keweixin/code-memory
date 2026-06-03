@@ -16,6 +16,7 @@ import {
 } from "../../search/context-budget.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
+import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
@@ -29,11 +30,11 @@ export function registerExplainModuleTool(server: McpServer, db?: SqlJsDatabase)
     "characteristics. Use this to quickly understand what a file does.",
     {
       filePath: z.string().describe("The file path to explain"),
-      repo: z.string().optional().describe("Optional registered repo name or repository root path"),
+      ...TOOL_CONTEXT_INPUT_SCHEMA,
     },
-    async ({ filePath, repo }) => {
+    async ({ filePath, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase(repo, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
           const fileInfo = getFileInfo(activeDb, filePath);
           if (!fileInfo) {
             return {

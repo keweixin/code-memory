@@ -1,6 +1,6 @@
 {
   "name": "@keweixin/code-memory",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "description": "Context Ledger and evidence-backed code graph for AI coding agents",
   "author": "keweixin",
@@ -38,6 +38,7 @@
     "benchmark:index": "node tools/benchmark-index.mjs",
     "benchmark:context": "node tools/benchmark-context.mjs",
     "benchmark:agent": "node tools/benchmark-agent.mjs",
+    "benchmark:gate": "node tools/benchmark-quality-gate.mjs",
     "bench": "vitest run tests/bench/"
   },
   "keywords": [
