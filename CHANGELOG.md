@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.1] - 2026-06-04
+
+### Fixed
+- Make `setup --agent auto` fail with explicit candidate commands instead of silently falling back to `codex` when no supported agent config is detected
+- Require an explicit `--agent <agent>` or `--all` when auto-detection finds multiple supported agent configs
+- Validate setup agent selection before bootstrap/register/write steps so failed setup attempts do not leave partial registry or project side effects
+
+### Added
+- Add CLI lifecycle coverage for `repair`, `upgrade`, and `clean`
+- Add setup CLI coverage for `--print-config` to guarantee it only prints planned config without bootstrapping, registering, or writing files
+
 ## [0.4.0] - 2026-06-04
 
 ### Added

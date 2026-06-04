@@ -4,7 +4,7 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
-Current source version: `0.4.0`.
+Current source version: `0.4.1`.
 
 Published npm status can lag the repository. Check before using `@latest`:
 
@@ -12,7 +12,7 @@ Published npm status can lag the repository. Check before using `@latest`:
 npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.4.0`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP watch routing, multi-repo project selection, structured real-repo benchmark metrics, structured MCP tool results, allowed-read constraints, benchmark gate fixes, and CLI mirror hardening yet.
+If npm reports a version older than `0.4.1`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP watch routing, multi-repo project selection, structured real-repo benchmark metrics, structured MCP tool results, allowed-read constraints, benchmark gate fixes, CLI mirror hardening, lifecycle command coverage, or strict setup auto-agent selection yet.
 
 Run this from the project you want an agent to understand:
 
