@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { CodeMemoryConfig } from '../src/shared/types.js';
@@ -84,6 +84,7 @@ function expectDiagnostics(text: string): void {
 
 function parseStructuredResult(text: string): {
   status?: string;
+  data?: unknown;
   freshness?: {
     indexStatus?: string;
     changedFiles?: string[];
@@ -94,6 +95,7 @@ function parseStructuredResult(text: string): {
   try {
     return JSON.parse(text) as {
       status?: string;
+      data?: unknown;
       freshness?: {
         indexStatus?: string;
         changedFiles?: string[];
@@ -228,5 +230,78 @@ describe('MCP registry index diagnostics', () => {
     expect(freshStructured?.status).toBe('ready');
     expect(freshStructured?.freshness?.indexStatus).toBe('fresh');
     expect(freshStructured?.freshness?.changedFiles).toEqual([]);
+  });
+
+  it('does not return orphaned paths from MCP tools after rename and delete sync', async () => {
+    mkdirSync(join(tempRoot, 'src', 'lifecycle'), { recursive: true });
+    const oldHelperPath = join(tempRoot, 'src', 'lifecycle', 'helper.ts');
+    const newHelperPath = join(tempRoot, 'src', 'lifecycle', 'helper-renamed.ts');
+    const deletedPath = join(tempRoot, 'src', 'lifecycle', 'deleted.ts');
+    writeFileSync(
+      oldHelperPath,
+      [
+        'export function lifecycleHelper(): string {',
+        "  return 'renamed';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      deletedPath,
+      [
+        'export function deletedOnly(): string {',
+        "  return 'delete-me';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await indexFixture(tempRoot);
+
+    renameSync(oldHelperPath, newHelperPath);
+    unlinkSync(deletedPath);
+    await new IndexManager(tempRoot, createConfig(tempRoot)).incrementalIndex({
+      changedPaths: [oldHelperPath, newHelperPath, deletedPath],
+    });
+
+    const server = new FakeMcpServer();
+    registerAllTools(server as never, getDatabaseSync());
+
+    const renamedResult = await server.handlers.get('search_code')!({
+      query: 'lifecycleHelper',
+      limit: 5,
+      searchMode: 'keyword',
+    });
+    const renamedStructured = parseStructuredResult(renamedResult.content[0].text) as {
+      data?: { resultCount?: number };
+      freshness?: { indexStatus?: string };
+    } | null;
+    const renamedMachineData = JSON.stringify(renamedStructured?.data);
+    expect(renamedStructured?.freshness?.indexStatus).toBe('fresh');
+    expect(renamedStructured?.data?.resultCount).toBeGreaterThan(0);
+    expect(renamedMachineData).toContain('src/lifecycle/helper-renamed.ts');
+    expect(renamedMachineData).not.toContain('src/lifecycle/helper.ts');
+
+    const deletedResult = await server.handlers.get('search_code')!({
+      query: 'deletedOnly',
+      limit: 5,
+      searchMode: 'keyword',
+    });
+    const deletedStructured = parseStructuredResult(deletedResult.content[0].text);
+    const deletedMachineData = JSON.stringify(deletedStructured?.data);
+    expect(deletedStructured?.freshness?.indexStatus).toBe('fresh');
+    expect(deletedMachineData).not.toContain('src/lifecycle/deleted.ts');
+
+    const repoMapResult = await server.handlers.get('get_repo_map')!({
+      directory: 'src/lifecycle',
+      tokenBudget: 1000,
+    });
+    const repoMapStructured = parseStructuredResult(repoMapResult.content[0].text);
+    const repoMapMachineData = JSON.stringify(repoMapStructured?.data);
+    expect(repoMapMachineData).toContain('src/lifecycle/helper-renamed.ts');
+    expect(repoMapMachineData).not.toContain('src/lifecycle/helper.ts');
+    expect(repoMapMachineData).not.toContain('src/lifecycle/deleted.ts');
   });
 });
