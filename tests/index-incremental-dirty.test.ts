@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
@@ -195,11 +195,95 @@ describe('incremental dirty indexing', () => {
     expect(Number(queryValue("SELECT COUNT(*) FROM call_refs WHERE file_id NOT IN (SELECT id FROM files)"))).toBe(0);
 
     const invariants = collectInvariants(getDatabaseSync());
+    expect(Number(queryValue("SELECT COUNT(*) FROM symbols WHERE file_id NOT IN (SELECT id FROM files)"))).toBe(0);
+    expect(Number(queryValue("SELECT COUNT(*) FROM chunks WHERE file_id NOT IN (SELECT id FROM files)"))).toBe(0);
     expect(invariants).toContainEqual(expect.objectContaining({
       name: 'context-ledger-stale-references',
       status: 'ok',
       count: 0,
     }));
+    expect(invariants).toContainEqual(expect.objectContaining({
+      name: 'dangling-edges',
+      status: 'ok',
+      count: 0,
+    }));
+  });
+
+  it('renames files without returning orphaned old paths or stale chunks', async () => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-rename-lifecycle-'));
+    mkdirSync(join(tempRoot, 'src'), { recursive: true });
+    const oldPath = join(tempRoot, 'src', 'helper.ts');
+    const newPath = join(tempRoot, 'src', 'helper-renamed.ts');
+    writeFileSync(
+      oldPath,
+      [
+        'export function helper(): string {',
+        "  return 'world';",
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(tempRoot, 'src', 'index.ts'),
+      [
+        "import { helper } from './helper.js';",
+        'export function hello(): string {',
+        '  return helper();',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    const config = createConfig(tempRoot);
+    writeConfig(tempRoot, config);
+    await new IndexManager(tempRoot, config).fullIndex();
+
+    renameSync(oldPath, newPath);
+    writeFileSync(
+      join(tempRoot, 'src', 'index.ts'),
+      [
+        "import { helper } from './helper-renamed.js';",
+        'export function hello(): string {',
+        '  return helper();',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await new IndexManager(tempRoot, config).incrementalIndex({
+      changedPaths: [oldPath, newPath, join(tempRoot, 'src', 'index.ts')],
+    });
+
+    expect(Number(queryValue("SELECT COUNT(*) FROM files WHERE path = 'src/helper.ts'"))).toBe(0);
+    expect(Number(queryValue("SELECT COUNT(*) FROM files WHERE path = 'src/helper-renamed.ts'"))).toBe(1);
+    expect(Number(queryValue(
+      `SELECT COUNT(*)
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE f.path = 'src/helper.ts'`,
+    ))).toBe(0);
+    expect(Number(queryValue(
+      `SELECT COUNT(*)
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE f.path = 'src/helper-renamed.ts' AND s.name = 'helper'`,
+    ))).toBeGreaterThan(0);
+    expect(Number(queryValue(
+      `SELECT COUNT(*)
+       FROM chunks c
+       JOIN files f ON f.id = c.file_id
+       WHERE f.path = 'src/helper.ts'`,
+    ))).toBe(0);
+    expect(Number(queryValue(
+      `SELECT COUNT(*)
+       FROM chunks c
+       JOIN files f ON f.id = c.file_id
+       WHERE f.path = 'src/helper-renamed.ts'`,
+    ))).toBeGreaterThan(0);
+
+    const invariants = collectInvariants(getDatabaseSync());
     expect(invariants).toContainEqual(expect.objectContaining({
       name: 'dangling-edges',
       status: 'ok',

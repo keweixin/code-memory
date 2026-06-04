@@ -164,6 +164,20 @@ describe('MCP context pack ledger integration', () => {
       reason: expect.any(String),
       readPriority: expect.any(String),
     });
+    expect(firstStructured.data.trustContract.allowedNextReads.length).toBeGreaterThan(0);
+    for (const allowedRead of firstStructured.data.trustContract.allowedNextReads) {
+      expect(allowedRead.path).toMatch(/\.(ts|tsx|js|jsx|py)$/);
+      expect(allowedRead.reason.length).toBeGreaterThan(10);
+      expect(['high', 'medium', 'low']).toContain(allowedRead.readPriority);
+    }
+    expect(firstStructured.data.trustContract.discouragedReads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pattern: expect.stringMatching(/Grep|Glob|whole repo/i),
+          reason: expect.any(String),
+        }),
+      ]),
+    );
 
     const second = await server.handlers.get('get_context_pack')!({
       query: 'login',
@@ -182,6 +196,9 @@ describe('MCP context pack ledger integration', () => {
     expect(secondStructured.data.sessionId).toBe('session-login');
     expect(secondStructured.data.repeatedContext.omitted).toBe(true);
     expect(secondStructured.data.repeatedContext.repeatedChunks).toBeGreaterThan(0);
+    expect(secondStructured.data.repeatedContext.repeatedFiles).toBeGreaterThan(0);
+    expect(secondStructured.data.repeatedContext.newChunks).toBeLessThan(firstStructured.data.trustContract.exactSnippets.length + secondStructured.data.repeatedContext.repeatedChunks);
+    expect(secondStructured.data.repeatedContext.repeatedPenalty).toBeGreaterThanOrEqual(0.5);
     expect(getContextLedgerEntries('session-login')).toHaveLength(2);
   });
 

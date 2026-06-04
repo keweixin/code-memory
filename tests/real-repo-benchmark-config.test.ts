@@ -15,6 +15,7 @@ interface RealRepoBenchmarkConfig {
   repo: string;
   commit: string;
   languageProfile: string[];
+  sparsePaths: string[];
   minimumMetrics: {
     realRepoKeyFileRecall: number;
     realRepoEvidenceCoverage: number;
@@ -42,6 +43,8 @@ describe('real repo benchmark config', () => {
       expect(config.repo).toMatch(/^https:\/\/github\.com\/.+\.git$/);
       expect(config.commit).toMatch(/^[a-f0-9]{40}$/);
       expect(config.languageProfile.length).toBeGreaterThan(0);
+      expect(config.sparsePaths.length).toBeGreaterThan(0);
+      expect(config.sparsePaths).toEqual(expect.arrayContaining(config.tasks.flatMap((task) => task.expectedFiles)));
       expect(config.minimumMetrics.realRepoKeyFileRecall).toBeGreaterThanOrEqual(0.85);
       expect(config.minimumMetrics.realRepoEvidenceCoverage).toBeGreaterThanOrEqual(0.9);
       expect(config.minimumMetrics.relatedTestRecall).toBeGreaterThanOrEqual(0.75);
@@ -72,14 +75,32 @@ describe('real repo benchmark config', () => {
   it('keeps primary benchmark metrics sourced from structured tool fields only', () => {
     const script = readFileSync(join(process.cwd(), 'tools', 'benchmark-real-repos.mjs'), 'utf8');
 
-    expect(script).toContain('collectStructuredFacts(structuredResults)');
+    expect(script).toContain('collectStructuredFacts(structuredResults.map((item) => item.result))');
     expect(script).toContain('structuredResultCoverage');
     expect(script).toContain('textOnlyHitRate');
+    expect(script).toContain("if (key === 'display') continue;");
     expect(script).toContain('const foundFiles = task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.paths, file));');
     expect(script).toContain('const foundSymbols = task.expectedSymbols.filter((symbol) => containsStringValue(structuredFacts.symbols, symbol));');
+    expect(script).toContain('const staleCheckedResults = structuredResults.filter(({ toolName }) => !isProjectManagementTool(toolName));');
+    expect(script).toContain('function isProjectManagementTool(toolName)');
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.latest.json')");
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.summary.md')");
+    expect(script).toContain('sanitizeBenchmarkArtifact(output)');
+    expect(script).toContain("workRoot: '<benchmark-workdir>'");
     expect(script).not.toContain('const foundFiles = task.expectedFiles.filter((file) => textContainsPath(combinedText, file));');
     expect(script).not.toContain('const foundSymbols = task.expectedSymbols.filter((symbol) => combinedText.includes(symbol));');
+  });
+
+  it('keeps full benchmark execution bounded and reproducible', () => {
+    const script = readFileSync(join(process.cwd(), 'tools', 'benchmark-real-repos.mjs'), 'utf8');
+
+    expect(script).toContain("options.commandTimeoutMinutes ?? options.timeoutMinutes ?? 45");
+    expect(script).toContain('sparse-checkout');
+    expect(script).toContain("['sparse-checkout', 'set', '--no-cone', ...sparsePaths]");
+    expect(script).toContain("['fetch', '--depth', '1', '--filter=blob:none', 'origin', repo.commit]");
+    expect(script).toContain("['checkout', '--force', 'FETCH_HEAD']");
+    expect(script).toContain("[real-repos] ${new Date().toISOString()} start:");
+    expect(script).toContain("[real-repos] ${new Date().toISOString()} done:");
+    expect(script).not.toContain("['clone', '--filter=blob:none', '--no-checkout'");
   });
 });

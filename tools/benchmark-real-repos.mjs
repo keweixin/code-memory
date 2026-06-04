@@ -16,6 +16,7 @@ const taskFilter = String(options.task ?? 'all');
 const embedding = String(options.embedding ?? 'none');
 const workers = String(options.workers ?? 'auto');
 const limit = String(options.limit ?? '20');
+const commandTimeoutMinutes = Number(options.commandTimeoutMinutes ?? options.timeoutMinutes ?? 45);
 const dryRun = Boolean(options.dryRun);
 const keep = Boolean(options.keep);
 const failOnThreshold = Boolean(options.failOnThreshold);
@@ -45,6 +46,7 @@ if (dryRun) {
       repo: repo.repo,
       commit: repo.commit,
       languageProfile: repo.languageProfile,
+      sparsePaths: repo.sparsePaths ?? [],
       taskIds: repo.tasks.map((task) => task.id),
       minimumMetrics: repo.minimumMetrics,
     })),
@@ -120,8 +122,21 @@ try {
 
 function writeBenchmarkArtifacts(output, dir) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'real-repos.latest.json'), JSON.stringify(output, null, 2) + '\n', 'utf8');
-  writeFileSync(join(dir, 'real-repos.summary.md'), formatBenchmarkSummary(output), 'utf8');
+  const artifact = sanitizeBenchmarkArtifact(output);
+  writeFileSync(join(dir, 'real-repos.latest.json'), JSON.stringify(artifact, null, 2) + '\n', 'utf8');
+  writeFileSync(join(dir, 'real-repos.summary.md'), formatBenchmarkSummary(artifact), 'utf8');
+}
+
+function sanitizeBenchmarkArtifact(output) {
+  return {
+    ...output,
+    configPath: 'benchmark/real-repos.json',
+    workRoot: '<benchmark-workdir>',
+    repos: output.repos.map((repo) => ({
+      ...repo,
+      projectRoot: `<benchmark-workdir>/${repo.name}`,
+    })),
+  };
 }
 
 function formatBenchmarkSummary(output) {
@@ -222,10 +237,10 @@ async function runTask(repo, task, projectRoot) {
   const combinedText = outputs.map((output) => output.stdout).join('\n');
   for (const output of outputs) {
     const structured = extractStructuredToolResult(output.stdout);
-    if (structured) structuredResults.push(structured);
+    if (structured) structuredResults.push({ toolName: output.toolName, result: structured });
   }
 
-  const structuredFacts = collectStructuredFacts(structuredResults);
+  const structuredFacts = collectStructuredFacts(structuredResults.map((item) => item.result));
   const foundFiles = task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.paths, file));
   const foundSymbols = task.expectedSymbols.filter((symbol) => containsStringValue(structuredFacts.symbols, symbol));
   const expectedTestFiles = task.expectedFiles.filter((file) => /(^|[/.\\])(?:test|tests|__tests__|spec)([/.\\]|$)|\.(?:test|spec)\./i.test(file));
@@ -238,11 +253,12 @@ async function runTask(repo, task, projectRoot) {
     structuredFacts,
   });
 
-  const wrongProjectRoutes = structuredResults.filter((result) => {
+  const wrongProjectRoutes = structuredResults.filter(({ result }) => {
     const root = result?.project?.root;
     return typeof root === 'string' && normalizePath(root) !== normalizePath(projectRoot);
   }).length;
-  const staleFailures = structuredResults.filter((result) => {
+  const staleCheckedResults = structuredResults.filter(({ toolName }) => !isProjectManagementTool(toolName));
+  const staleFailures = staleCheckedResults.filter(({ result }) => {
     const status = result?.status;
     const indexStatus = result?.freshness?.indexStatus;
     return status === 'stale' || indexStatus === 'stale';
@@ -265,7 +281,7 @@ async function runTask(repo, task, projectRoot) {
       realRepoEvidenceCoverage: ratio(foundSymbols.length, task.expectedSymbols.length),
       relatedTestRecall: expectedTestFiles.length > 0 ? ratio(foundTestFiles.length, expectedTestFiles.length) : null,
       wrongProjectRouteRate: ratio(wrongProjectRoutes, structuredResults.length),
-      staleFailureRate: ratio(staleFailures, structuredResults.length),
+      staleFailureRate: ratio(staleFailures, staleCheckedResults.length),
       structuredResultCoverage: ratio(structuredResults.length, outputs.length),
       textOnlyHitRate,
       allowedNextReadsRecall: ratio(
@@ -286,18 +302,33 @@ async function runTask(repo, task, projectRoot) {
 
 async function prepareRepo(repo, projectRoot) {
   if (existsSync(join(projectRoot, '.git'))) {
-    await run('git', ['fetch', '--depth', '1', 'origin', repo.commit], projectRoot);
-    await run('git', ['checkout', '--force', repo.commit], projectRoot);
+    await configureSparseCheckout(repo, projectRoot);
+    await run('git', ['fetch', '--depth', '1', '--filter=blob:none', 'origin', repo.commit], projectRoot);
+    await run('git', ['checkout', '--force', 'FETCH_HEAD'], projectRoot);
     return;
   }
 
   mkdirSync(dirname(projectRoot), { recursive: true });
-  await run('git', ['clone', '--filter=blob:none', '--no-checkout', repo.repo, projectRoot], repoRoot);
-  await run('git', ['checkout', '--force', repo.commit], projectRoot);
+  mkdirSync(projectRoot, { recursive: true });
+  await run('git', ['init'], projectRoot);
+  await run('git', ['remote', 'add', 'origin', repo.repo], projectRoot);
+  await configureSparseCheckout(repo, projectRoot);
+  await run('git', ['fetch', '--depth', '1', '--filter=blob:none', 'origin', repo.commit], projectRoot);
+  await run('git', ['checkout', '--force', 'FETCH_HEAD'], projectRoot);
+}
+
+async function configureSparseCheckout(repo, projectRoot) {
+  const sparsePaths = Array.isArray(repo.sparsePaths)
+    ? repo.sparsePaths.filter((item) => typeof item === 'string' && item.trim())
+    : [];
+  if (sparsePaths.length === 0) return;
+
+  await run('git', ['sparse-checkout', 'init', '--no-cone'], projectRoot);
+  await run('git', ['sparse-checkout', 'set', '--no-cone', ...sparsePaths], projectRoot);
 }
 
 async function runTool(projectRoot, toolName, args) {
-  return runCli([
+  const output = await runCli([
     'tool',
     toolName,
     '--project',
@@ -305,6 +336,7 @@ async function runTool(projectRoot, toolName, args) {
     '--args',
     JSON.stringify(args),
   ], repoRoot);
+  return { ...output, toolName };
 }
 
 function runCli(args, cwd) {
@@ -313,6 +345,9 @@ function runCli(args, cwd) {
 
 function run(command, args, cwd) {
   return new Promise((resolveRun, reject) => {
+    const started = Date.now();
+    const printable = `${command} ${args.join(' ')}`;
+    console.error(`[real-repos] ${new Date().toISOString()} start: ${printable}`);
     const child = spawn(command, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -323,14 +358,36 @@ function run(command, args, cwd) {
     });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const timeoutMs = Math.max(1, commandTimeoutMinutes) * 60 * 1000;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGTERM');
+      reject(new Error(`${printable} timed out after ${commandTimeoutMinutes} minutes\n${stderr || stdout}`));
+    }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', reject);
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      process.stderr.write(text);
+    });
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const durationSeconds = Math.round((Date.now() - started) / 100) / 10;
       if (code !== 0) {
-        reject(new Error(`${command} ${args.join(' ')} exited ${code}\n${stderr || stdout}`));
+        reject(new Error(`${printable} exited ${code} after ${durationSeconds}s\n${stderr || stdout}`));
         return;
       }
+      console.error(`[real-repos] ${new Date().toISOString()} done: ${printable} (${durationSeconds}s)`);
       resolveRun({ stdout, stderr });
     });
   });
@@ -387,6 +444,13 @@ function checkThresholds(repo, failures) {
       failures.push(`${repo.name} ${metric} ${value} is below ${threshold}`);
     }
   }
+}
+
+function isProjectManagementTool(toolName) {
+  return toolName === 'resolve_project' ||
+    toolName === 'bootstrap_project' ||
+    toolName === 'sync_project' ||
+    toolName === 'register_project';
 }
 
 function averageMetric(tasks, key) {

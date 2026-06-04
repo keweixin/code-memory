@@ -101,6 +101,45 @@ describe('graph edge evidence', () => {
     expect(Number(rows[0]?.[1])).toBe(2);
   });
 
+  it('keeps parser provenance and file-line evidence for call graph edges', async () => {
+    const config = createConfig(tempRoot);
+    const manager = new IndexManager(tempRoot, config);
+
+    await manager.fullIndex();
+
+    const rows = queryRows(
+      `SELECT e.confidence, gee.source_table, gee.source_id, f.path, gee.start_line, gee.evidence
+       FROM edges e
+       JOIN graph_edge_evidence gee ON gee.edge_id = e.id
+       JOIN files f ON f.id = gee.file_id
+       JOIN symbols target ON target.id = e.to_id
+       WHERE e.type = 'CALLS'
+         AND target.name = 'save'
+       ORDER BY gee.start_line`,
+    );
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(Number(row[0])).toBeGreaterThanOrEqual(0.9);
+      expect(row[1]).toBe('call_refs');
+      expect(String(row[2])).toBeTruthy();
+      expect(row[3]).toBe('src/run.ts');
+      expect(Number(row[4])).toBeGreaterThan(0);
+      expect(String(row[5])).toContain('save()');
+    }
+
+    const heuristicCallEdges = queryRows(
+      `SELECT COUNT(*)
+       FROM edges e
+       JOIN graph_edge_evidence gee ON gee.edge_id = e.id
+       JOIN symbols target ON target.id = e.to_id
+       WHERE e.type = 'CALLS'
+         AND target.name = 'save'
+         AND gee.source_table = 'graph_builder'`,
+    );
+    expect(Number(heuristicCallEdges[0]?.[0] ?? 0)).toBe(0);
+  });
+
   it('rolls back graph edge deletion when rebuild flushing fails', async () => {
     const config = createConfig(tempRoot);
     const manager = new IndexManager(tempRoot, config);

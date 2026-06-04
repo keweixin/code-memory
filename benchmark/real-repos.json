@@ -4,6 +4,12 @@
     "repo": "https://github.com/vercel/next.js.git",
     "commit": "02953dc208ca611e16a2026979b84131f5baf0a9",
     "languageProfile": ["typescript", "javascript"],
+    "sparsePaths": [
+      "packages/next/src/server/route-modules/app-route/module.ts",
+      "packages/next/src/server/route-modules/app-route/helpers/",
+      "packages/next/src/server/route-modules/route-module.ts",
+      "test/e2e/app-dir/app-routes/app-custom-routes.test.ts"
+    ],
     "minimumMetrics": {
       "realRepoKeyFileRecall": 0.85,
       "realRepoEvidenceCoverage": 0.9,
@@ -33,6 +39,11 @@
     "repo": "https://github.com/fastapi/fastapi.git",
     "commit": "3d2aace42fdfe34077647e47f3ee9688161e2651",
     "languageProfile": ["python"],
+    "sparsePaths": [
+      "fastapi/routing.py",
+      "tests/test_router.py",
+      "tests/test_ws_router.py"
+    ],
     "minimumMetrics": {
       "realRepoKeyFileRecall": 0.85,
       "realRepoEvidenceCoverage": 0.9,
@@ -62,6 +73,12 @@
     "repo": "https://github.com/expressjs/express.git",
     "commit": "dae209ae6559c29cfca2a1f4414c51d89ea643d5",
     "languageProfile": ["javascript"],
+    "sparsePaths": [
+      "lib/application.js",
+      "lib/express.js",
+      "test/Router.js",
+      "test/app.router.js"
+    ],
     "minimumMetrics": {
       "realRepoKeyFileRecall": 0.85,
       "realRepoEvidenceCoverage": 0.9,
@@ -91,6 +108,12 @@
     "repo": "https://github.com/axios/axios.git",
     "commit": "6bb12c191f5380fad321322fb90216ae0dc36985",
     "languageProfile": ["javascript"],
+    "sparsePaths": [
+      "lib/core/Axios.js",
+      "lib/core/InterceptorManager.js",
+      "lib/core/dispatchRequest.js",
+      "test/specs/core/"
+    ],
     "minimumMetrics": {
       "realRepoKeyFileRecall": 0.85,
       "realRepoEvidenceCoverage": 0.9,

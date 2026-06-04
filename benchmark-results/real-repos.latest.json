@@ -1,0 +1,425 @@
+{
+  "benchmark": "real-repos",
+  "status": "measured",
+  "startedAt": "2026-06-04T13:43:50.815Z",
+  "completedAt": "2026-06-04T13:44:22.933Z",
+  "configPath": "benchmark/real-repos.json",
+  "workRoot": "<benchmark-workdir>",
+  "embedding": "none",
+  "workers": "auto",
+  "repoCount": 4,
+  "taskCount": 8,
+  "metrics": {
+    "realRepoKeyFileRecall": 1,
+    "realRepoEvidenceCoverage": 1,
+    "relatedTestRecall": 1,
+    "wrongProjectRouteRate": 0,
+    "staleFailureRate": 0,
+    "structuredResultCoverage": 1,
+    "textOnlyHitRate": 0,
+    "allowedNextReadsRecall": 0.8125,
+    "exactSnippetCoverage": 0,
+    "fileLineEvidenceCoverage": 0.875
+  },
+  "repos": [
+    {
+      "name": "nextjs",
+      "repo": "https://github.com/vercel/next.js.git",
+      "commit": "02953dc208ca611e16a2026979b84131f5baf0a9",
+      "projectRoot": "<benchmark-workdir>/nextjs",
+      "taskCount": 2,
+      "minimumMetrics": {
+        "realRepoKeyFileRecall": 0.85,
+        "realRepoEvidenceCoverage": 0.9,
+        "relatedTestRecall": 0.75,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0
+      },
+      "metrics": {
+        "realRepoKeyFileRecall": 1,
+        "realRepoEvidenceCoverage": 1,
+        "relatedTestRecall": 1,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0,
+        "structuredResultCoverage": 1,
+        "textOnlyHitRate": 0,
+        "allowedNextReadsRecall": 0.5,
+        "exactSnippetCoverage": 0,
+        "fileLineEvidenceCoverage": 0.5
+      },
+      "tasks": [
+        {
+          "id": "nextjs-app-router-route-handler",
+          "type": "architecture_understanding",
+          "query": "Explain how App Router route handlers are discovered and executed.",
+          "expectedFiles": [
+            "packages/next/src/server/route-modules/app-route/module.ts"
+          ],
+          "expectedSymbols": [
+            "AppRouteRouteModule"
+          ],
+          "foundFiles": [
+            "packages/next/src/server/route-modules/app-route/module.ts"
+          ],
+          "foundSymbols": [
+            "AppRouteRouteModule"
+          ],
+          "expectedTestFiles": [],
+          "foundTestFiles": [],
+          "toolCallCount": 4,
+          "structuredResultCount": 4,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": null,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 1,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        },
+        {
+          "id": "nextjs-related-tests",
+          "type": "related_tests",
+          "query": "Find tests related to route handler behavior.",
+          "expectedFiles": [
+            "test/e2e/app-dir/app-routes/app-custom-routes.test.ts"
+          ],
+          "expectedSymbols": [],
+          "foundFiles": [
+            "test/e2e/app-dir/app-routes/app-custom-routes.test.ts"
+          ],
+          "foundSymbols": [],
+          "expectedTestFiles": [
+            "test/e2e/app-dir/app-routes/app-custom-routes.test.ts"
+          ],
+          "foundTestFiles": [
+            "test/e2e/app-dir/app-routes/app-custom-routes.test.ts"
+          ],
+          "toolCallCount": 4,
+          "structuredResultCount": 4,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": 1,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 0,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "fastapi",
+      "repo": "https://github.com/fastapi/fastapi.git",
+      "commit": "3d2aace42fdfe34077647e47f3ee9688161e2651",
+      "projectRoot": "<benchmark-workdir>/fastapi",
+      "taskCount": 2,
+      "minimumMetrics": {
+        "realRepoKeyFileRecall": 0.85,
+        "realRepoEvidenceCoverage": 0.9,
+        "relatedTestRecall": 0.75,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0
+      },
+      "metrics": {
+        "realRepoKeyFileRecall": 1,
+        "realRepoEvidenceCoverage": 1,
+        "relatedTestRecall": null,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0,
+        "structuredResultCoverage": 1,
+        "textOnlyHitRate": 0,
+        "allowedNextReadsRecall": 1,
+        "exactSnippetCoverage": 0,
+        "fileLineEvidenceCoverage": 1
+      },
+      "tasks": [
+        {
+          "id": "fastapi-apirouter-include-router",
+          "type": "architecture_understanding",
+          "query": "Trace how APIRouter include_router composes routes.",
+          "expectedFiles": [
+            "fastapi/routing.py"
+          ],
+          "expectedSymbols": [
+            "APIRouter",
+            "include_router"
+          ],
+          "foundFiles": [
+            "fastapi/routing.py"
+          ],
+          "foundSymbols": [
+            "APIRouter",
+            "include_router"
+          ],
+          "expectedTestFiles": [],
+          "foundTestFiles": [],
+          "toolCallCount": 5,
+          "structuredResultCount": 5,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": null,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 1,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        },
+        {
+          "id": "fastapi-new-api-parameter",
+          "type": "new_api_parameter",
+          "query": "Assess impact of adding a parameter to APIRouter.include_router.",
+          "expectedFiles": [
+            "fastapi/routing.py"
+          ],
+          "expectedSymbols": [
+            "include_router"
+          ],
+          "foundFiles": [
+            "fastapi/routing.py"
+          ],
+          "foundSymbols": [
+            "include_router"
+          ],
+          "expectedTestFiles": [],
+          "foundTestFiles": [],
+          "toolCallCount": 5,
+          "structuredResultCount": 5,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": null,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 1,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "express",
+      "repo": "https://github.com/expressjs/express.git",
+      "commit": "dae209ae6559c29cfca2a1f4414c51d89ea643d5",
+      "projectRoot": "<benchmark-workdir>/express",
+      "taskCount": 2,
+      "minimumMetrics": {
+        "realRepoKeyFileRecall": 0.85,
+        "realRepoEvidenceCoverage": 0.9,
+        "relatedTestRecall": 0.75,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0
+      },
+      "metrics": {
+        "realRepoKeyFileRecall": 1,
+        "realRepoEvidenceCoverage": 1,
+        "relatedTestRecall": 1,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0,
+        "structuredResultCoverage": 1,
+        "textOnlyHitRate": 0,
+        "allowedNextReadsRecall": 0.75,
+        "exactSnippetCoverage": 0,
+        "fileLineEvidenceCoverage": 1
+      },
+      "tasks": [
+        {
+          "id": "express-router-chain",
+          "type": "impact_analysis",
+          "query": "Find blast radius for changes to router route registration.",
+          "expectedFiles": [
+            "lib/application.js",
+            "test/Router.js"
+          ],
+          "expectedSymbols": [
+            "route",
+            "use"
+          ],
+          "foundFiles": [
+            "lib/application.js",
+            "test/Router.js"
+          ],
+          "foundSymbols": [
+            "route",
+            "use"
+          ],
+          "expectedTestFiles": [
+            "test/Router.js"
+          ],
+          "foundTestFiles": [
+            "test/Router.js"
+          ],
+          "toolCallCount": 6,
+          "structuredResultCount": 6,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": 1,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 1,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        },
+        {
+          "id": "express-bug-location",
+          "type": "bug_location",
+          "query": "Locate where request handlers are dispatched through middleware.",
+          "expectedFiles": [
+            "lib/application.js",
+            "test/app.router.js"
+          ],
+          "expectedSymbols": [
+            "Router",
+            "router"
+          ],
+          "foundFiles": [
+            "lib/application.js",
+            "test/app.router.js"
+          ],
+          "foundSymbols": [
+            "Router",
+            "router"
+          ],
+          "expectedTestFiles": [
+            "test/app.router.js"
+          ],
+          "foundTestFiles": [
+            "test/app.router.js"
+          ],
+          "toolCallCount": 5,
+          "structuredResultCount": 5,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": 1,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 0.5,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "axios",
+      "repo": "https://github.com/axios/axios.git",
+      "commit": "6bb12c191f5380fad321322fb90216ae0dc36985",
+      "projectRoot": "<benchmark-workdir>/axios",
+      "taskCount": 2,
+      "minimumMetrics": {
+        "realRepoKeyFileRecall": 0.85,
+        "realRepoEvidenceCoverage": 0.9,
+        "relatedTestRecall": 0.75,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0
+      },
+      "metrics": {
+        "realRepoKeyFileRecall": 1,
+        "realRepoEvidenceCoverage": 1,
+        "relatedTestRecall": null,
+        "wrongProjectRouteRate": 0,
+        "staleFailureRate": 0,
+        "structuredResultCoverage": 1,
+        "textOnlyHitRate": 0,
+        "allowedNextReadsRecall": 1,
+        "exactSnippetCoverage": 0,
+        "fileLineEvidenceCoverage": 1
+      },
+      "tasks": [
+        {
+          "id": "axios-follow-up-delta",
+          "type": "follow_up_delta",
+          "query": "After seeing request dispatch context, return only new context for interceptors.",
+          "expectedFiles": [
+            "lib/core/Axios.js",
+            "lib/core/InterceptorManager.js"
+          ],
+          "expectedSymbols": [
+            "Axios",
+            "InterceptorManager"
+          ],
+          "foundFiles": [
+            "lib/core/Axios.js",
+            "lib/core/InterceptorManager.js"
+          ],
+          "foundSymbols": [
+            "Axios",
+            "InterceptorManager"
+          ],
+          "expectedTestFiles": [],
+          "foundTestFiles": [],
+          "toolCallCount": 7,
+          "structuredResultCount": 7,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": null,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 1,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        },
+        {
+          "id": "axios-stale-sync",
+          "type": "stale_sync",
+          "query": "Detect stale evidence after modifying request dispatch files.",
+          "expectedFiles": [
+            "lib/core/dispatchRequest.js"
+          ],
+          "expectedSymbols": [
+            "dispatchRequest"
+          ],
+          "foundFiles": [
+            "lib/core/dispatchRequest.js"
+          ],
+          "foundSymbols": [
+            "dispatchRequest"
+          ],
+          "expectedTestFiles": [],
+          "foundTestFiles": [],
+          "toolCallCount": 5,
+          "structuredResultCount": 5,
+          "metrics": {
+            "realRepoKeyFileRecall": 1,
+            "realRepoEvidenceCoverage": 1,
+            "relatedTestRecall": null,
+            "wrongProjectRouteRate": 0,
+            "staleFailureRate": 0,
+            "structuredResultCoverage": 1,
+            "textOnlyHitRate": 0,
+            "allowedNextReadsRecall": 1,
+            "exactSnippetCoverage": 0,
+            "fileLineEvidenceCoverage": 1
+          }
+        }
+      ]
+    }
+  ],
+  "failures": []
+}
