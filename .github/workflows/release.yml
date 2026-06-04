@@ -56,18 +56,25 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is required for release publishing." >&2
-            exit 1
-          fi
           PACKAGE_NAME="$(node -p "require('./package.json').name")"
           VERSION="$(node -p "require('./package.json').version")"
           if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
             echo "$PACKAGE_NAME@$VERSION is already published; skipping npm publish."
           else
+            if [ -z "$NODE_AUTH_TOKEN" ]; then
+              echo "NPM_TOKEN is required to publish $PACKAGE_NAME@$VERSION." >&2
+              exit 1
+            fi
             npm publish --access public --provenance
           fi
-          npm dist-tag add "$PACKAGE_NAME@$VERSION" latest --registry=https://registry.npmjs.org
+          CURRENT_LATEST="$(npm view "$PACKAGE_NAME" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
+          if [ "$CURRENT_LATEST" != "$VERSION" ]; then
+            if [ -z "$NODE_AUTH_TOKEN" ]; then
+              echo "NPM_TOKEN is required to move latest from '${CURRENT_LATEST:-unavailable}' to $VERSION." >&2
+              exit 1
+            fi
+            npm dist-tag add "$PACKAGE_NAME@$VERSION" latest --registry=https://registry.npmjs.org
+          fi
           for attempt in 1 2 3 4 5 6; do
             LATEST="$(npm view "$PACKAGE_NAME" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
             if [ "$LATEST" = "$VERSION" ]; then
