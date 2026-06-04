@@ -45,6 +45,7 @@ import {
   getFileExportsByFileIds,
   getRouteEndpointsByFileIds,
   getRouteReferencesByFileIds,
+  materializeImportEntries,
   getScopeBindingsByFileIds,
   getTypeRelationsByFileIds,
   type StoredCallRefRow,
@@ -93,6 +94,8 @@ interface ImportResolution {
   symbolsByName: Map<string, SymbolRecord[]>;
   namespaceSymbolsByName: Map<string, Map<string, SymbolRecord[]>>;
 }
+
+type MaterializedImportEntry = ReturnType<typeof materializeImportEntries>[number];
 
 const AUTO_WORKER_CAP = 8;
 
@@ -1503,9 +1506,12 @@ export class IndexManager {
     for (const imp of imports) {
       const importedFile = this.resolveImportTarget(importer, imp.source, filesByPath);
       if (!importedFile) continue;
+      const importEntries = materializeImportEntries(importer.id, imp);
+      const importSourceId = this.getImportEntrySourceId(importEntries);
 
       edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'IMPORTS', 0.95, imp.source, {
         sourceTable: 'file_imports',
+        sourceId: importSourceId,
         fileId: importer.id,
         startLine: imp.startLine ?? 0,
         startColumn: imp.startColumn ?? 0,
@@ -1513,6 +1519,7 @@ export class IndexManager {
       if (importer.role === 'test' && importedFile.role !== 'test') {
         edgeCount += this.upsertGraphEdge(importer.id, importedFile.id, 'TESTS', 0.8, imp.source, {
           sourceTable: 'file_imports',
+          sourceId: importSourceId,
           fileId: importer.id,
           startLine: imp.startLine ?? 0,
           startColumn: imp.startColumn ?? 0,
@@ -1549,6 +1556,7 @@ export class IndexManager {
             ...importedSymbol.resolutionNames,
           ]),
         ];
+        const symbolImportSourceId = this.getImportEntrySourceId(importEntries, resolutionNames);
         if (!imp.isTypeOnly) {
           for (const resolutionName of resolutionNames) {
             const current = symbolsByName.get(resolutionName) || [];
@@ -1558,6 +1566,7 @@ export class IndexManager {
         }
         edgeCount += this.upsertGraphEdge(importer.id, symbol.id, 'REFERENCES', 0.75, imp.source, {
           sourceTable: 'file_imports',
+          sourceId: symbolImportSourceId,
           fileId: importer.id,
           startLine: imp.startLine ?? 0,
           startColumn: imp.startColumn ?? 0,
@@ -1566,6 +1575,7 @@ export class IndexManager {
           for (const testSymbol of localTestSymbols) {
             edgeCount += this.upsertGraphEdge(testSymbol.id, symbol.id, 'TESTS', 0.82, imp.source, {
               sourceTable: 'file_imports',
+              sourceId: symbolImportSourceId,
               fileId: importer.id,
               startLine: imp.startLine ?? 0,
               startColumn: imp.startColumn ?? 0,
@@ -1576,6 +1586,21 @@ export class IndexManager {
     }
 
     return { edgeCount, symbolsByName, namespaceSymbolsByName };
+  }
+
+  private getImportEntrySourceId(
+    importEntries: MaterializedImportEntry[],
+    resolutionNames: string[] = [],
+  ): string | null {
+    if (importEntries.length === 0) return null;
+    if (resolutionNames.length === 0) return importEntries[0]?.id ?? null;
+
+    const names = new Set(resolutionNames);
+    const matched = importEntries.find((entry) =>
+      (entry.importedName !== null && names.has(entry.importedName))
+      || (entry.localName !== null && names.has(entry.localName)),
+    );
+    return matched?.id ?? importEntries[0]?.id ?? null;
   }
 
   private getNamespaceBindingLocalNames(

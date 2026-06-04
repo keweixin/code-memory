@@ -140,6 +140,35 @@ describe('graph edge evidence', () => {
     expect(Number(heuristicCallEdges[0]?.[0] ?? 0)).toBe(0);
   });
 
+  it('links import graph evidence back to the exact file_imports row', async () => {
+    const config = createConfig(tempRoot);
+    const manager = new IndexManager(tempRoot, config);
+
+    await manager.fullIndex();
+
+    const rows = queryRows(
+      `SELECT e.confidence, gee.source_table, gee.source_id, f.path, gee.start_line, gee.evidence, fi.source
+       FROM edges e
+       JOIN graph_edge_evidence gee ON gee.edge_id = e.id
+       JOIN files f ON f.id = gee.file_id
+       LEFT JOIN file_imports fi ON fi.id = gee.source_id
+       WHERE e.type = 'IMPORTS'
+       ORDER BY f.path, gee.start_line`,
+    );
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(Number(row[0])).toBeGreaterThanOrEqual(0.9);
+      expect(row[1]).toBe('file_imports');
+      expect(row[2]).toEqual(expect.any(String));
+      expect(row[2]).not.toBe('');
+      expect(row[3]).toBe('src/run.ts');
+      expect(Number(row[4])).toBeGreaterThan(0);
+      expect(String(row[5])).toBe('./helpers.js');
+      expect(row[6]).toBe('./helpers.js');
+    }
+  });
+
   it('rolls back graph edge deletion when rebuild flushing fails', async () => {
     const config = createConfig(tempRoot);
     const manager = new IndexManager(tempRoot, config);

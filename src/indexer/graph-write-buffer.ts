@@ -38,14 +38,6 @@ export interface GraphEdgeEvidenceMeta {
   startColumn?: number | null;
 }
 
-export interface GraphEdgeEvidenceMeta {
-  sourceTable?: string | null;
-  sourceId?: string | null;
-  fileId?: string | null;
-  startLine?: number | null;
-  startColumn?: number | null;
-}
-
 interface PendingGraphWrite {
   edge: EdgeRecord;
   evidence: GraphEdgeEvidenceInput;

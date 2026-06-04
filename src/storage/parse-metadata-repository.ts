@@ -15,6 +15,7 @@ import { generateId } from '../shared/utils.js';
 import { getDatabaseSync } from './database.js';
 
 export interface StoredImportRow {
+  id: string;
   file_id: string;
   source: string;
   imported_name: string | null;
@@ -343,7 +344,7 @@ function getRowsByFileIds<T>(table: string, fileIds?: string[]): T[] {
   return db.all<T>(`SELECT * FROM ${table} WHERE file_id IN (${placeholders})`, fileIds);
 }
 
-function materializeImportEntries(fileId: string, imp: ImportInfo): Array<{
+export function materializeImportEntries(fileId: string, imp: ImportInfo): Array<{
   id: string;
   importedName: string | null;
   localName: string | null;
