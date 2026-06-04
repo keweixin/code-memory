@@ -39,24 +39,27 @@ export function registerSetupCommand(program: Command): void {
         const projectRoot = resolveProjectPath(options);
         const runtime = options.runtime as RuntimeName;
         const printConfig = options.printConfig as AgentSelector | undefined;
-        if (options.bootstrap !== false && !options.dryRun && !printConfig) {
-          await bootstrapProject({ project: projectRoot, embedding: 'none', workers: 'auto' });
-        }
-        const registeredRepo = !options.dryRun && !printConfig
-          ? registerRepo(projectRoot)
-          : null;
-        const changes = setupAgents({
+        const agentOptions = {
           agent: (printConfig ?? options.agent) as AgentSelector,
           all: Boolean(options.all),
           projectRoot,
           runtime,
           bindProject: Boolean(options.bindProject),
-          dryRun: Boolean(options.dryRun) || Boolean(printConfig),
-        });
+        };
+        const plannedAgentChanges = setupAgents({ ...agentOptions, dryRun: true });
         if (printConfig) {
-          console.log(formatAgentChanges(changes, true));
+          console.log(formatAgentChanges(plannedAgentChanges, true));
           return;
         }
+        if (options.bootstrap !== false && !options.dryRun) {
+          await bootstrapProject({ project: projectRoot, embedding: 'none', workers: 'auto' });
+        }
+        const changes = options.dryRun
+          ? plannedAgentChanges
+          : setupAgents({ ...agentOptions, dryRun: false });
+        const registeredRepo = !options.dryRun
+          ? registerRepo(projectRoot)
+          : null;
         const onboardingChanges = setupProjectOnboarding({
           projectRoot,
           dryRun: Boolean(options.dryRun),

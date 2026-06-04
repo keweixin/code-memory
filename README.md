@@ -40,6 +40,8 @@ Reload your IDE after setup. The generated MCP config starts a global router, so
 | `gemini` | `.gemini/settings.json` |
 | `opencode` | `opencode.json` |
 
+Use an explicit `--agent` for first-run setup. `--agent auto` only succeeds when exactly one supported agent config already exists; if none or multiple are detected, setup prints candidate commands instead of silently choosing the wrong target.
+
 The default runtime is `npx`, which avoids global installs:
 
 ```json

@@ -75,13 +75,32 @@ export function formatAgentChanges(changes: AgentConfigChange[], dryRun: boolean
 
 function getTargetAgents(options: AgentConfigOptions): AgentName[] {
   if (options.all) return SUPPORTED_AGENTS;
-  if (options.agent === 'auto') return detectAgents(options);
+  if (options.agent === 'auto') return selectAutoAgent(options);
   return [options.agent || 'codex'];
 }
 
 function detectAgents(options: AgentConfigOptions): AgentName[] {
-  const detected = SUPPORTED_AGENTS.filter((agent) => existsSync(getAgentConfigPath(agent, options)));
-  return detected.length > 0 ? detected : ['codex'];
+  return SUPPORTED_AGENTS.filter((agent) => existsSync(getAgentConfigPath(agent, options)));
+}
+
+function selectAutoAgent(options: AgentConfigOptions): AgentName[] {
+  const detected = detectAgents(options);
+  if (detected.length === 1) return detected;
+  if (detected.length > 1) {
+    throw new Error([
+      '--agent auto detected multiple agent configs: ' + detected.join(', '),
+      'Choose one explicitly with --agent <agent>, or use --all to configure every supported agent.',
+    ].join('\n'));
+  }
+
+  const projectRoot = getProjectRoot(options);
+  throw new Error([
+    '--agent auto could not detect an existing supported agent config.',
+    'Choose one explicitly:',
+    ...SUPPORTED_AGENTS.map((agent) => '  code-memory setup --agent ' + agent + ' --project ' + JSON.stringify(projectRoot)),
+    'Or configure all supported agents:',
+    '  code-memory setup --all --project ' + JSON.stringify(projectRoot),
+  ].join('\n'));
 }
 
 function getHomeDir(options: AgentConfigOptions): string {

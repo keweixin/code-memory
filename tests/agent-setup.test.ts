@@ -89,6 +89,45 @@ describe('agent setup and uninstall', () => {
     expect(changes[0].after).not.toContain('CODE_MEMORY_PROJECT');
   });
 
+  it('does not silently fallback when --agent auto cannot detect an agent', () => {
+    expect(() => setupAgents({
+      agent: 'auto',
+      dryRun: true,
+      projectRoot: tempRoot,
+      homeDir,
+    })).toThrow(/--agent auto could not detect an existing supported agent config/);
+  });
+
+  it('uses the single detected agent config for --agent auto', () => {
+    mkdirSync(join(tempRoot, '.cursor'), { recursive: true });
+    writeFileSync(join(tempRoot, '.cursor', 'mcp.json'), '{}\n', 'utf-8');
+
+    const changes = setupAgents({
+      agent: 'auto',
+      dryRun: true,
+      projectRoot: tempRoot,
+      homeDir,
+    });
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0].agent).toBe('cursor');
+    expect(changes[0].filePath).toBe(join(tempRoot, '.cursor', 'mcp.json'));
+  });
+
+  it('requires an explicit choice when --agent auto detects multiple agents', () => {
+    mkdirSync(join(tempRoot, '.cursor'), { recursive: true });
+    mkdirSync(join(homeDir, '.codex'), { recursive: true });
+    writeFileSync(join(tempRoot, '.cursor', 'mcp.json'), '{}\n', 'utf-8');
+    writeFileSync(join(homeDir, '.codex', 'config.toml'), '# existing codex config\n', 'utf-8');
+
+    expect(() => setupAgents({
+      agent: 'auto',
+      dryRun: true,
+      projectRoot: tempRoot,
+      homeDir,
+    })).toThrow(/--agent auto detected multiple agent configs: cursor, codex|--agent auto detected multiple agent configs: codex, cursor/);
+  });
+
   it('is idempotent for markdown marker blocks and uninstall only removes code-memory content', () => {
     writeFileSync(join(tempRoot, 'CLAUDE.md'), '# Project\n\nKeep this line.\n', 'utf-8');
 

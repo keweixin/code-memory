@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createCli } from '../src/cli/cli.js';
@@ -13,11 +13,13 @@ describe('CLI --project routing', () => {
   let originalCwd: string;
   let originalHome: string | undefined;
   let originalGlobalHome: string | undefined;
+  let originalTestHome: string | undefined;
 
   beforeEach(() => {
     originalCwd = process.cwd();
     originalHome = process.env.CODE_MEMORY_HOME;
     originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
+    originalTestHome = process.env.CODE_MEMORY_TEST_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-project-path-'));
     projectRoot = join(tempRoot, 'target-project');
     otherRoot = join(tempRoot, 'other-cwd');
@@ -36,6 +38,7 @@ describe('CLI --project routing', () => {
     );
     process.env.CODE_MEMORY_HOME = homeDir;
     process.env.CODE_MEMORY_GLOBAL_HOME = homeDir;
+    process.env.CODE_MEMORY_TEST_HOME = homeDir;
     process.chdir(otherRoot);
   });
 
@@ -50,6 +53,11 @@ describe('CLI --project routing', () => {
       delete process.env.CODE_MEMORY_GLOBAL_HOME;
     } else {
       process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
+    }
+    if (originalTestHome === undefined) {
+      delete process.env.CODE_MEMORY_TEST_HOME;
+    } else {
+      process.env.CODE_MEMORY_TEST_HOME = originalTestHome;
     }
     vi.restoreAllMocks();
     rmSync(tempRoot, { recursive: true, force: true });
@@ -145,6 +153,57 @@ describe('CLI --project routing', () => {
     };
     expect(cleanedConfig.mcpServers['code-memory']).toBeUndefined();
     expect(readFileSync(join(projectRoot, 'AGENTS.md'), 'utf-8')).not.toContain('CODE_MEMORY_CONTEXT_START');
+  });
+
+  it('setup --agent auto fails clearly without registering when no agent config is detected', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null | undefined) => {
+      throw new Error('process.exit ' + String(code));
+    });
+    const program = createCli();
+    program.exitOverride();
+
+    await expect(program.parseAsync([
+      'node',
+      'code-memory',
+      'setup',
+      '--agent',
+      'auto',
+      '--project',
+      projectRoot,
+      '--no-bootstrap',
+      '--no-context',
+      '--no-skills',
+      '--no-hooks',
+    ])).rejects.toThrow(/process\.exit 1/);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(existsSync(getRegistryPath())).toBe(false);
+  });
+
+  it('setup --print-config prints config without bootstrapping, registering, or writing files', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const program = createCli();
+    program.exitOverride();
+
+    await program.parseAsync([
+      'node',
+      'code-memory',
+      'setup',
+      '--print-config',
+      'cursor',
+      '--project',
+      projectRoot,
+    ]);
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(output).toContain('Code Memory setup dry run');
+    expect(output).toContain('"command": "npx"');
+    expect(output).toContain('"@keweixin/code-memory@latest"');
+    expect(output).toContain('"--auto-project"');
+    expect(output).toContain('"CODE_MEMORY_PROJECT": "' + projectRoot.replace(/\\/g, '\\\\') + '"');
+    expect(existsSync(join(projectRoot, '.cursor', 'mcp.json'))).toBe(false);
+    expect(existsSync(join(projectRoot, '.code-memory', 'index.db'))).toBe(false);
+    expect(existsSync(getRegistryPath())).toBe(false);
   });
 
   it('wiki --project checks the explicit project instead of cwd', async () => {

@@ -10,6 +10,8 @@ Supported agents:
 | Gemini | `setup --agent gemini --project .` |
 | OpenCode | `setup --agent opencode --project .` |
 
+Use `--agent auto` only after an agent config already exists. Auto-detection succeeds when exactly one supported config is found; if none or multiple are found, setup prints explicit commands and stops without registering or writing partial config.
+
 Runtime options:
 
 | Runtime | MCP command |
