@@ -98,6 +98,9 @@ describe('real repo benchmark config', () => {
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.summary.md')");
     expect(script).toContain('sanitizeBenchmarkArtifact(output)');
     expect(script).toContain("workRoot: '<benchmark-workdir>'");
+    expect(script).toContain('if (options.help)');
+    expect(script).toContain('function formatHelp()');
+    expect(script).toContain('Show this help without running the benchmark.');
     expect(script).not.toContain('const foundFiles = task.expectedFiles.filter((file) => textContainsPath(combinedText, file));');
     expect(script).not.toContain('const foundSymbols = task.expectedSymbols.filter((symbol) => combinedText.includes(symbol));');
   });

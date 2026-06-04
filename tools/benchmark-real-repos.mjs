@@ -10,6 +10,11 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliPath = join(repoRoot, 'dist', 'index.js');
 
 const options = parseArgs(process.argv.slice(2));
+if (options.help) {
+  console.log(formatHelp());
+  process.exit(0);
+}
+
 const configPath = resolve(repoRoot, String(options.config ?? 'benchmark/real-repos.json'));
 const repoFilter = String(options.repo ?? 'all');
 const taskFilter = String(options.task ?? 'all');
@@ -727,6 +732,25 @@ function parseArgs(args) {
     }
   }
   return parsed;
+}
+
+function formatHelp() {
+  return [
+    'Usage: npm run benchmark:real-repos -- [options]',
+    '',
+    'Options:',
+    '  --dry-run                         Validate config and print selected repos without cloning.',
+    '  --fail-on-threshold               Exit non-zero when global thresholds fail.',
+    '  --repo <name|all>                 Run one configured repo (default: all).',
+    '  --task <id|all>                   Run one configured task (default: all).',
+    '  --embedding <provider>            Embedding provider for bootstrap (default: none).',
+    '  --workers <count|auto>            Index workers for bootstrap (default: auto).',
+    '  --work-dir <path>                 Reuse a working directory instead of a temp dir.',
+    '  --output-dir <path>               Artifact output directory (default: benchmark-results).',
+    '  --keep                            Keep the temporary work directory.',
+    '  --timeout-minutes <minutes>       Per-command timeout (default: 45).',
+    '  --help                            Show this help without running the benchmark.',
+  ].join('\n');
 }
 
 function numberEnv(name, fallback) {
