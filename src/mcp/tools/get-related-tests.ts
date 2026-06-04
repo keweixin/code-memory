@@ -15,6 +15,7 @@ import { resolveTargetNode } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-related-tests");
@@ -49,43 +50,72 @@ export function registerGetRelatedTestsTool(server: McpServer, db?: SqlJsDatabas
     },
     async ({ target, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const testResults = findRelatedTests(activeDb, activeGraphEngine, target);
 
           if (testResults.length === 0) {
+            const display = wrapWithStaleBanner("No related tests found for: " + target + ".", activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner("No related tests found for: " + target + ".", activeDb),
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  {
+                    target,
+                    resultCount: 0,
+                    tests: testResults,
+                  },
+                  display,
+                  {
+                    tool: "search_code",
+                    reason: "No related tests were found. Search code for the target to identify nearby test seams.",
+                  },
+                )),
               }],
             };
           }
 
-          const text = formatTestResults(target, testResults);
+          const text = wrapWithStaleBanner(formatTestResults(target, testResults), activeDb);
           log.info("Found " + testResults.length + " related tests for: " + target);
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  target,
+                  resultCount: testResults.length,
+                  tests: testResults,
+                  runCommand: "npx vitest run " + testResults.map((test) => test.filePath).join(" "),
+                },
+                text,
+                {
+                  command: "npx vitest run " + testResults.map((test) => test.filePath).join(" "),
+                  reason: "Run the related tests after editing the target code.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error("Get related tests failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Get related tests failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { target },
+              wrapWithStaleBanner("Error: Get related tests failed - " + errorMsg, db),
+            )),
+          }],
           isError: true,
         };
       }

@@ -68,4 +68,18 @@ describe('real repo benchmark config', () => {
       'stale_sync',
     ]));
   });
+
+  it('keeps primary benchmark metrics sourced from structured tool fields only', () => {
+    const script = readFileSync(join(process.cwd(), 'tools', 'benchmark-real-repos.mjs'), 'utf8');
+
+    expect(script).toContain('collectStructuredFacts(structuredResults)');
+    expect(script).toContain('structuredResultCoverage');
+    expect(script).toContain('textOnlyHitRate');
+    expect(script).toContain('const foundFiles = task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.paths, file));');
+    expect(script).toContain('const foundSymbols = task.expectedSymbols.filter((symbol) => containsStringValue(structuredFacts.symbols, symbol));');
+    expect(script).toContain("writeFileSync(join(dir, 'real-repos.latest.json')");
+    expect(script).toContain("writeFileSync(join(dir, 'real-repos.summary.md')");
+    expect(script).not.toContain('const foundFiles = task.expectedFiles.filter((file) => textContainsPath(combinedText, file));');
+    expect(script).not.toContain('const foundSymbols = task.expectedSymbols.filter((symbol) => combinedText.includes(symbol));');
+  });
 });

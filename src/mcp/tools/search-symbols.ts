@@ -15,6 +15,11 @@ import { HybridSearchEngine } from "../../search/hybrid-search.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:search-symbols");
@@ -60,7 +65,7 @@ export function registerSearchSymbolsTool(server: McpServer, db?: SqlJsDatabase)
     },
     async ({ query, kind, limit, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeSearchEngine = searchEngine && activeDb === db
             ? searchEngine
             : new HybridSearchEngine(activeDb);
@@ -71,16 +76,53 @@ export function registerSearchSymbolsTool(server: McpServer, db?: SqlJsDatabase)
 
           if (results.length === 0) {
             const kindMsg = kind ? ` of kind '${kind}'` : "";
+            const display = wrapWithStaleBanner(`No symbols found for "${query}"${kindMsg}.\n\nEnsure the codebase has been indexed with 'code-memory index'.`, activeDb);
             return {
-              content: [{ type: "text" as const, text: wrapWithStaleBanner(`No symbols found for "${query}"${kindMsg}.\n\nEnsure the codebase has been indexed with 'code-memory index'.`, activeDb) }],
+              content: [{
+                type: "text" as const,
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  {
+                    query,
+                    kind: kind ?? null,
+                    resultCount: 0,
+                    results,
+                  },
+                  display,
+                  {
+                    tool: "search_code",
+                    reason: "No symbol results were found. Try search_code or a broader query before reading files directly.",
+                  },
+                )),
+              }],
             };
           }
 
-          const text = formatSymbolResults(query, kind, results);
+          const text = wrapWithStaleBanner(formatSymbolResults(query, kind, results), activeDb);
           log.info(`Symbol search "${query}" returned ${results.length} results`);
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  query,
+                  kind: kind ?? null,
+                  resultCount: results.length,
+                  results,
+                },
+                text,
+                {
+                  tool: "find_definition",
+                  reason: "Call find_definition for the specific symbol you plan to inspect or edit.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
@@ -88,10 +130,15 @@ export function registerSearchSymbolsTool(server: McpServer, db?: SqlJsDatabase)
         const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
 
         if (isUninitializedRepo) {
+          const display = wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db);
           return {
             content: [{
               type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { query, kind: kind ?? null },
+                display,
+              )),
             }],
             isError: false,
           };
@@ -99,7 +146,14 @@ export function registerSearchSymbolsTool(server: McpServer, db?: SqlJsDatabase)
 
         log.error(`Symbol search failed: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Symbol search failed - ${errorMsg}`, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { query, kind: kind ?? null },
+              wrapWithStaleBanner(`Error: Symbol search failed - ${errorMsg}`, db),
+            )),
+          }],
           isError: true,
         };
       }

@@ -11,6 +11,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-route-map");
@@ -62,30 +63,50 @@ export function registerGetRouteMapTool(server: McpServer, db?: SqlJsDatabase): 
     },
     async ({ route, includeUnresolved, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const endpoints = loadEndpoints(activeDb, route);
           const references = loadReferences(activeDb, route, Boolean(includeUnresolved));
-          const text = formatRouteMap(endpoints, references);
+          const text = wrapWithStaleBanner(formatRouteMap(endpoints, references), activeDb);
           log.info("Route map: " + endpoints.length + " endpoints, " + references.length + " references");
-          return { content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }] };
-        });
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
           return {
             content: [{
               type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  route: route ?? null,
+                  includeUnresolved: Boolean(includeUnresolved),
+                  endpointCount: endpoints.length,
+                  referenceCount: references.length,
+                  endpoints,
+                  references,
+                },
+                text,
+                {
+                  tool: endpoints.length > 0 ? "get_process" : "get_repo_map",
+                  reason: endpoints.length > 0
+                    ? "Use get_process on a route entry point to inspect execution flow."
+                    : "No endpoints found. Use get_repo_map or re-index after adding route-capable files.",
+                },
+              )),
             }],
-            isError: false,
           };
-        }
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
 
         log.error("Route map failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: route map failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { route: route ?? null, includeUnresolved: Boolean(includeUnresolved) },
+              wrapWithStaleBanner("Error: route map failed - " + errorMsg, db),
+            )),
+          }],
           isError: true,
         };
       }

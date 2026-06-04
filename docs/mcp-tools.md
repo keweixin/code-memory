@@ -24,9 +24,16 @@ Core project/retrieval tools return a structured JSON envelope:
 
 ```ts
 type CodeMemoryToolResult<T> = {
-  status: 'ready' | 'needs_bootstrap' | 'needs_index' | 'stale' | 'error';
+  status: 'ready' | 'needs_bootstrap' | 'needs_index' | 'needs_project_selection' | 'stale' | 'pending' | 'syncing' | 'error';
   project: { root: string; repoName: string; dbPath: string };
-  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  freshness: {
+    indexStatus: string;
+    changedFiles: string[];
+    lastIndexedAt: string | null;
+    watcherActive: boolean;
+    syncing: boolean;
+    recommendedAction: string;
+  };
   data: T;
   nextAction: { tool?: string; command?: string; reason: string };
   display: string;
@@ -43,7 +50,8 @@ After a ready `get_context_pack`, prefer `data.trustContract.allowedNextReads`:
     {
       "path": "src/auth/session.ts",
       "reason": "contains createSession implementation",
-      "maxLines": "12-68"
+      "lineRange": "12-68",
+      "readPriority": "high"
     }
   ],
   "discouragedReads": [
@@ -57,9 +65,11 @@ After a ready `get_context_pack`, prefer `data.trustContract.allowedNextReads`:
 
 Only read outside `allowedNextReads` when confidence is low, freshness is stale, or the returned evidence is insufficient for the task.
 
-`get_context_pack` automatically records context when you pass a stable
-`sessionId`. If you send context manually from `search_code`, resources, or CLI
-output, call `mark_context_used` with the files/symbols/chunks you returned.
+`get_context_pack` automatically records context and returns
+`data.contextPackId`, `data.sessionId`, `data.autoRecorded`, and
+`data.repeatedContext`. Pass a stable `sessionId` for multi-turn delta behavior.
+If you send context manually from `search_code`, resources, or CLI output, call
+`mark_context_used` with the files/symbols/chunks you returned.
 Before sending more context for the same session, call `get_context_delta` or
 `avoid_repeated_context` to prefer new evidence.
 

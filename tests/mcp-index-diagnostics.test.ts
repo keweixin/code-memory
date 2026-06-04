@@ -61,11 +61,48 @@ async function indexFixture(rootPath: string): Promise<void> {
 }
 
 function expectDiagnostics(text: string): void {
+  const structured = parseStructuredResult(text);
+  if (structured) {
+    expect(structured).toHaveProperty('status');
+    expect(structured).toHaveProperty('freshness');
+    expect(structured.freshness).toHaveProperty('indexStatus');
+    expect(structured.freshness).toHaveProperty('changedFiles');
+    expect(structured.freshness).toHaveProperty('recommendedAction');
+    expect(Array.isArray(structured.freshness.changedFiles)).toBe(true);
+    expect(String(structured.freshness.indexStatus).length).toBeGreaterThan(0);
+    expect(String(structured.freshness.recommendedAction).length).toBeGreaterThan(0);
+    return;
+  }
+
   expect(text).toContain('=== Index Diagnostics ===');
   expect(text).toContain('Index status:');
   expect(text).toContain('Schema: v');
   expect(text).toContain('Changed files:');
   expect(text).toContain('Recommended action:');
+}
+
+function parseStructuredResult(text: string): {
+  status?: string;
+  freshness?: {
+    indexStatus?: string;
+    changedFiles?: string[];
+    recommendedAction?: string;
+  };
+  display?: string;
+} | null {
+  try {
+    return JSON.parse(text) as {
+      status?: string;
+      freshness?: {
+        indexStatus?: string;
+        changedFiles?: string[];
+        recommendedAction?: string;
+      };
+      display?: string;
+    };
+  } catch {
+    return null;
+  }
 }
 
 describe('MCP registry index diagnostics', () => {
@@ -97,9 +134,10 @@ describe('MCP registry index diagnostics', () => {
     for (const [toolName, args, expectedBody] of cases) {
       const result = await server.handlers.get(toolName)!(args);
       const text = result.content[0].text;
+      const structured = parseStructuredResult(text);
 
       expectDiagnostics(text);
-      expect(text).toContain(expectedBody);
+      expect(structured?.display ?? text).toContain(expectedBody);
     }
   });
 
@@ -116,8 +154,8 @@ describe('MCP registry index diagnostics', () => {
     const text = result.content[0].text;
 
     expectDiagnostics(text);
-    expect(text.match(/=== Index Diagnostics ===/g)).toHaveLength(1);
     const structured = JSON.parse(text) as { display: string };
+    expect(structured.display.match(/=== Index Diagnostics ===/g)).toHaveLength(1);
     expect(structured.display).toContain('Search results for: "login"');
   });
 
@@ -130,18 +168,20 @@ describe('MCP registry index diagnostics', () => {
 
     const failedResult = await server.handlers.get('get_project_card')!({});
     const failedText = failedResult.content[0].text;
+    const failedStructured = parseStructuredResult(failedText);
 
     expectDiagnostics(failedText);
-    expect(failedText).toContain('Watch sync: failed');
-    expect(failedText).toContain('Last watch error: simulated watch failure');
-    expect(failedText).toContain('Recommended action: inspect watch error and run code-memory sync after fixing it');
+    expect(failedStructured?.status).toBe('stale');
+    expect(failedStructured?.freshness?.indexStatus).toBe('failed');
+    expect(failedStructured?.freshness?.recommendedAction).toBe('inspect watch error and run code-memory sync after fixing it');
 
     await recordWatchSyncSuccess(tempRoot);
 
     const recoveredResult = await server.handlers.get('get_project_card')!({});
     const recoveredText = recoveredResult.content[0].text;
+    const recoveredStructured = parseStructuredResult(recoveredText);
 
-    expect(recoveredText).toContain('Watch sync: ok');
-    expect(recoveredText).toContain('Last watch error: (none)');
+    expect(recoveredStructured?.status).toBe('ready');
+    expect(recoveredStructured?.freshness?.indexStatus).toBe('fresh');
   });
 });

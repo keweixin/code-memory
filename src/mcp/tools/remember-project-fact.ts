@@ -14,6 +14,7 @@ import { createLogger } from "../../shared/logger.js";
 import type { MemoryType, InvalidationRule } from "../../shared/types.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 
 const log = createLogger("mcp:remember-project-fact");
 
@@ -42,10 +43,16 @@ export function registerRememberProjectFactTool(server: McpServer, db?: SqlJsDat
     },
     async ({ content, type, scope, confidence, evidence, invalidateOn, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, _projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           if (!content.trim()) {
             return {
-              content: [{ type: "text" as const, text: "Error: Content cannot be empty." }],
+              content: [{
+                type: "text" as const,
+                text: formatStructuredToolResult(errorToolResult(
+                  "Content cannot be empty.",
+                  { content, type, scope, confidence, evidence, invalidateOn },
+                )),
+              }],
               isError: true,
             };
           }
@@ -89,25 +96,53 @@ export function registerRememberProjectFactTool(server: McpServer, db?: SqlJsDat
 
           log.info("Saved memory: " + id + " (type: " + type + ", rules: " + processedRules.length + ")");
 
+          const data = {
+            id,
+            type,
+            content: content.trim(),
+            scope,
+            evidence: processedEvidence,
+            invalidationRules: processedRules,
+            confidence: Math.min(Math.max(confidence, 0), 1),
+            savedAt: now,
+          };
+          const display = "Memory saved successfully.\n" +
+            "ID: " + id + "\n" +
+            "Type: " + type + "\n" +
+            "Content: " + content.trim() + "\n" +
+            "Scope: " + (scope?.join(', ') || 'none') + "\n" +
+            "Evidence: " + (processedEvidence.join(', ') || 'none') + "\n" +
+            "Auto-invalidation rules: " + processedRules.length + " rule(s)\n" +
+            "Confidence: " + confidence.toFixed(1) + "\n" +
+            "Saved at: " + now;
+
           return {
             content: [{
               type: "text" as const,
-              text: "Memory saved successfully.\n" +
-                "ID: " + id + "\n" +
-                "Type: " + type + "\n" +
-                "Content: " + content.trim() + "\n" +
-                "Scope: " + (scope?.join(', ') || 'none') + "\n" +
-                "Evidence: " + (processedEvidence.join(', ') || 'none') + "\n" +
-                "Auto-invalidation rules: " + processedRules.length + " rule(s)\n" +
-                "Confidence: " + confidence.toFixed(1) + "\n" +
-                "Saved at: " + now,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                data,
+                display,
+                {
+                  tool: "invalidate_memory",
+                  reason: "Use invalidate_memory if this stored fact becomes stale or incorrect.",
+                },
+              )),
             }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text" as const, text: "Error: " + errorMsg }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { content, type, scope, confidence, evidence, invalidateOn },
+            )),
+          }],
           isError: true,
         };
       }

@@ -16,6 +16,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-process");
@@ -59,6 +60,12 @@ interface ProcessStepRow {
   file_path: string | null;
 }
 
+interface LoadedProcess {
+  process: ProcessRow | null;
+  steps: ProcessStepRow[];
+  display: string;
+}
+
 export function registerGetProcessTool(server: McpServer, _db?: SqlJsDatabase): void {
   server.tool(
     "get_process",
@@ -74,30 +81,50 @@ export function registerGetProcessTool(server: McpServer, _db?: SqlJsDatabase): 
     },
     async ({ name, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
-          const text = loadProcess(activeDb, name);
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb, projectRoot, resolution) => {
+          const processResult = loadProcess(activeDb, name);
+          const text = wrapWithStaleBanner(processResult.display, activeDb);
           log.info(`Returned process: ${name}`);
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  name,
+                  found: processResult.process !== null,
+                  process: processResult.process,
+                  steps: processResult.steps,
+                },
+                text,
+                processResult.process
+                  ? {
+                      tool: "get_context_pack",
+                      reason: "Use get_context_pack for source snippets around this process before editing.",
+                    }
+                  : {
+                      tool: "get_repo_map",
+                      reason: "No process matched. Inspect the repo map or use search_symbols to discover entry points.",
+                    },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, _db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error(`Failed to get process: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Failed to get process - ${errorMsg}`, _db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { name },
+              wrapWithStaleBanner(`Error: Failed to get process - ${errorMsg}`, _db),
+            )),
+          }],
           isError: true,
         };
       }
@@ -105,7 +132,7 @@ export function registerGetProcessTool(server: McpServer, _db?: SqlJsDatabase): 
   );
 }
 
-function loadProcess(db: SqlJsDatabase, name: string): string {
+function loadProcess(db: SqlJsDatabase, name: string): LoadedProcess {
   const processes = db.all<ProcessRow>(
     `SELECT id, name, entry_point, entry_kind, framework, depth_limit, step_count, last_indexed
      FROM processes
@@ -116,8 +143,12 @@ function loadProcess(db: SqlJsDatabase, name: string): string {
   );
 
   if (processes.length === 0) {
-    return `No process found with name: ${name}\n` +
-      `Tip: Run \`code-memory index\` to (re)build processes, or use get_route_map / search_symbols to discover entry points.`;
+    return {
+      process: null,
+      steps: [],
+      display: `No process found with name: ${name}\n` +
+        `Tip: Run \`code-memory index\` to (re)build processes, or use get_route_map / search_symbols to discover entry points.`,
+    };
   }
 
   const process = processes[0]!;
@@ -166,5 +197,9 @@ function loadProcess(db: SqlJsDatabase, name: string): string {
     }
   }
 
-  return lines.join("\n");
+  return {
+    process,
+    steps: stepRows,
+    display: lines.join("\n"),
+  };
 }

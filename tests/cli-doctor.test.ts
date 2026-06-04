@@ -82,6 +82,14 @@ describe('CLI doctor command', () => {
     const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     const result = JSON.parse(output) as {
       checks: Array<{ name: string; status: string; message: string }>;
+      config: { exists: boolean; path: string; status: string };
+      index: { exists: boolean; path: string; status: string };
+      schema: { status: string; message: string };
+      registry: { registered: boolean; repoCount: number };
+      watcher: { active: boolean; pendingFiles: string[]; syncing: boolean };
+      staleness: { indexStatus: string; watcherActive: boolean };
+      agentConfig: Record<string, unknown>;
+      repairCommands: string[];
     };
 
     expect(result.checks).toContainEqual({
@@ -103,6 +111,18 @@ describe('CLI doctor command', () => {
       status: 'ok',
       message: 'typescript=stable, javascript=stable',
     });
+    expect(result.config).toMatchObject({ exists: true, status: 'ok' });
+    expect(result.index).toMatchObject({ exists: false, status: 'warn' });
+    expect(result.schema.status).toBeTruthy();
+    expect(result.registry.registered).toBe(false);
+    expect(result.watcher).toMatchObject({ active: false, pendingFiles: [], syncing: false });
+    expect(result.staleness.indexStatus).toBe('missing');
+    expect(result.staleness.watcherActive).toBe(false);
+    expect(result.agentConfig).toHaveProperty('context');
+    expect(result.repairCommands).toEqual(expect.arrayContaining([
+      'code-memory bootstrap --project ' + JSON.stringify(tempRoot),
+      'code-memory setup --project ' + JSON.stringify(tempRoot),
+    ]));
   });
 
   it('reports setup context, skills, and hooks after project onboarding', async () => {

@@ -14,6 +14,11 @@ import { GraphEngine } from "../../graph/graph-engine.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:find-references");
@@ -49,14 +54,30 @@ export function registerFindReferencesTool(server: McpServer, db?: SqlJsDatabase
     },
     async ({ symbolName, maxResults, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const symbolIds = findSymbolIds(activeDb, symbolName);
           if (symbolIds.length === 0) {
+            const display = wrapWithStaleBanner("No symbol found for: " + symbolName + ". Run code-memory index first.", activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner("No symbol found for: " + symbolName + ". Run code-memory index first.", activeDb),
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  {
+                    symbolName,
+                    targetDefinitionCount: 0,
+                    resultCount: 0,
+                    references: [],
+                  },
+                  display,
+                  {
+                    tool: "search_symbols",
+                    reason: "No exact symbol was found. Search symbols to resolve the indexed name.",
+                  },
+                )),
               }],
             };
           }
@@ -64,19 +85,53 @@ export function registerFindReferencesTool(server: McpServer, db?: SqlJsDatabase
           const refs = collectReferences(activeDb, activeGraphEngine, symbolIds, symbolName, Math.min(maxResults, 100));
 
           if (refs.length === 0) {
+            const display = wrapWithStaleBanner("No references found for: " + symbolName + ".", activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner("No references found for: " + symbolName + ".", activeDb),
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  {
+                    symbolName,
+                    targetDefinitionCount: symbolIds.length,
+                    resultCount: 0,
+                    references: refs,
+                  },
+                  display,
+                  {
+                    tool: "impact_analysis",
+                    reason: "No direct references were found. Run impact_analysis before editing shared code.",
+                  },
+                )),
               }],
             };
           }
 
-          const text = formatReferences(symbolName, symbolIds.length, refs);
+          const text = wrapWithStaleBanner(formatReferences(symbolName, symbolIds.length, refs), activeDb);
           log.info("Found " + refs.length + " references for: " + symbolName);
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  symbolName,
+                  targetDefinitionCount: symbolIds.length,
+                  resultCount: refs.length,
+                  references: refs,
+                },
+                text,
+                {
+                  tool: "impact_analysis",
+                  reason: "Use impact_analysis before editing code referenced by these results.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
@@ -84,10 +139,15 @@ export function registerFindReferencesTool(server: McpServer, db?: SqlJsDatabase
         const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
 
         if (isUninitializedRepo) {
+          const display = wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db);
           return {
             content: [{
               type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { symbolName },
+                display,
+              )),
             }],
             isError: false,
           };
@@ -95,7 +155,14 @@ export function registerFindReferencesTool(server: McpServer, db?: SqlJsDatabase
 
         log.error("Find references failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Find references failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { symbolName },
+              wrapWithStaleBanner("Error: Find references failed - " + errorMsg, db),
+            )),
+          }],
           isError: true,
         };
       }

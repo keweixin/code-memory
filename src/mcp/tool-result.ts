@@ -4,7 +4,15 @@ import type { SqlJsDatabase } from '../storage/database.js';
 import { getIndexStaleness, type IndexFreshness } from '../indexer/staleness.js';
 import type { ProjectResolution } from './project-resolver.js';
 
-export type CodeMemoryToolStatus = 'ready' | 'needs_bootstrap' | 'needs_index' | 'stale' | 'error';
+export type CodeMemoryToolStatus =
+  | 'ready'
+  | 'needs_bootstrap'
+  | 'needs_index'
+  | 'needs_project_selection'
+  | 'stale'
+  | 'pending'
+  | 'syncing'
+  | 'error';
 
 export interface CodeMemoryToolResult<T> {
   status: CodeMemoryToolStatus;
@@ -16,6 +24,9 @@ export interface CodeMemoryToolResult<T> {
   freshness: {
     indexStatus: string;
     changedFiles: string[];
+    lastIndexedAt?: string | null;
+    watcherActive?: boolean;
+    syncing?: boolean;
     recommendedAction: string;
   };
   data: T;
@@ -30,6 +41,9 @@ export interface CodeMemoryToolResult<T> {
 export interface ToolFreshnessInput {
   indexStatus: string;
   changedFiles?: string[];
+  lastIndexedAt?: string | null;
+  watcherActive?: boolean;
+  syncing?: boolean;
   recommendedAction?: string | null;
 }
 
@@ -95,6 +109,9 @@ export function toolResultFromProject<T>(
     freshness: {
       indexStatus: freshness.indexStatus,
       changedFiles: freshness.watchLastChangedPaths,
+      lastIndexedAt: freshness.lastIndexedAt,
+      watcherActive: freshness.watcherActive,
+      syncing: freshness.watchState?.syncing ?? false,
       recommendedAction: freshness.recommendedAction,
     },
     data,
@@ -152,6 +169,9 @@ function freshnessFromResolution(resolution: ProjectResolution): ToolFreshnessIn
   return {
     indexStatus: freshness.indexStatus,
     changedFiles: freshness.watchLastChangedPaths,
+    lastIndexedAt: freshness.lastIndexedAt,
+    watcherActive: freshness.watcherActive,
+    syncing: freshness.watchState?.syncing ?? false,
     recommendedAction: freshness.recommendedAction ?? resolution.command ?? resolution.nextAction,
   };
 }
@@ -165,6 +185,7 @@ function toolForResolution(resolution: ProjectResolution): string | undefined {
   if (resolution.status === 'ready') return 'plan_context';
   if (resolution.status === 'stale') return 'sync_project';
   if (resolution.status === 'needs_bootstrap' || resolution.status === 'needs_index') return 'bootstrap_project';
+  if (resolution.status === 'needs_project_selection') return 'resolve_project';
   return 'register_project';
 }
 
@@ -173,6 +194,7 @@ function nextActionReasonFromResolution(resolution: ProjectResolution): string {
   if (resolution.status === 'stale') return 'Index is stale. Run sync_project before trusting old evidence.';
   if (resolution.status === 'needs_index') return 'Config exists but index is missing. Run bootstrap_project or index the project.';
   if (resolution.status === 'needs_bootstrap') return 'Project is missing Code Memory config/index. Run bootstrap_project.';
+  if (resolution.status === 'needs_project_selection') return 'Multiple registered repos match no active workspace. Call resolve_project again with one candidate repo or project.';
   return resolution.reason || 'Project could not be resolved. Register a project or pass repo/project explicitly.';
 }
 
@@ -180,6 +202,9 @@ function normalizeFreshness(input: ToolFreshnessInput): CodeMemoryToolResult<unk
   return {
     indexStatus: input.indexStatus,
     changedFiles: input.changedFiles ?? [],
+    lastIndexedAt: input.lastIndexedAt ?? null,
+    watcherActive: input.watcherActive ?? false,
+    syncing: input.syncing ?? false,
     recommendedAction: input.recommendedAction ?? 'none',
   };
 }

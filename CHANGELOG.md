@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0] - 2026-06-04
+
+### Added
+- Add an internal `WatchRegistry` for `serve --watch` so global `--auto-project` mode can watch an explicit default project without binding to an unrelated cwd
+- Add `needs_project_selection` project resolution status with candidate repo metadata when multiple registry entries are available and no active project identity is known
+- Add a nightly/manual real-repo benchmark workflow with threshold enforcement and uploaded benchmark output
+- Add `CodeMemoryToolResult` envelopes across core MCP tools so `status`, `project`, `freshness`, `data`, `nextAction`, and `display` are machine-parseable
+- Add automatic Context Ledger recording for `get_context_pack`, including returned `contextPackId`, generated/reused `sessionId`, and repeated-context metrics
+- Add richer `get_context_pack.data.trustContract` fields for allowed reads, exact snippets, file-line evidence, discouraged reads, and related tests
+- Add persisted `.code-memory/watch-state.json` with watcher active/pid/sync/pending/error state
+- Add `repair`, `upgrade`, and `clean` lifecycle CLI commands
+- Add package `imports` (`#alias`) resolution for modern Node/TypeScript projects
+- Add real-repo benchmark artifact output under `benchmark-results/real-repos.latest.json` and `benchmark-results/real-repos.summary.md`
+
+### Changed
+- Make `serve --watch --auto-project` bootstrap and watch `--project` or `CODE_MEMORY_PROJECT` before starting the global MCP router, while leaving no-default global servers side-effect free
+- Compute real-repo benchmark primary recall/evidence metrics from structured MCP result fields only; `display`/plain text now contributes only to `textOnlyHitRate`
+- Gate release tags on `npm run benchmark:real-repos -- --dry-run`
+- Extend all structured tool freshness blocks with `lastIndexedAt`, `watcherActive`, and `syncing`
+- Extend `doctor --json` with machine-readable config/index/schema/registry/watcher/staleness/agentConfig/repairCommands sections
+
 ## [0.3.9] - 2026-06-04
 
 ### Added

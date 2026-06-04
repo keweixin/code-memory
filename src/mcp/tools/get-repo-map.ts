@@ -14,6 +14,7 @@ import { createLogger } from "../../shared/logger.js";
 import { estimateTokens } from "../../shared/token-counter.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-repo-map");
@@ -55,30 +56,40 @@ export function registerGetRepoMapTool(server: McpServer, _db?: SqlJsDatabase): 
     },
     async ({ tokenBudget, directory, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
-          const mapText = buildRepoMap(activeDb, tokenBudget, directory);
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb, projectRoot, resolution) => {
+          const mapText = wrapWithStaleBanner(buildRepoMap(activeDb, tokenBudget, directory), activeDb);
+          const mapData = buildRepoMapData(activeDb, tokenBudget, directory);
           log.info(`Returned repo map (budget: ${tokenBudget}, dir: "${directory}")`);
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(mapText, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                mapData,
+                mapText,
+                {
+                  tool: "get_context_pack",
+                  reason: "Use get_context_pack for task-specific files after reviewing the repository map.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, _db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error(`Failed to get repo map: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Failed to get repo map - ${errorMsg}`, _db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { tokenBudget, directory },
+              wrapWithStaleBanner(`Error: Failed to get repo map - ${errorMsg}`, _db),
+            )),
+          }],
           isError: true,
         };
       }
@@ -108,6 +119,49 @@ interface DirNode {
   name: string;
   files: FileEntry[];
   children: Map<string, DirNode>;
+}
+
+interface RepoMapSummary {
+  tokenBudget: number;
+  directory: string;
+  fileCount: number;
+  symbolCount: number;
+  files: Array<{
+    path: string;
+    role: string;
+    language: string;
+    size: number;
+    symbols: SymbolEntry[];
+  }>;
+}
+
+function buildRepoMapData(db: SqlJsDatabase, tokenBudget: number, directory: string): RepoMapSummary {
+  const symbolsByPath = getSymbolsByPath(db, directory);
+  const params: string[] = [];
+  let sql = "SELECT path, role, language, size FROM files WHERE is_ignored = 0";
+
+  if (directory) {
+    sql += " AND path LIKE ?";
+    params.push(`${directory.replace(/\/$/, "")}/%`);
+  }
+
+  sql += " ORDER BY path";
+  const rows = db.all<{ path: string; role: string; language: string; size: number }>(sql, params);
+  const files = rows.map((row) => ({
+    path: row.path,
+    role: row.role,
+    language: row.language,
+    size: row.size,
+    symbols: symbolsByPath.get(row.path) ?? [],
+  }));
+
+  return {
+    tokenBudget,
+    directory,
+    fileCount: files.length,
+    symbolCount: files.reduce((total, file) => total + file.symbols.length, 0),
+    files,
+  };
 }
 
 function buildRepoMap(db: SqlJsDatabase, tokenBudget: number, directory: string): string {

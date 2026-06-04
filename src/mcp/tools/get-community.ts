@@ -14,6 +14,7 @@ import { createLogger } from "../../shared/logger.js";
 import { safeJsonParse } from "../../shared/utils.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-community");
@@ -46,30 +47,52 @@ export function registerGetCommunityTool(server: McpServer, _db?: SqlJsDatabase)
     },
     async ({ name, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
-          const text = loadCommunity(activeDb, name);
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb, projectRoot, resolution) => {
+          const communityResult = loadCommunity(activeDb, name);
+          const text = wrapWithStaleBanner(communityResult.display, activeDb);
           log.info(`Returned community: ${name}`);
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  name,
+                  found: communityResult.community !== null,
+                  community: communityResult.community,
+                  members: communityResult.members,
+                  keywords: communityResult.keywords,
+                  topEntrySymbols: communityResult.topEntrySymbols,
+                },
+                text,
+                communityResult.community
+                  ? {
+                      tool: "get_context_pack",
+                      reason: "Use get_context_pack for task-specific snippets from this community.",
+                    }
+                  : {
+                      tool: "get_repo_map",
+                      reason: "No community matched. Use get_repo_map to discover community names.",
+                    },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, _db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error(`Failed to get community: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Failed to get community - ${errorMsg}`, _db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { name },
+              wrapWithStaleBanner(`Error: Failed to get community - ${errorMsg}`, _db),
+            )),
+          }],
           isError: true,
         };
       }
@@ -88,7 +111,22 @@ interface MemberRow {
   file_path: string | null;
 }
 
-function loadCommunity(db: SqlJsDatabase, name: string): string {
+interface LoadedCommunity {
+  community: {
+    id: string;
+    name: string;
+    cohesion: number;
+    symbol_count: number;
+    detection_method: string;
+    last_indexed: string | null;
+  } | null;
+  members: MemberRow[];
+  keywords: string[];
+  topEntrySymbols: string[];
+  display: string;
+}
+
+function loadCommunity(db: SqlJsDatabase, name: string): LoadedCommunity {
   const communityRows = db.all<{
     id: string;
     name: string;
@@ -104,8 +142,14 @@ function loadCommunity(db: SqlJsDatabase, name: string): string {
   );
 
   if (communityRows.length === 0) {
-    return `No community found with name: ${name}\n` +
-      `Tip: Run \`code-memory index\` to (re)build communities, or use get_repo_map to discover available communities.`;
+    return {
+      community: null,
+      members: [],
+      keywords: [],
+      topEntrySymbols: [],
+      display: `No community found with name: ${name}\n` +
+        `Tip: Run \`code-memory index\` to (re)build communities, or use get_repo_map to discover available communities.`,
+    };
   }
 
   const community = communityRows[0]!;
@@ -158,7 +202,20 @@ function loadCommunity(db: SqlJsDatabase, name: string): string {
     }
   }
 
-  return lines.join("\n");
+  return {
+    community: {
+      id: community.id,
+      name: community.name,
+      cohesion: community.cohesion,
+      symbol_count: community.symbol_count,
+      detection_method: community.detection_method,
+      last_indexed: community.last_indexed,
+    },
+    members: memberRows,
+    keywords,
+    topEntrySymbols,
+    display: lines.join("\n"),
+  };
 }
 
 function parseStringList(json: string): string[] {

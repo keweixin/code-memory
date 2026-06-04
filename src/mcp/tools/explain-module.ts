@@ -17,6 +17,7 @@ import {
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
@@ -34,13 +35,33 @@ export function registerExplainModuleTool(server: McpServer, db?: SqlJsDatabase)
     },
     async ({ filePath, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const fileInfo = getFileInfo(activeDb, filePath);
           if (!fileInfo) {
+            const display = "File not found in index: " + filePath + ". Ensure it has been indexed.";
             return {
               content: [{
                 type: "text" as const,
-                text: "File not found in index: " + filePath + ". Ensure it has been indexed.",
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  {
+                    filePath,
+                    found: false,
+                    fileInfo: null,
+                    symbols: [],
+                    dependencies: [],
+                    dependents: [],
+                    chunks: [],
+                    memories: [],
+                  },
+                  display,
+                  {
+                    tool: "get_repo_map",
+                    reason: "File was not indexed. Use get_repo_map to find indexed paths or sync the project.",
+                  },
+                )),
               }],
             };
           }
@@ -52,33 +73,52 @@ export function registerExplainModuleTool(server: McpServer, db?: SqlJsDatabase)
           const memories = getFileMemories(activeDb, filePath);
 
           const adaptiveBudget = getAdaptiveBudget(countIndexedNodes(activeDb));
-          const text = applyOutputCharBudget(
+          const text = wrapWithStaleBanner(applyOutputCharBudget(
             formatModuleExplanation(fileInfo, symbols, dependencies, dependents, chunks, memories),
             adaptiveBudget.maxOutputChars,
-          );
+          ), activeDb);
           log.info("Explained module: " + filePath + " (" + symbols.length + " symbols, budget=" + adaptiveBudget.tier + ")");
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  filePath,
+                  found: true,
+                  fileInfo,
+                  symbols,
+                  dependencies,
+                  dependents,
+                  chunks,
+                  memories,
+                  adaptiveBudget,
+                },
+                text,
+                {
+                  tool: "get_context_pack",
+                  reason: "Use get_context_pack for task-specific snippets before editing this module.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
 
         log.error("Explain module failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Explain module failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { filePath },
+              wrapWithStaleBanner("Error: Explain module failed - " + errorMsg, db),
+            )),
+          }],
           isError: true,
         };
       }

@@ -19,6 +19,7 @@ import { openExistingDatabase } from "../../storage/database.js";
 import { readRegistry, type RegistryEntry } from "../../cli/registry.js";
 import { createLogger } from "../../shared/logger.js";
 import { safeJsonParse } from "../../shared/utils.js";
+import { createStructuredToolResult, errorToolResult, formatStructuredToolResult } from "../tool-result.js";
 
 const log = createLogger("mcp:get-unified-repo-map");
 
@@ -43,28 +44,47 @@ export function registerGetUnifiedRepoMapTool(
     },
     async ({ repos }) => {
       try {
-        const text = await buildUnifiedMap(repos);
-        log.info(`Returned unified repo map (${text.length} chars)`);
+        const result = await buildUnifiedMap(repos);
+        log.info(`Returned unified repo map (${result.display.length} chars)`);
         return {
-          content: [{ type: "text" as const, text }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(createStructuredToolResult({
+              status: "ready",
+              project: {
+                root: "",
+                repoName: "global",
+                dbPath: "",
+              },
+              freshness: {
+                indexStatus: "fresh",
+                changedFiles: [],
+                recommendedAction: result.overviews.length > 0 ? "choose repo and call resolve_project" : "register_project",
+              },
+              data: result,
+              display: result.display,
+              nextAction: {
+                tool: result.overviews.length > 0 ? "resolve_project" : "register_project",
+                reason: result.overviews.length > 0
+                  ? "Choose a repo from the unified map, then resolve it before task retrieval."
+                  : "No repos are registered. Register or bootstrap a project first.",
+              },
+            })),
+          }],
         };
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
 
         log.error(`Failed to get unified repo map: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: `Error: Failed to get unified repo map - ${errorMsg}` }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { repos: repos ?? [] },
+              `Error: Failed to get unified repo map - ${errorMsg}`,
+            )),
+          }],
           isError: true,
         };
       }
@@ -98,21 +118,48 @@ interface RepoOverview {
   externalDeps: Set<string>;
 }
 
+interface RepoOverviewData {
+  name: string;
+  path: string;
+  primaryLanguage: string;
+  nodeCount: number;
+  edgeCount: number;
+  lastIndexed: string | null;
+  communities: CommunitySummary[];
+  processes: ProcessSummary[];
+  externalDeps: string[];
+}
+
 interface CrossRepoSuggestion {
   package: string;
   repoCount: number;
 }
 
-async function buildUnifiedMap(repos: string[] | undefined): Promise<string> {
+async function buildUnifiedMap(repos: string[] | undefined): Promise<{
+  requestedRepos: string[];
+  selectedCount: number;
+  overviewCount: number;
+  overviews: RepoOverviewData[];
+  crossRepoSuggestions: CrossRepoSuggestion[];
+  display: string;
+}> {
   const registry = readRegistry();
   const selected = selectRepos(registry.repos, repos);
 
   if (selected.length === 0) {
-    return "=== Unified Repository Map ===\n\n" +
+    const display = "=== Unified Repository Map ===\n\n" +
       "No registered repositories found. Run `code-memory register` to add a repository, " +
       "or pass a `repos` filter that matches a registered name.\n\n" +
       "--- Cross-repo suggestions ---\n" +
       "  (no registered repos to aggregate)\n";
+    return {
+      requestedRepos: repos ?? [],
+      selectedCount: 0,
+      overviewCount: 0,
+      overviews: [],
+      crossRepoSuggestions: [],
+      display,
+    };
   }
 
   // Use Promise.all to allow concurrent repo overview loading.
@@ -122,8 +169,19 @@ async function buildUnifiedMap(repos: string[] | undefined): Promise<string> {
   )).filter((o): o is RepoOverview => o !== null);
 
   const crossRepoSuggestions = aggregateCrossRepoSuggestions(overviews);
+  const overviewData = overviews.map((overview) => ({
+    ...overview,
+    externalDeps: [...overview.externalDeps].sort((a, b) => a.localeCompare(b)),
+  }));
 
-  return formatUnifiedMap(overviews, crossRepoSuggestions);
+  return {
+    requestedRepos: repos ?? [],
+    selectedCount: selected.length,
+    overviewCount: overviewData.length,
+    overviews: overviewData,
+    crossRepoSuggestions,
+    display: formatUnifiedMap(overviews, crossRepoSuggestions),
+  };
 }
 
 function selectRepos(all: RegistryEntry[], filter: string[] | undefined): RegistryEntry[] {

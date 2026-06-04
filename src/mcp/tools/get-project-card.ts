@@ -12,6 +12,7 @@ import { getActiveWatchState } from "../../indexer/watch-service.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-project-card");
@@ -42,7 +43,7 @@ export function registerGetProjectCardTool(server: McpServer, _db?: SqlJsDatabas
     },
     async ({ repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, _db, async (activeDb, projectRoot, resolution) => {
           const meta = getIndexMetadata(activeDb);
           const stats = getDatabaseStats(activeDb);
 
@@ -52,27 +53,37 @@ export function registerGetProjectCardTool(server: McpServer, _db?: SqlJsDatabas
           };
 
           log.info("Returned project card");
+          const display = wrapWithStaleBanner(formatProjectCard(card), activeDb);
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(formatProjectCard(card), activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                { card },
+                display,
+                {
+                  tool: "plan_context",
+                  reason: "Project is identified. Start task retrieval with plan_context.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, _db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error(`Failed to get project card: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Failed to get project card - ${errorMsg}`, _db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              {},
+              wrapWithStaleBanner(`Error: Failed to get project card - ${errorMsg}`, _db),
+            )),
+          }],
           isError: true,
         };
       }

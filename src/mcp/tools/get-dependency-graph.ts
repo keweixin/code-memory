@@ -13,6 +13,7 @@ import { GraphEngine } from "../../graph/graph-engine.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-dependency-graph");
@@ -48,51 +49,70 @@ export function registerGetDependencyGraphTool(server: McpServer, db?: SqlJsData
     },
     async ({ filePath, depth, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
+          const maxDepth = Math.min(Math.max(depth, 1), 3);
           const fileId = findFileId(activeDb, filePath);
           if (!fileId) {
             // Try as partial path match
             const matches = findFilesByPartialPath(activeDb, filePath);
             if (matches.length === 0) {
+              const display = wrapWithStaleBanner("No file found matching: " + filePath + ". Ensure the file has been indexed.", activeDb);
               return {
                 content: [{
                   type: "text" as const,
-                  text: wrapWithStaleBanner("No file found matching: " + filePath + ". Ensure the file has been indexed.", activeDb),
+                  text: formatStructuredToolResult(toolResultFromProject(
+                    projectRoot,
+                    resolution.repoName ?? "",
+                    activeDb,
+                    { filePath, found: false, matches, maxDepth, nodes: [], edges: [] },
+                    display,
+                    {
+                      tool: "search_code",
+                      reason: "No file matched. Use search_code or get_repo_map to discover indexed paths.",
+                    },
+                  )),
                 }],
               };
             }
             if (matches.length > 1) {
               const list = matches.map(function(m) { return "  - " + m.path; }).join("\n");
+              const display = wrapWithStaleBanner("Multiple files match: " + filePath + ":\n" + list + "\n\nPlease use a more specific path.", activeDb);
               return {
                 content: [{
                   type: "text" as const,
-                  text: wrapWithStaleBanner("Multiple files match: " + filePath + ":\n" + list + "\n\nPlease use a more specific path.", activeDb),
+                  text: formatStructuredToolResult(toolResultFromProject(
+                    projectRoot,
+                    resolution.repoName ?? "",
+                    activeDb,
+                    { filePath, found: false, ambiguous: true, matches, maxDepth, nodes: [], edges: [] },
+                    display,
+                    {
+                      tool: "get_dependency_graph",
+                      reason: "Multiple files matched. Call get_dependency_graph again with one exact path.",
+                    },
+                  )),
                 }],
               };
             }
-            return analyzeGraph(activeDb, activeGraphEngine, matches[0].id, matches[0].path, Math.min(Math.max(depth, 1), 3));
+            return analyzeGraph(activeDb, activeGraphEngine, matches[0].id, matches[0].path, maxDepth, projectRoot, resolution.repoName ?? "");
           }
 
-          return analyzeGraph(activeDb, activeGraphEngine, fileId, filePath, Math.min(Math.max(depth, 1), 3));
+          return analyzeGraph(activeDb, activeGraphEngine, fileId, filePath, maxDepth, projectRoot, resolution.repoName ?? "");
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error("Get dependency graph failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Get dependency graph failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { filePath, depth },
+              wrapWithStaleBanner("Error: Get dependency graph failed - " + errorMsg, db),
+            )),
+          }],
           isError: true,
         };
       }
@@ -138,23 +158,49 @@ function analyzeGraph(
   fileId: string,
   filePath: string,
   depth: number,
+  projectRoot: string,
+  repoName: string,
 ): { content: Array<{ type: "text"; text: string }> } {
   const subGraph = graphEngine.getDependencyGraph(fileId, depth);
 
   if (subGraph.nodes.length === 0) {
+    const display = wrapWithStaleBanner("No import dependencies found for: " + filePath + ". The file may have no imports or exports.", db);
     return {
       content: [{
         type: "text" as const,
-        text: wrapWithStaleBanner("No import dependencies found for: " + filePath + ". The file may have no imports or exports.", db),
+        text: formatStructuredToolResult(toolResultFromProject(
+          projectRoot,
+          repoName,
+          db,
+          { filePath, fileId, found: true, depth, nodes: [], edges: [], fileInfo: getFileInfo(db, filePath) },
+          display,
+          {
+            tool: "get_repo_map",
+            reason: "No dependency edges were found. Use get_repo_map to inspect nearby modules.",
+          },
+        )),
       }],
     };
   }
 
-  const text = formatDependencyGraph(filePath, subGraph, db);
+  const text = wrapWithStaleBanner(formatDependencyGraph(filePath, subGraph, db), db);
   log.info("Dependency graph for " + filePath + ": " + subGraph.nodes.length + " nodes, " + subGraph.edges.length + " edges");
 
   return {
-    content: [{ type: "text" as const, text: wrapWithStaleBanner(text, db) }],
+    content: [{
+      type: "text" as const,
+      text: formatStructuredToolResult(toolResultFromProject(
+        projectRoot,
+        repoName,
+        db,
+        { filePath, fileId, found: true, depth, nodes: subGraph.nodes, edges: subGraph.edges, fileInfo: getFileInfo(db, filePath) },
+        text,
+        {
+          tool: "impact_analysis",
+          reason: "Run impact_analysis before refactoring files in this dependency graph.",
+        },
+      )),
+    }],
   };
 }
 

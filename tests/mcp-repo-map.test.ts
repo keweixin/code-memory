@@ -13,6 +13,14 @@ const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -25,6 +33,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 function createConfig(rootPath: string): CodeMemoryConfig {
@@ -81,13 +95,38 @@ describe('MCP repo map', () => {
       tokenBudget: 4000,
       directory: 'src/services',
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      tokenBudget: number;
+      directory: string;
+      fileCount: number;
+      symbolCount: number;
+      files: Array<{ path: string; symbols: Array<{ name: string; kind: string }> }>;
+    }>(result);
 
-    expect(text).toContain('AuthService.ts [source] [typescript]');
-    expect(text).toContain('symbols: {LoginRequest:interface');
-    expect(text).toContain('AuthService:class');
-    expect(text).toContain('login:method');
-    expect(text).toContain('issueTokens:function');
-    expect(text).not.toContain('user-repository.ts');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.data.tokenBudget).toBe(4000);
+    expect(structured.data.directory).toBe('src/services');
+    expect(structured.data.fileCount).toBeGreaterThan(0);
+    expect(structured.data.symbolCount).toBeGreaterThan(0);
+    const serviceFiles = structured.data.files.map((file) => file.path);
+    expect(serviceFiles).toContain('src/services/AuthService.ts');
+    expect(serviceFiles).not.toContain('src/repositories/user-repository.ts');
+    const authSymbols = structured.data.files
+      .find((file) => file.path === 'src/services/AuthService.ts')
+      ?.symbols.map((symbol) => `${symbol.name}:${symbol.kind}`);
+    expect(authSymbols).toEqual(expect.arrayContaining([
+      'LoginRequest:interface',
+      'AuthService:class',
+      'login:method',
+    ]));
+    expect(structured.data.files.some((file) =>
+      file.symbols.some((symbol) => `${symbol.name}:${symbol.kind}` === 'issueTokens:function'))).toBe(true);
+    expect(structured.display).toContain('AuthService.ts [source] [typescript]');
+    expect(structured.display).toContain('symbols: {LoginRequest:interface');
+    expect(structured.display).toContain('AuthService:class');
+    expect(structured.display).toContain('login:method');
+    expect(structured.display).toContain('issueTokens:function');
+    expect(structured.display).not.toContain('user-repository.ts');
   });
 });

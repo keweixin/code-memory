@@ -4,9 +4,21 @@ import { CONFIG_DIR, CONFIG_FILE, DATABASE_FILE, NPM_PACKAGE_SPEC } from '../sha
 import { findRepo, readRegistry, type RegistryEntry } from '../cli/registry.js';
 import { getIndexStaleness, type IndexFreshness } from '../indexer/staleness.js';
 
-export type ProjectResolutionStatus = 'ready' | 'stale' | 'needs_bootstrap' | 'needs_index' | 'unknown';
+export type ProjectResolutionStatus =
+  | 'ready'
+  | 'stale'
+  | 'needs_bootstrap'
+  | 'needs_index'
+  | 'needs_project_selection'
+  | 'unknown';
 export type ProjectResolutionIndexStatus = IndexFreshness | 'needs_bootstrap' | 'needs_index' | 'unknown';
-export type ProjectResolutionNextAction = 'use_code_memory' | 'bootstrap' | 'index' | 'sync' | 'register_or_pass_project';
+export type ProjectResolutionNextAction =
+  | 'use_code_memory'
+  | 'bootstrap'
+  | 'index'
+  | 'sync'
+  | 'choose_project'
+  | 'register_or_pass_project';
 
 export interface ResolveProjectInput {
   repo?: string;
@@ -28,6 +40,14 @@ export interface ProjectResolution {
   nextAction: ProjectResolutionNextAction;
   command: string | null;
   reason: string;
+  candidates?: ProjectResolutionCandidate[];
+}
+
+export interface ProjectResolutionCandidate {
+  name: string;
+  root: string;
+  indexStatus: ProjectResolutionIndexStatus;
+  registered: boolean;
 }
 
 export function resolveProject(input: ResolveProjectInput = {}): ProjectResolution {
@@ -66,9 +86,18 @@ export function resolveProject(input: ResolveProjectInput = {}): ProjectResoluti
     return buildResolution(gitRoot, findRepoByRoot(gitRoot), 'nearest git root');
   }
 
-  const registered = findRepoByRoot(cwd) ?? getRegisteredRepos()[0] ?? null;
+  const registered = findRepoByRoot(cwd);
   if (registered) {
     return buildResolution(registered.rootPath, registered, 'registry');
+  }
+
+  const registry = getRegisteredRepos();
+  if (registry.length === 1) {
+    const onlyRepo = registry[0];
+    return buildResolution(onlyRepo.rootPath, onlyRepo, 'registry');
+  }
+  if (registry.length > 1) {
+    return needsProjectSelection(registry);
   }
 
   return buildResolution(cwd, null, 'cwd');
@@ -88,6 +117,7 @@ export function formatProjectResolution(resolution: ProjectResolution): string {
     nextAction: resolution.nextAction,
     command: resolution.command,
     reason: resolution.reason,
+    candidates: resolution.candidates,
   }, null, 2);
 }
 
@@ -149,6 +179,24 @@ function unresolved(reason: string): ProjectResolution {
   };
 }
 
+function needsProjectSelection(registry: RegistryEntry[]): ProjectResolution {
+  return {
+    projectRoot: null,
+    gitRoot: null,
+    repoName: null,
+    registered: false,
+    configExists: false,
+    indexExists: false,
+    dbPath: null,
+    indexStatus: 'unknown',
+    status: 'needs_project_selection',
+    nextAction: 'choose_project',
+    command: null,
+    reason: 'Multiple registered Code Memory repos are available, and no repo/project/workspace root identifies the active project.',
+    candidates: registry.map((repo) => projectCandidate(repo)),
+  };
+}
+
 function getCommand(action: ProjectResolutionNextAction, projectRoot: string): string | null {
   if (action === 'use_code_memory') return null;
   if (action === 'index') {
@@ -166,6 +214,19 @@ function getCommand(action: ProjectResolutionNextAction, projectRoot: string): s
 function findRepoByRoot(rootPath: string): RegistryEntry | null {
   const root = resolve(rootPath);
   return getRegisteredRepos().find((repo: RegistryEntry) => resolve(repo.rootPath) === root) ?? null;
+}
+
+function projectCandidate(repo: RegistryEntry): ProjectResolutionCandidate {
+  const root = resolve(repo.rootPath);
+  const configExists = existsSync(join(root, CONFIG_DIR, CONFIG_FILE));
+  const indexExists = existsSync(join(root, CONFIG_DIR, DATABASE_FILE));
+  const freshness = configExists && indexExists ? getIndexStaleness(root) : null;
+  return {
+    name: repo.name,
+    root,
+    indexStatus: freshness?.indexStatus ?? (configExists ? 'needs_index' : 'needs_bootstrap'),
+    registered: true,
+  };
 }
 
 function getRegisteredRepos(): RegistryEntry[] {

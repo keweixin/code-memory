@@ -14,6 +14,14 @@ const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -26,6 +34,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 function createConfig(rootPath: string): CodeMemoryConfig {
@@ -90,12 +104,24 @@ describe('MCP process and community tools', () => {
 
     const processName = processes[0]!.name;
     const result = await server.handlers.get('get_process')!({ name: processName });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      name: string;
+      found: boolean;
+      process: { name: string; entry_kind: string; step_count: number };
+      steps: unknown[];
+    }>(result);
 
-    expect(text).toContain(`=== Process: ${processName} ===`);
-    expect(text).toContain('Entry kind:');
-    expect(text).toContain('Step count:');
-    expect(text).toContain('--- Steps ---');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.data.name).toBe(processName);
+    expect(structured.data.found).toBe(true);
+    expect(structured.data.process.name).toBe(processName);
+    expect(structured.data.steps.length).toBeGreaterThanOrEqual(0);
+    expect(structured.nextAction.tool).toBe('get_context_pack');
+    expect(structured.display).toContain(`=== Process: ${processName} ===`);
+    expect(structured.display).toContain('Entry kind:');
+    expect(structured.display).toContain('Step count:');
+    expect(structured.display).toContain('--- Steps ---');
   });
 
   it('get_community returns community data after full index', async () => {
@@ -115,12 +141,24 @@ describe('MCP process and community tools', () => {
 
     const communityName = communities[0]!.name;
     const result = await server.handlers.get('get_community')!({ name: communityName });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      name: string;
+      found: boolean;
+      community: { name: string; cohesion: number; symbol_count: number };
+      members: unknown[];
+    }>(result);
 
-    expect(text).toContain(`=== Community: ${communityName} ===`);
-    expect(text).toContain('Cohesion:');
-    expect(text).toContain('Member count:');
-    expect(text).toContain('--- Members ---');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.data.name).toBe(communityName);
+    expect(structured.data.found).toBe(true);
+    expect(structured.data.community.name).toBe(communityName);
+    expect(structured.data.members.length).toBeGreaterThan(0);
+    expect(structured.nextAction.tool).toBe('get_context_pack');
+    expect(structured.display).toContain(`=== Community: ${communityName} ===`);
+    expect(structured.display).toContain('Cohesion:');
+    expect(structured.display).toContain('Member count:');
+    expect(structured.display).toContain('--- Members ---');
   });
 
   it('get_process returns error for unknown process', async () => {
@@ -135,9 +173,20 @@ describe('MCP process and community tools', () => {
     const result = await server.handlers.get('get_process')!({
       name: 'NONEXISTENT_PROCESS_xyz',
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      name: string;
+      found: boolean;
+      process: null;
+      steps: unknown[];
+    }>(result);
 
-    expect(text).toContain('No process found with name: NONEXISTENT_PROCESS_xyz');
+    expect(structured.status).toBe('ready');
+    expect(structured.data.name).toBe('NONEXISTENT_PROCESS_xyz');
+    expect(structured.data.found).toBe(false);
+    expect(structured.data.process).toBeNull();
+    expect(structured.data.steps).toHaveLength(0);
+    expect(structured.nextAction.tool).toBe('get_repo_map');
+    expect(structured.display).toContain('No process found with name: NONEXISTENT_PROCESS_xyz');
   });
 
   it('get_community returns error for unknown community', async () => {
@@ -152,8 +201,19 @@ describe('MCP process and community tools', () => {
     const result = await server.handlers.get('get_community')!({
       name: 'NONEXISTENT_COMMUNITY_xyz',
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      name: string;
+      found: boolean;
+      community: null;
+      members: unknown[];
+    }>(result);
 
-    expect(text).toContain('No community found with name: NONEXISTENT_COMMUNITY_xyz');
+    expect(structured.status).toBe('ready');
+    expect(structured.data.name).toBe('NONEXISTENT_COMMUNITY_xyz');
+    expect(structured.data.found).toBe(false);
+    expect(structured.data.community).toBeNull();
+    expect(structured.data.members).toHaveLength(0);
+    expect(structured.nextAction.tool).toBe('get_repo_map');
+    expect(structured.display).toContain('No community found with name: NONEXISTENT_COMMUNITY_xyz');
   });
 });

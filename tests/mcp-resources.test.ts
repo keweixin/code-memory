@@ -62,10 +62,13 @@ async function indexFixture(rootPath: string): Promise<void> {
 describe('MCP resources', () => {
   let tempRoot: string;
   let originalCwd: string;
+  let originalGlobalHome: string | undefined;
 
   beforeEach(async () => {
     originalCwd = process.cwd();
+    originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-resources-'));
+    process.env.CODE_MEMORY_GLOBAL_HOME = join(tempRoot, 'home');
     cpSync(fixtureRoot, tempRoot, { recursive: true });
     process.chdir(tempRoot);
     await indexFixture(tempRoot);
@@ -73,6 +76,11 @@ describe('MCP resources', () => {
 
   afterEach(async () => {
     process.chdir(originalCwd);
+    if (originalGlobalHome === undefined) {
+      delete process.env.CODE_MEMORY_GLOBAL_HOME;
+    } else {
+      process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
+    }
     await closeDatabase();
     rmSync(tempRoot, { recursive: true, force: true });
   });

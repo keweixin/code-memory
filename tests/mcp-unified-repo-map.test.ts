@@ -12,6 +12,14 @@ import { registerRepo } from '../src/cli/registry.js';
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -24,6 +32,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 interface DepSet {
@@ -128,15 +142,26 @@ describe('MCP unified repo map', () => {
     registerGetUnifiedRepoMapTool(server as never, getDatabaseSync());
 
     const result = await server.handlers.get('get_unified_repo_map')!({});
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      overviewCount: number;
+      overviews: Array<{ name: string; path: string; primaryLanguage: string }>;
+      crossRepoSuggestions: unknown[];
+    }>(result);
 
-    expect(text).toContain('=== Unified Repository Map ===');
-    expect(text).toContain('Repository: repoA');
-    expect(text).toContain(resolve(rootA));
-    expect(text).toContain('Language: typescript');
-    expect(text).toContain('Repository: repoB');
-    expect(text).toContain(resolve(rootB));
-    expect(text).toContain('--- Cross-repo suggestions ---');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.repoName).toBe('global');
+    expect(structured.data.overviewCount).toBe(2);
+    expect(structured.data.overviews).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'repoA', path: resolve(rootA), primaryLanguage: 'typescript' }),
+      expect.objectContaining({ name: 'repoB', path: resolve(rootB), primaryLanguage: 'typescript' }),
+    ]));
+    expect(structured.display).toContain('=== Unified Repository Map ===');
+    expect(structured.display).toContain('Repository: repoA');
+    expect(structured.display).toContain(resolve(rootA));
+    expect(structured.display).toContain('Language: typescript');
+    expect(structured.display).toContain('Repository: repoB');
+    expect(structured.display).toContain(resolve(rootB));
+    expect(structured.display).toContain('--- Cross-repo suggestions ---');
   });
 
   it('respects the optional repos filter', async () => {
@@ -157,10 +182,17 @@ describe('MCP unified repo map', () => {
     const result = await server.handlers.get('get_unified_repo_map')!({
       repos: ['repoA'],
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      requestedRepos: string[];
+      overviewCount: number;
+      overviews: Array<{ name: string }>;
+    }>(result);
 
-    expect(text).toContain('Repository: repoA');
-    expect(text).not.toContain('Repository: repoB');
+    expect(structured.data.requestedRepos).toEqual(['repoA']);
+    expect(structured.data.overviewCount).toBe(1);
+    expect(structured.data.overviews[0].name).toBe('repoA');
+    expect(structured.display).toContain('Repository: repoA');
+    expect(structured.display).not.toContain('Repository: repoB');
   });
 
   it('emits cross-repo suggestions for shared external dependencies', async () => {
@@ -189,10 +221,15 @@ describe('MCP unified repo map', () => {
     registerGetUnifiedRepoMapTool(server as never, getDatabaseSync());
 
     const result = await server.handlers.get('get_unified_repo_map')!({});
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      crossRepoSuggestions: Array<{ package: string; repoCount: number }>;
+    }>(result);
 
-    expect(text).toContain('- lodash (3 repos)');
-    expect(text).not.toContain('- axios');
+    expect(structured.data.crossRepoSuggestions).toEqual([
+      { package: 'lodash', repoCount: 3 },
+    ]);
+    expect(structured.display).toContain('- lodash (3 repos)');
+    expect(structured.display).not.toContain('- axios');
   });
 
   it('returns a graceful empty response when no repos are registered', async () => {
@@ -210,11 +247,19 @@ describe('MCP unified repo map', () => {
     registerGetUnifiedRepoMapTool(server as never, getDatabaseSync());
 
     const result = await server.handlers.get('get_unified_repo_map')!({});
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      selectedCount: number;
+      overviewCount: number;
+      overviews: unknown[];
+    }>(result);
 
-    expect(text).toContain('=== Unified Repository Map ===');
-    expect(text).toContain('No registered repositories found');
-    expect(text).toContain('--- Cross-repo suggestions ---');
+    expect(structured.data.selectedCount).toBe(0);
+    expect(structured.data.overviewCount).toBe(0);
+    expect(structured.data.overviews).toHaveLength(0);
+    expect(structured.nextAction.tool).toBe('register_project');
+    expect(structured.display).toContain('=== Unified Repository Map ===');
+    expect(structured.display).toContain('No registered repositories found');
+    expect(structured.display).toContain('--- Cross-repo suggestions ---');
   });
 
   it('filters repos case-insensitively', async () => {
@@ -231,9 +276,10 @@ describe('MCP unified repo map', () => {
     const result = await server.handlers.get('get_unified_repo_map')!({
       repos: ['payment-service'],
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{ overviews: Array<{ name: string }> }>(result);
 
-    expect(text).toContain('Repository: Payment-Service');
+    expect(structured.data.overviews[0].name).toBe('Payment-Service');
+    expect(structured.display).toContain('Repository: Payment-Service');
   });
 
   it('filters repos by substring match', async () => {
@@ -250,8 +296,9 @@ describe('MCP unified repo map', () => {
     const result = await server.handlers.get('get_unified_repo_map')!({
       repos: ['payment'],
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{ overviews: Array<{ name: string }> }>(result);
 
-    expect(text).toContain('Repository: payment-service');
+    expect(structured.data.overviews[0].name).toBe('payment-service');
+    expect(structured.display).toContain('Repository: payment-service');
   });
 });

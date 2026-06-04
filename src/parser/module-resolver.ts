@@ -13,7 +13,10 @@ export class ModuleResolver {
     if (source.startsWith('.')) {
       return this.resolveRelative(importer, source);
     }
-    return this.resolveTsconfigPath(source) || this.resolvePackageSource(source);
+    return this.resolvePackageImport(source) ||
+      this.resolveTsconfigPath(source) ||
+      this.resolvePackageSource(source) ||
+      this.resolveBaseUrlSource(source);
   }
 
   private resolveRelative(importer: FileRecord, source: string): FileRecord | null {
@@ -58,6 +61,29 @@ export class ModuleResolver {
     }
 
     return this.resolveCandidates(source, true);
+  }
+
+  private resolvePackageImport(source: string): FileRecord | null {
+    if (!source.startsWith('#')) return null;
+    const exported = this.manifest.packageImports.get(source);
+    if (exported) {
+      const match = this.resolveCandidates(exported, true);
+      if (match) return match;
+    }
+
+    for (const [specifier, target] of this.manifest.packageImports.entries()) {
+      const middle = matchPattern(specifier, source);
+      if (middle === null) continue;
+      const match = this.resolveCandidates(target.replace('*', middle), true);
+      if (match) return match;
+    }
+
+    return null;
+  }
+
+  private resolveBaseUrlSource(source: string): FileRecord | null {
+    if (!this.manifest.baseUrlPath || this.manifest.baseUrlPath === '.') return null;
+    return this.resolveCandidates(this.withBaseUrl(source), true);
   }
 
   private resolveCandidates(rawPath: string, preferTypeScript: boolean): FileRecord | null {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { CONFIG_DIR, DATABASE_FILE } from '../shared/constants.js';
 import type { SqlJsDatabase } from '../storage/database.js';
 import { contentHash, normalizePath } from '../shared/utils.js';
+import { readWatchState, type PersistedWatchState } from './watch-state.js';
 
 export type IndexFreshness = 'fresh' | 'stale' | 'missing' | 'rebuilding' | 'failed';
 
@@ -13,6 +14,8 @@ export interface IndexStaleness {
   lastIndexedAt: string | null;
   lastIndexedCommit: string | null;
   currentCommit: string | null;
+  watcherActive: boolean;
+  watchState: PersistedWatchState | null;
   recommendedAction: string | null;
   watchSyncStatus: string | null;
   watchLastChangedPaths: string[];
@@ -32,6 +35,8 @@ export function getIndexStaleness(projectRoot: string, db?: SqlJsDatabase): Inde
       lastIndexedAt: null,
       lastIndexedCommit: null,
       currentCommit: getGitValue(projectRoot, 'rev-parse HEAD'),
+      watcherActive: false,
+      watchState: readWatchState(projectRoot),
       recommendedAction: 'run code-memory init -i',
       watchSyncStatus: null,
       watchLastChangedPaths: [],
@@ -45,6 +50,7 @@ export function getIndexStaleness(projectRoot: string, db?: SqlJsDatabase): Inde
 
   const meta = db ? readMetadata(db) : new Map<string, string>();
   const currentCommit = getGitValue(projectRoot, 'rev-parse HEAD');
+  const watchState = readWatchState(projectRoot);
   const lastIndexedCommit = meta.get('current_commit') || null;
   const lastIndexedAt = meta.get('last_incremental_index') || meta.get('last_full_index') || null;
   const changedFiles = db ? getStaleIndexedFileCount(projectRoot, db) : getRelevantGitChangedPaths(projectRoot).length;
@@ -59,6 +65,8 @@ export function getIndexStaleness(projectRoot: string, db?: SqlJsDatabase): Inde
     lastIndexedAt,
     lastIndexedCommit,
     currentCommit,
+    watcherActive: Boolean(watchState?.active),
+    watchState,
     recommendedAction: rebuilding
       ? 'wait for current indexing run to finish'
       : lastWatchError

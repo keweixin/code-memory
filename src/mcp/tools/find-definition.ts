@@ -13,6 +13,11 @@ import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
+import {
   attachStaleBanner,
   partitionPending,
 } from "./_stale-banner.js";
@@ -36,17 +41,33 @@ export function registerFindDefinitionTool(server: McpServer, db?: SqlJsDatabase
     },
     async ({ symbolName, filePath, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const definitions = findDefinitions(activeDb, symbolName, filePath || null);
 
           if (definitions.length === 0) {
+            const display = wrapWithStaleBanner(
+              `No definition found for "${symbolName}".\n\nPossible reasons:\n- The symbol is not indexed yet (run 'code-memory index')\n- The name might be slightly different (use search_symbols to explore)\n- The symbol might be from an external dependency`,
+              activeDb,
+            );
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner(
-                  `No definition found for "${symbolName}".\n\nPossible reasons:\n- The symbol is not indexed yet (run 'code-memory index')\n- The name might be slightly different (use search_symbols to explore)\n- The symbol might be from an external dependency`,
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
                   activeDb,
-                ),
+                  {
+                    symbolName,
+                    filePath: filePath || null,
+                    resultCount: 0,
+                    definitions,
+                  },
+                  display,
+                  {
+                    tool: "search_symbols",
+                    reason: "No exact definition was found. Search symbols to discover the indexed name before using Read/Grep.",
+                  },
+                )),
               }],
             };
           }
@@ -56,7 +77,25 @@ export function registerFindDefinitionTool(server: McpServer, db?: SqlJsDatabase
           log.info(`Found ${definitions.length} definition(s) for "${symbolName}"`);
 
           return {
-            content: [{ type: "text" as const, text }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  symbolName,
+                  filePath: filePath || null,
+                  resultCount: definitions.length,
+                  definitions,
+                },
+                text,
+                {
+                  tool: "find_references",
+                  reason: "Call find_references or impact_analysis before editing this definition.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
@@ -64,10 +103,15 @@ export function registerFindDefinitionTool(server: McpServer, db?: SqlJsDatabase
         const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
 
         if (isUninitializedRepo) {
+          const display = `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`;
           return {
             content: [{
               type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { symbolName, filePath: filePath || null },
+                display,
+              )),
             }],
             isError: false,
           };
@@ -75,7 +119,14 @@ export function registerFindDefinitionTool(server: McpServer, db?: SqlJsDatabase
 
         log.error(`Find definition failed: ${errorMsg}`);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner(`Error: Find definition failed - ${errorMsg}`, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { symbolName, filePath: filePath || null },
+              wrapWithStaleBanner(`Error: Find definition failed - ${errorMsg}`, db),
+            )),
+          }],
           isError: true,
         };
       }

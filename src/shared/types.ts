@@ -641,7 +641,7 @@ export interface RouteEndpointRecord {
   symbolId: string | null;
   routePath: string;
   httpMethod: string;
-  framework: 'next_app_router' | 'fastapi';
+  framework: 'next_app_router' | 'fastapi' | 'express';
   startLine: number;
   startColumn: number;
   evidence: string;

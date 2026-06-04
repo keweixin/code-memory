@@ -18,6 +18,7 @@ import type { ContextFeedback } from "../../shared/types.js";
 import { getDatabaseSync, isInitialized, type SqlJsDatabase } from "../../storage/database.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 
 const FEEDBACK_VALUES = ["useful", "irrelevant", "stale"] as const;
 
@@ -49,7 +50,7 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     },
     async (input) => {
       try {
-        return await withRepoDatabase(input, routedDb, async (activeDb, projectRoot) => {
+        return await withRepoDatabase(input, routedDb, async (activeDb, projectRoot, resolution) => {
           const id = markContextUsed({
             sessionId: input.sessionId,
             taskId: input.taskId,
@@ -68,24 +69,24 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
             agentFeedback: input.agentFeedback as ContextFeedback | undefined,
             feedbackReason: input.feedbackReason,
           }, activeDb);
-          return { content: [{ type: "text" as const, text: "Context ledger entry recorded: " + id }] };
+          const display = "Context ledger entry recorded: " + id;
+          return ledgerResult(activeDb, projectRoot, resolution.repoName ?? "", {
+            entryId: id,
+            sessionId: input.sessionId,
+            query: input.query,
+            returnedFiles: input.returnedFiles,
+            returnedSymbols: input.returnedSymbols,
+            returnedChunks: input.returnedChunks,
+            tokenEstimate: input.tokenEstimate,
+          }, display, {
+            tool: "get_context_delta",
+            reason: "Use get_context_delta before returning more context for this session.",
+          });
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
-
         return {
-          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          content: [{ type: "text" as const, text: formatStructuredToolResult(errorToolResult(errorMsg, { sessionId: input.sessionId })) }],
           isError: true,
         };
       }
@@ -106,31 +107,30 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     },
     async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb, projectRoot, resolution) => {
           const delta = getContextDeltaForDb(sessionId, {
             files: candidateFiles,
             symbols: candidateSymbols,
             chunks: candidateChunks,
             evidenceIds: candidateEvidenceIds,
           }, activeDb);
-          return { content: [{ type: "text" as const, text: formatDelta(delta) }] };
+          const display = formatDelta(delta);
+          return ledgerResult(activeDb, projectRoot, resolution.repoName ?? "", {
+            sessionId,
+            candidateFiles,
+            candidateSymbols,
+            candidateChunks,
+            candidateEvidenceIds,
+            delta,
+          }, display, {
+            tool: "get_context_pack",
+            reason: "Use the delta to prefer new context and avoid repeated evidence.",
+          });
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
-
         return {
-          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          content: [{ type: "text" as const, text: formatStructuredToolResult(errorToolResult(errorMsg, { sessionId })) }],
           isError: true,
         };
       }
@@ -150,7 +150,7 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     },
     async ({ sessionId, candidateFiles, candidateSymbols, candidateChunks, candidateEvidenceIds, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb, projectRoot, resolution) => {
           const delta = getContextDeltaForDb(sessionId, {
             files: candidateFiles,
             symbols: candidateSymbols,
@@ -171,24 +171,35 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
             "Novelty score: " + delta.noveltyScore.toFixed(2),
             "Repeated penalty: " + delta.repeatedPenalty.toFixed(2),
           ];
-          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+          const display = lines.join("\n");
+          return ledgerResult(activeDb, projectRoot, resolution.repoName ?? "", {
+            sessionId,
+            candidateFiles,
+            candidateSymbols,
+            candidateChunks,
+            candidateEvidenceIds,
+            delta,
+            keep: {
+              files: delta.newFiles,
+              symbols: delta.newSymbols,
+              chunks: delta.newChunks,
+              evidenceIds: delta.newEvidenceIds,
+            },
+            drop: {
+              files: delta.repeatedFiles,
+              symbols: delta.repeatedSymbols,
+              chunks: delta.repeatedChunks,
+              evidenceIds: delta.repeatedEvidenceIds,
+            },
+          }, display, {
+            tool: "get_context_pack",
+            reason: "Keep new context and drop repeated context when building the next pack.",
+          });
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
-
         return {
-          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          content: [{ type: "text" as const, text: formatStructuredToolResult(errorToolResult(errorMsg, { sessionId })) }],
           isError: true,
         };
       }
@@ -207,7 +218,7 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     },
     async ({ sessionId, contextId, contextType, feedback, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb, projectRoot, resolution) => {
           let entries = getContextLedgerEntriesForDb(sessionId, activeDb);
           let seenIn = entries.filter((entry) => {
             if (contextType === "file") return entry.returnedFiles.includes(contextId);
@@ -231,24 +242,25 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
           for (const entry of seenIn.slice(-5)) {
             lines.push("- " + entry.createdAt + " query=\"" + entry.query + "\" feedback=" + (entry.agentFeedback || "none"));
           }
-          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+          const display = lines.join("\n");
+          return ledgerResult(activeDb, projectRoot, resolution.repoName ?? "", {
+            sessionId,
+            contextId,
+            contextType,
+            feedback: feedback ?? null,
+            repeated: seenIn.length > 0,
+            seenCount: seenIn.length,
+            priorTokens: entries.reduce((sum, entry) => sum + entry.tokenEstimate, 0),
+            seenEntries: seenIn,
+          }, display, {
+            tool: "get_context_delta",
+            reason: "Use get_context_delta to decide whether this context should be reused or replaced.",
+          });
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
-
         return {
-          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          content: [{ type: "text" as const, text: formatStructuredToolResult(errorToolResult(errorMsg, { sessionId, contextId, contextType })) }],
           isError: true,
         };
       }
@@ -264,7 +276,7 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     },
     async ({ sessionId, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb, projectRoot, resolution) => {
           const summary = compactSessionContext(sessionId, activeDb);
           const lines = [
             "Compact session context",
@@ -276,24 +288,16 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
             "Chunks: " + formatList(summary.chunks),
             "Evidence: " + formatList(summary.evidenceIds),
           ];
-          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+          const display = lines.join("\n");
+          return ledgerResult(activeDb, projectRoot, resolution.repoName ?? "", summary, display, {
+            tool: "get_context_delta",
+            reason: "Use this compact summary to avoid rereading already-returned context.",
+          });
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
-
         return {
-          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          content: [{ type: "text" as const, text: formatStructuredToolResult(errorToolResult(errorMsg, { sessionId })) }],
           isError: true,
         };
       }
@@ -309,31 +313,49 @@ export function registerContextLedgerTools(server: McpServer, db?: SqlJsDatabase
     },
     async ({ sessionId, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, routedDb, async (activeDb, projectRoot, resolution) => {
           const removed = resetContextSession(sessionId, activeDb);
-          return { content: [{ type: "text" as const, text: "Removed ledger entries: " + removed }] };
+          const display = "Removed ledger entries: " + removed;
+          return ledgerResult(activeDb, projectRoot, resolution.repoName ?? "", {
+            sessionId,
+            removed,
+          }, display, {
+            tool: "plan_context",
+            reason: "Session ledger was reset. Start the next retrieval with plan_context.",
+          });
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`,
-            }],
-            isError: false,
-          };
-        }
-
         return {
-          content: [{ type: "text" as const, text: `Error: ${errorMsg}` }],
+          content: [{ type: "text" as const, text: formatStructuredToolResult(errorToolResult(errorMsg, { sessionId })) }],
           isError: true,
         };
       }
     },
   );
+}
+
+function ledgerResult<T>(
+  db: SqlJsDatabase,
+  projectRoot: string,
+  repoName: string,
+  data: T,
+  display: string,
+  nextAction: { tool?: string; command?: string; reason: string },
+): { content: Array<{ type: "text"; text: string }> } {
+  return {
+    content: [{
+      type: "text",
+      text: formatStructuredToolResult(toolResultFromProject(
+        projectRoot,
+        repoName,
+        db,
+        data,
+        display,
+        nextAction,
+      )),
+    }],
+  };
 }
 
 function formatDelta(delta: ReturnType<typeof getContextDeltaForDb>): string {

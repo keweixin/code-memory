@@ -8,6 +8,7 @@ export interface ProjectManifest {
   baseUrlPath: string;
   tsconfigPaths: Record<string, string[]>;
   packageExports: Map<string, string>;
+  packageImports: Map<string, string>;
 }
 
 interface TsConfigJson {
@@ -20,6 +21,7 @@ interface TsConfigJson {
 interface PackageJson {
   name?: string;
   exports?: string | Record<string, unknown>;
+  imports?: Record<string, unknown>;
   main?: string;
   module?: string;
   types?: string;
@@ -44,12 +46,16 @@ export function loadProjectManifest(rootPath: string): ProjectManifest {
     baseUrl,
     baseUrlPath: normalizePath(relative(rootPath, baseUrl)),
     tsconfigPaths: tsconfig?.compilerOptions?.paths || {},
-    packageExports: loadPackageExports(rootPath),
+    ...loadPackageSubpaths(rootPath),
   };
 }
 
-function loadPackageExports(rootPath: string): Map<string, string> {
+function loadPackageSubpaths(rootPath: string): {
+  packageExports: Map<string, string>;
+  packageImports: Map<string, string>;
+} {
   const exportsBySpecifier = new Map<string, string>();
+  const importsBySpecifier = new Map<string, string>();
   for (const packageJsonPath of findPackageJsonFiles(rootPath)) {
     const pkg = safeJsonParse<PackageJson>(readFileSync(packageJsonPath, 'utf-8'));
     if (!pkg?.name) continue;
@@ -79,8 +85,19 @@ function loadPackageExports(rootPath: string): Map<string, string> {
     if (!exportsBySpecifier.has(pkg.name)) {
       add(pkg.name, pkg.module || pkg.main || pkg.types || './index');
     }
+
+    if (pkg.imports && typeof pkg.imports === 'object') {
+      for (const [specifier, target] of Object.entries(pkg.imports)) {
+        const targetPath = extractExportTarget(target);
+        if (!targetPath) continue;
+        importsBySpecifier.set(
+          specifier,
+          normalizePath(join(packageRelDir, targetPath)),
+        );
+      }
+    }
   }
-  return exportsBySpecifier;
+  return { packageExports: exportsBySpecifier, packageImports: importsBySpecifier };
 }
 
 function findPackageJsonFiles(rootPath: string): string[] {

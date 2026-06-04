@@ -29,15 +29,23 @@ function createConfig(rootPath: string): CodeMemoryConfig {
 describe('CLI serve command', () => {
   let tempRoot: string;
   let originalCwd: string;
+  let originalProjectEnv: string | undefined;
 
   beforeEach(() => {
     originalCwd = process.cwd();
+    originalProjectEnv = process.env.CODE_MEMORY_PROJECT;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-serve-'));
+    delete process.env.CODE_MEMORY_PROJECT;
     process.chdir(tempRoot);
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
+    if (originalProjectEnv === undefined) {
+      delete process.env.CODE_MEMORY_PROJECT;
+    } else {
+      process.env.CODE_MEMORY_PROJECT = originalProjectEnv;
+    }
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -131,6 +139,7 @@ describe('CLI serve command', () => {
 
   it('starts global auto-project MCP without requiring a project config', async () => {
     let startedProject: string | undefined = 'not-called';
+    let watched = false;
 
     await expect(startServer(
       { watch: true, autoProject: true },
@@ -139,7 +148,7 @@ describe('CLI serve command', () => {
           throw new Error('should not bootstrap in global mode');
         },
         startIndexWatcher: () => {
-          throw new Error('should not watch a fixed project in global mode');
+          watched = true;
         },
         startMcpServer: async (project) => {
           startedProject = project;
@@ -147,6 +156,66 @@ describe('CLI serve command', () => {
       },
     )).resolves.toBeUndefined();
 
+    expect(startedProject).toBeUndefined();
+    expect(watched).toBe(false);
+  });
+
+  it('bootstraps and watches the CODE_MEMORY_PROJECT default while keeping auto-project MCP global', async () => {
+    const defaultProject = join(tempRoot, 'default-project');
+    process.env.CODE_MEMORY_PROJECT = defaultProject;
+    const watchedProjects: string[] = [];
+    let startedProject: string | undefined = 'not-called';
+
+    await expect(startServer(
+      { watch: true, autoProject: true },
+      {
+        bootstrapProject: async ({ project }) => {
+          mkdirSync(join(project, '.code-memory'), { recursive: true });
+          writeFileSync(
+            join(project, '.code-memory', 'config.json'),
+            JSON.stringify(createConfig(project), null, 2),
+            'utf-8',
+          );
+        },
+        startIndexWatcher: (project) => {
+          watchedProjects.push(project);
+        },
+        startMcpServer: async (project) => {
+          startedProject = project;
+        },
+      },
+    )).resolves.toBeUndefined();
+
+    expect(watchedProjects).toEqual([defaultProject]);
+    expect(startedProject).toBeUndefined();
+  });
+
+  it('bootstraps and watches an explicit --project default while keeping auto-project MCP global', async () => {
+    const defaultProject = join(tempRoot, 'explicit-project');
+    const watchedProjects: string[] = [];
+    let startedProject: string | undefined = 'not-called';
+
+    await expect(startServer(
+      { watch: true, autoProject: true, project: defaultProject },
+      {
+        bootstrapProject: async ({ project }) => {
+          mkdirSync(join(project, '.code-memory'), { recursive: true });
+          writeFileSync(
+            join(project, '.code-memory', 'config.json'),
+            JSON.stringify(createConfig(project), null, 2),
+            'utf-8',
+          );
+        },
+        startIndexWatcher: (project) => {
+          watchedProjects.push(project);
+        },
+        startMcpServer: async (project) => {
+          startedProject = project;
+        },
+      },
+    )).resolves.toBeUndefined();
+
+    expect(watchedProjects).toEqual([defaultProject]);
     expect(startedProject).toBeUndefined();
   });
 

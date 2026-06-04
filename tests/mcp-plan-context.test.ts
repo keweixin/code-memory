@@ -14,6 +14,14 @@ const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -26,6 +34,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 function createConfig(rootPath: string): CodeMemoryConfig {
@@ -91,15 +105,28 @@ describe('MCP plan_context', () => {
       sessionId: 'plan-session',
       avoidRepeated: true,
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      query: string;
+      intent: string;
+      ledger: { priorEntries: number; priorTokens: number };
+      recommendedCall: { tool: string };
+    }>(result);
 
-    expect(text).toContain('=== Index Diagnostics ===');
-    expect(text).toContain('Recommended action:');
-    expect(text).toContain('Context retrieval plan');
-    expect(text).toContain('Intent: debug');
-    expect(text).toContain('Ledger prior entries: 1');
-    expect(text).toContain('Ledger prior tokens: 321');
-    expect(text).toContain('pre-pack rerank penalty');
-    expect(text).toContain('Recommended next call:');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.data.query).toBe('debug login failure');
+    expect(structured.data.intent).toBe('debug');
+    expect(structured.data.ledger.priorEntries).toBe(1);
+    expect(structured.data.ledger.priorTokens).toBe(321);
+    expect(structured.data.recommendedCall.tool).toBe('get_context_pack');
+    expect(structured.nextAction.tool).toBe('get_context_pack');
+    expect(structured.display).toContain('=== Index Diagnostics ===');
+    expect(structured.display).toContain('Recommended action:');
+    expect(structured.display).toContain('Context retrieval plan');
+    expect(structured.display).toContain('Intent: debug');
+    expect(structured.display).toContain('Ledger prior entries: 1');
+    expect(structured.display).toContain('Ledger prior tokens: 321');
+    expect(structured.display).toContain('pre-pack rerank penalty');
+    expect(structured.display).toContain('Recommended next call:');
   });
 });

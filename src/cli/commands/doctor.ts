@@ -22,6 +22,9 @@ import { collectInvariants } from '../../storage/invariants.js';
 import type { SqlJsDatabase } from '../../storage/database.js';
 import { resolveEmbeddingConfig, resolveLlmConfig } from '../../shared/provider-config.js';
 import { resolveProjectPath } from '../project-path.js';
+import { readRegistry } from '../registry.js';
+import { getIndexStaleness } from '../../indexer/staleness.js';
+import { readWatchState } from '../../indexer/watch-state.js';
 
 const log = createLogger('doctor');
 const PROJECT_CONTEXT_MARKER = '<!-- CODE_MEMORY_CONTEXT_START -->';
@@ -309,7 +312,12 @@ export async function runDoctor(asJson: boolean, fix = false, deep = false, proj
   }
 
   if (asJson) {
-    console.log(JSON.stringify({ projectPath, checks, fixes }, null, 2));
+    console.log(JSON.stringify({
+      projectPath,
+      checks,
+      fixes,
+      ...buildDoctorSummary(projectPath, checks, dbPath),
+    }, null, 2));
     return;
   }
 
@@ -325,6 +333,83 @@ export async function runDoctor(asJson: boolean, fix = false, deep = false, proj
       console.log('      Suggestion: ' + check.suggestion);
     }
   }
+}
+
+function buildDoctorSummary(projectPath: string, checks: CheckResult[], dbPath: string): Record<string, unknown> {
+  const byName = new Map(checks.map((check) => [check.name, check]));
+  const configPath = join(projectPath, CONFIG_DIR, CONFIG_FILE);
+  const registry = readRegistry();
+  const registered = registry.repos.find((repo) => resolve(repo.rootPath) === resolve(projectPath)) || null;
+  const watchState = readWatchState(projectPath);
+  let staleness: unknown = null;
+  try {
+    staleness = getIndexStaleness(projectPath);
+  } catch {
+    staleness = null;
+  }
+
+  return {
+    config: {
+      exists: existsSync(configPath),
+      path: configPath,
+      status: byName.get('config')?.status ?? 'error',
+    },
+    index: {
+      exists: existsSync(dbPath),
+      path: dbPath,
+      status: byName.get('index')?.status ?? 'warn',
+    },
+    schema: {
+      status: byName.get('schema')?.status ?? 'warn',
+      message: byName.get('schema')?.message ?? 'Schema unavailable until an index can be opened.',
+    },
+    registry: {
+      registered: Boolean(registered),
+      name: registered?.name ?? null,
+      rootPath: registered?.rootPath ?? null,
+      repoCount: registry.repos.length,
+    },
+    watcher: {
+      active: Boolean(watchState?.active),
+      pid: watchState?.pid ?? null,
+      startedAt: watchState?.startedAt ?? null,
+      lastSyncAt: watchState?.lastSyncAt ?? null,
+      pendingFiles: watchState?.pendingFiles ?? [],
+      syncing: watchState?.syncing ?? false,
+      lastError: watchState?.lastError ?? null,
+    },
+    staleness,
+    agentConfig: {
+      context: byName.get('setup-context') ?? null,
+      skills: byName.get('setup-skills') ?? null,
+      hookScript: byName.get('setup-hook-script') ?? null,
+      hookSettings: byName.get('setup-hook-settings') ?? null,
+    },
+    repairCommands: buildRepairCommands(projectPath, byName, registered, watchState),
+  };
+}
+
+function buildRepairCommands(
+  projectPath: string,
+  checks: Map<string, CheckResult>,
+  registered: unknown,
+  watchState: ReturnType<typeof readWatchState>,
+): string[] {
+  const commands: string[] = [];
+  if (checks.get('config')?.status === 'error') {
+    commands.push('code-memory init --project ' + JSON.stringify(projectPath));
+  }
+  if (checks.get('index')?.status !== 'ok') {
+    commands.push('code-memory bootstrap --project ' + JSON.stringify(projectPath));
+  }
+  if (!registered) {
+    commands.push('code-memory register --project ' + JSON.stringify(projectPath));
+  }
+  if (watchState?.lastError) {
+    commands.push('code-memory sync --project ' + JSON.stringify(projectPath));
+  }
+  commands.push('code-memory setup --project ' + JSON.stringify(projectPath));
+  return [...new Set(commands)];
 }
 
 function collectOnboardingChecks(projectPath: string): CheckResult[] {

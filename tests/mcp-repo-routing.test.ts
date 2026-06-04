@@ -13,6 +13,14 @@ import { getMemoriesByType } from '../src/storage/memory-repository.js';
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -25,6 +33,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 describe('MCP repo routing', () => {
@@ -71,12 +85,27 @@ describe('MCP repo routing', () => {
     expect(routedResolution.content[0].text).toContain('"indexExists": true');
 
     const defaultCard = await server.handlers.get('get_project_card')!({});
-    expect(defaultCard.content[0].text).toContain('Name:       first-project');
-    expect(defaultCard.content[0].text).toContain(firstRoot);
+    const structuredDefaultCard = parseStructured<{
+      card: { name: string; root_path: string };
+    }>(defaultCard);
+    expect(structuredDefaultCard.status).toBe('ready');
+    expect(structuredDefaultCard.project.root).toBe(firstRoot);
+    expect(structuredDefaultCard.data.card.name).toBe('first-project');
+    expect(structuredDefaultCard.data.card.root_path).toBe(firstRoot);
+    expect(structuredDefaultCard.display).toContain('Name:       first-project');
+    expect(structuredDefaultCard.display).toContain(firstRoot);
 
     const routedCard = await server.handlers.get('get_project_card')!({ repo: 'second' });
-    expect(routedCard.content[0].text).toContain('Name:       second-project');
-    expect(routedCard.content[0].text).toContain(secondRoot);
+    const structuredRoutedCard = parseStructured<{
+      card: { name: string; root_path: string };
+    }>(routedCard);
+    expect(structuredRoutedCard.status).toBe('ready');
+    expect(structuredRoutedCard.project.root).toBe(secondRoot);
+    expect(structuredRoutedCard.project.repoName).toBe('second');
+    expect(structuredRoutedCard.data.card.name).toBe('second-project');
+    expect(structuredRoutedCard.data.card.root_path).toBe(secondRoot);
+    expect(structuredRoutedCard.display).toContain('Name:       second-project');
+    expect(structuredRoutedCard.display).toContain(secondRoot);
 
     const routedCode = await server.handlers.get('search_code')!({
       repo: 'second',
@@ -93,38 +122,96 @@ describe('MCP repo routing', () => {
       query: 'betaOnly',
       limit: 5,
     });
-    expect(routedSymbols.content[0].text).toContain('Symbol search for: "betaOnly"');
-    expect(routedSymbols.content[0].text).toContain('betaOnly');
+    const structuredSymbols = parseStructured<{
+      query: string;
+      resultCount: number;
+      results: Array<{ name: string }>;
+    }>(routedSymbols);
+    expect(structuredSymbols.status).toBe('ready');
+    expect(structuredSymbols.project.root).toBe(secondRoot);
+    expect(structuredSymbols.project.repoName).toBe('second');
+    expect(structuredSymbols.data.query).toBe('betaOnly');
+    expect(structuredSymbols.data.resultCount).toBeGreaterThan(0);
+    expect(structuredSymbols.data.results.some((symbol) => symbol.name === 'betaOnly')).toBe(true);
+    expect(structuredSymbols.nextAction.tool).toBe('find_definition');
+    expect(structuredSymbols.display).toContain('Symbol search for: "betaOnly"');
 
     const routedDefinition = await server.handlers.get('find_definition')!({
       repo: 'second',
       symbolName: 'betaOnly',
     });
-    expect(routedDefinition.content[0].text).toContain('Definition search for: "betaOnly"');
-    expect(routedDefinition.content[0].text).toContain('betaOnly');
+    const structuredDefinition = parseStructured<{
+      symbolName: string;
+      resultCount: number;
+      definitions: Array<{ name: string }>;
+    }>(routedDefinition);
+    expect(structuredDefinition.status).toBe('ready');
+    expect(structuredDefinition.project.root).toBe(secondRoot);
+    expect(structuredDefinition.project.repoName).toBe('second');
+    expect(structuredDefinition.data.symbolName).toBe('betaOnly');
+    expect(structuredDefinition.data.resultCount).toBeGreaterThan(0);
+    expect(structuredDefinition.data.definitions.some((definition) => definition.name === 'betaOnly')).toBe(true);
+    expect(structuredDefinition.nextAction.tool).toBe('find_references');
+    expect(structuredDefinition.display).toContain('Definition search for: "betaOnly"');
 
     const routedReferences = await server.handlers.get('find_references')!({
       repo: 'second',
       symbolName: 'betaOnlyHelper',
     });
-    expect(routedReferences.content[0].text).toContain('No references found for: betaOnlyHelper');
-    expect(routedReferences.content[0].text).not.toContain('No symbol found');
+    const structuredReferences = parseStructured<{
+      symbolName: string;
+      resultCount: number;
+      references: unknown[];
+    }>(routedReferences);
+    expect(structuredReferences.status).toBe('ready');
+    expect(structuredReferences.project.root).toBe(secondRoot);
+    expect(structuredReferences.project.repoName).toBe('second');
+    expect(structuredReferences.data.symbolName).toBe('betaOnlyHelper');
+    expect(structuredReferences.data.resultCount).toBe(0);
+    expect(structuredReferences.display).toContain('No references found for: betaOnlyHelper');
+    expect(structuredReferences.display).not.toContain('No symbol found');
 
     const routedCallGraph = await server.handlers.get('get_call_graph')!({
       repo: 'second',
       symbolName: 'betaOnly',
       depth: 2,
     });
-    expect(routedCallGraph.content[0].text).toContain('Call Graph for: betaOnly');
-    expect(routedCallGraph.content[0].text).toContain('betaOnlyHelper');
+    const structuredCallGraph = parseStructured<{
+      symbolName: string;
+      found: boolean;
+      nodes: Array<{ label: string }>;
+      edges: unknown[];
+    }>(routedCallGraph);
+    expect(structuredCallGraph.status).toBe('ready');
+    expect(structuredCallGraph.project.root).toBe(secondRoot);
+    expect(structuredCallGraph.project.repoName).toBe('second');
+    expect(structuredCallGraph.data.symbolName).toBe('betaOnly');
+    expect(structuredCallGraph.data.found).toBe(true);
+    expect(structuredCallGraph.data.nodes.some((node) => node.label === 'betaOnlyHelper')).toBe(true);
+    expect(structuredCallGraph.data.edges.length).toBeGreaterThan(0);
+    expect(structuredCallGraph.display).toContain('Call Graph for: betaOnly');
+    expect(structuredCallGraph.display).toContain('betaOnlyHelper');
 
     const routedDependencyGraph = await server.handlers.get('get_dependency_graph')!({
       repo: 'second',
       filePath: 'src/index.ts',
       depth: 1,
     });
-    expect(routedDependencyGraph.content[0].text).toContain('Dependency Graph for: src/index.ts');
-    expect(routedDependencyGraph.content[0].text).toContain('src/helper.ts');
+    const structuredDependencyGraph = parseStructured<{
+      filePath: string;
+      found: boolean;
+      nodes: Array<{ label: string }>;
+      edges: unknown[];
+    }>(routedDependencyGraph);
+    expect(structuredDependencyGraph.status).toBe('ready');
+    expect(structuredDependencyGraph.project.root).toBe(secondRoot);
+    expect(structuredDependencyGraph.project.repoName).toBe('second');
+    expect(structuredDependencyGraph.data.filePath).toBe('src/index.ts');
+    expect(structuredDependencyGraph.data.found).toBe(true);
+    expect(structuredDependencyGraph.data.nodes.some((node) => node.label === 'src/helper.ts')).toBe(true);
+    expect(structuredDependencyGraph.data.edges.length).toBeGreaterThan(0);
+    expect(structuredDependencyGraph.display).toContain('Dependency Graph for: src/index.ts');
+    expect(structuredDependencyGraph.display).toContain('src/helper.ts');
 
     const routedImpact = await server.handlers.get('impact_analysis')!({
       repo: 'second',
@@ -151,15 +238,40 @@ describe('MCP repo routing', () => {
       repo: 'second',
       target: 'src/index.ts',
     });
-    expect(routedRelatedTests.content[0].text).toContain('Related Tests for: src/index.ts');
-    expect(routedRelatedTests.content[0].text).toContain('src/index.test.ts');
+    const structuredRelatedTests = parseStructured<{
+      target: string;
+      resultCount: number;
+      tests: Array<{ filePath: string; method: string }>;
+      runCommand: string;
+    }>(routedRelatedTests);
+    expect(structuredRelatedTests.status).toBe('ready');
+    expect(structuredRelatedTests.project.root).toBe(secondRoot);
+    expect(structuredRelatedTests.project.repoName).toBe('second');
+    expect(structuredRelatedTests.data.target).toBe('src/index.ts');
+    expect(structuredRelatedTests.data.resultCount).toBe(1);
+    expect(structuredRelatedTests.data.tests[0].filePath).toBe('src/index.test.ts');
+    expect(structuredRelatedTests.data.tests[0].method).toBe('graph (TESTS edge)');
+    expect(structuredRelatedTests.nextAction.command).toContain('npx vitest run src/index.test.ts');
+    expect(structuredRelatedTests.display).toContain('Related Tests for: src/index.ts');
 
     const routedRepoMap = await server.handlers.get('get_repo_map')!({
       repo: 'second',
       tokenBudget: 1200,
     });
-    expect(routedRepoMap.content[0].text).toContain('betaOnly');
-    expect(routedRepoMap.content[0].text).not.toContain('alphaOnly');
+    const structuredRepoMap = parseStructured<{
+      fileCount: number;
+      symbolCount: number;
+      files: Array<{ path: string; symbols: Array<{ name: string }> }>;
+    }>(routedRepoMap);
+    expect(structuredRepoMap.status).toBe('ready');
+    expect(structuredRepoMap.project.root).toBe(secondRoot);
+    expect(structuredRepoMap.project.repoName).toBe('second');
+    expect(structuredRepoMap.data.fileCount).toBe(3);
+    expect(structuredRepoMap.data.symbolCount).toBeGreaterThan(0);
+    expect(structuredRepoMap.data.files.some((file) =>
+      file.symbols.some((symbol) => symbol.name === 'betaOnly'))).toBe(true);
+    expect(structuredRepoMap.display).toContain('betaOnly');
+    expect(structuredRepoMap.display).not.toContain('alphaOnly');
 
     const routedPlan = await server.handlers.get('plan_context')!({
       repo: 'second',
@@ -167,9 +279,20 @@ describe('MCP repo routing', () => {
       sessionId: 'repo-routing-plan',
       tokenBudget: 1500,
     });
-    expect(routedPlan.content[0].text).toContain('Context retrieval plan');
-    expect(routedPlan.content[0].text).toContain('Query: change betaOnly behavior');
-    expect(routedPlan.content[0].text).toContain('repo: "second"');
+    const structuredPlan = parseStructured<{
+      query: string;
+      recommendedCall: { tool: string; args: { repo?: string } };
+    }>(routedPlan);
+    expect(structuredPlan.status).toBe('ready');
+    expect(structuredPlan.project.root).toBe(secondRoot);
+    expect(structuredPlan.project.repoName).toBe('second');
+    expect(structuredPlan.data.query).toBe('change betaOnly behavior');
+    expect(structuredPlan.data.recommendedCall.tool).toBe('get_context_pack');
+    expect(structuredPlan.data.recommendedCall.args.repo).toBe('second');
+    expect(structuredPlan.nextAction.tool).toBe('get_context_pack');
+    expect(structuredPlan.display).toContain('Context retrieval plan');
+    expect(structuredPlan.display).toContain('Query: change betaOnly behavior');
+    expect(structuredPlan.display).toContain('repo: "second"');
 
     const routedContext = await server.handlers.get('get_context_pack')!({
       repo: 'second',
@@ -229,7 +352,21 @@ describe('MCP repo routing', () => {
       scope: ['src/index.ts'],
       confidence: 0.9,
     });
-    expect(routedRemember.content[0].text).toContain('Memory saved successfully');
+    const structuredRemember = parseStructured<{
+      id: string;
+      type: string;
+      content: string;
+      scope: string[];
+      confidence: number;
+    }>(routedRemember);
+    expect(structuredRemember.status).toBe('ready');
+    expect(structuredRemember.project.root).toBe(secondRoot);
+    expect(structuredRemember.project.repoName).toBe('second');
+    expect(structuredRemember.data.type).toBe('decision');
+    expect(structuredRemember.data.content).toContain('second repo memory store');
+    expect(structuredRemember.data.scope).toEqual(['src/index.ts']);
+    expect(structuredRemember.data.confidence).toBe(0.9);
+    expect(structuredRemember.display).toContain('Memory saved successfully');
     expect(getMemoriesByType('decision')).toHaveLength(0);
 
     const secondDb = openExistingDatabase(secondRoot);
@@ -242,7 +379,17 @@ describe('MCP repo routing', () => {
         repo: 'second',
         memoryId: secondMemories[0].id,
       });
-      expect(routedInvalidate.content[0].text).toContain('Deleted memory: ' + secondMemories[0].id);
+      const structuredInvalidate = parseStructured<{
+        memoryId: string | null;
+        deletedCount: number;
+        deleted: Array<{ id: string; type: string }>;
+      }>(routedInvalidate);
+      expect(structuredInvalidate.status).toBe('ready');
+      expect(structuredInvalidate.project.root).toBe(secondRoot);
+      expect(structuredInvalidate.data.memoryId).toBe(secondMemories[0].id);
+      expect(structuredInvalidate.data.deletedCount).toBe(1);
+      expect(structuredInvalidate.data.deleted[0].id).toBe(secondMemories[0].id);
+      expect(structuredInvalidate.display).toContain('Deleted memory: ' + secondMemories[0].id);
       expect(getMemoriesByType('decision', secondDb)).toHaveLength(0);
     } finally {
       secondDb.close();
@@ -268,8 +415,13 @@ describe('MCP repo routing', () => {
       query: 'change gammaOnly behavior',
       tokenBudget: 1500,
     });
-    expect(plan.content[0].text).toContain('Context retrieval plan');
-    expect(plan.content[0].text).toContain('Query: change gammaOnly behavior');
+    const structuredPlan = parseStructured<{ query: string }>(plan);
+    expect(structuredPlan.status).toBe('ready');
+    expect(structuredPlan.project.root).toBe(projectRoot);
+    expect(structuredPlan.project.repoName).toBe('global-target');
+    expect(structuredPlan.data.query).toBe('change gammaOnly behavior');
+    expect(structuredPlan.display).toContain('Context retrieval plan');
+    expect(structuredPlan.display).toContain('Query: change gammaOnly behavior');
 
     const search = await server.handlers.get('search_code')!({
       repo: 'global-target',
@@ -304,8 +456,13 @@ describe('MCP repo routing', () => {
       query: 'change deltaOnly behavior',
       tokenBudget: 1500,
     });
-    expect(plan.content[0].text).toContain('Context retrieval plan');
-    expect(plan.content[0].text).toContain('Query: change deltaOnly behavior');
+    const structuredPlan = parseStructured<{ query: string }>(plan);
+    expect(structuredPlan.status).toBe('ready');
+    expect(structuredPlan.project.root).toBe(projectRoot);
+    expect(structuredPlan.project.repoName).toBe('project-arg-target');
+    expect(structuredPlan.data.query).toBe('change deltaOnly behavior');
+    expect(structuredPlan.display).toContain('Context retrieval plan');
+    expect(structuredPlan.display).toContain('Query: change deltaOnly behavior');
 
     const search = await server.handlers.get('search_code')!({
       project: projectRoot,
@@ -334,15 +491,33 @@ describe('MCP repo routing', () => {
       query: 'deltaOnly',
       returnedFiles: ['src/index.ts'],
     });
-    expect(marked.content[0].text).toContain('Context ledger entry recorded');
+    const structuredMarked = parseStructured<{
+      entryId: string;
+      sessionId: string;
+      query: string;
+      returnedFiles: string[];
+    }>(marked);
+    expect(structuredMarked.status).toBe('ready');
+    expect(structuredMarked.project.root).toBe(projectRoot);
+    expect(structuredMarked.data.sessionId).toBe('project-arg-ledger');
+    expect(structuredMarked.data.query).toBe('deltaOnly');
+    expect(structuredMarked.data.returnedFiles).toEqual(['src/index.ts']);
+    expect(structuredMarked.display).toContain('Context ledger entry recorded');
 
     const delta = await server.handlers.get('get_context_delta')!({
       project: projectRoot,
       sessionId: 'project-arg-ledger',
       candidateFiles: ['src/index.ts', 'src/helper.ts'],
     });
-    expect(delta.content[0].text).toContain('Repeated files: src/index.ts');
-    expect(delta.content[0].text).toContain('New files: src/helper.ts');
+    const structuredDelta = parseStructured<{
+      delta: { repeatedFiles: string[]; newFiles: string[] };
+    }>(delta);
+    expect(structuredDelta.status).toBe('ready');
+    expect(structuredDelta.project.root).toBe(projectRoot);
+    expect(structuredDelta.data.delta.repeatedFiles).toEqual(['src/index.ts']);
+    expect(structuredDelta.data.delta.newFiles).toEqual(['src/helper.ts']);
+    expect(structuredDelta.display).toContain('Repeated files: src/index.ts');
+    expect(structuredDelta.display).toContain('New files: src/helper.ts');
   }, 20_000);
 });
 

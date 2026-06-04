@@ -13,6 +13,14 @@ const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -25,6 +33,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 function createConfig(rootPath: string): CodeMemoryConfig {
@@ -88,14 +102,32 @@ describe('MCP project card', () => {
     registerGetProjectCardTool(server as never, db);
 
     const result = await server.handlers.get('get_project_card')!({});
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      card: {
+        name: string;
+        current_branch: string;
+        current_commit: string;
+        index_completed: string;
+        embedding_provider: string;
+        embedding_model: string;
+        vector_search: string | null;
+      };
+    }>(result);
 
-    expect(text).toContain('Name:       sample-ts-project');
-    expect(text).toContain('Branch:     feature/context-evidence');
-    expect(text).toContain('Commit:     abc123def456');
-    expect(text).toContain('Index Completed: 2026-05-31T09:00:00.000Z');
-    expect(text).toContain('Embedding:  none (none)');
-    expect(text).toContain('Vector:     disabled');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.data.card.name).toBe('sample-ts-project');
+    expect(structured.data.card.current_branch).toBe('feature/context-evidence');
+    expect(structured.data.card.current_commit).toBe('abc123def456');
+    expect(structured.data.card.index_completed).toBe('2026-05-31T09:00:00.000Z');
+    expect(structured.data.card.embedding_provider).toBe('none');
+    expect(structured.data.card.embedding_model).toBe('none');
+    expect(structured.display).toContain('Name:       sample-ts-project');
+    expect(structured.display).toContain('Branch:     feature/context-evidence');
+    expect(structured.display).toContain('Commit:     abc123def456');
+    expect(structured.display).toContain('Index Completed: 2026-05-31T09:00:00.000Z');
+    expect(structured.display).toContain('Embedding:  none (none)');
+    expect(structured.display).toContain('Vector:     disabled');
   });
 
   it('reports vector search as enabled when index metadata proves it', async () => {
@@ -112,9 +144,18 @@ describe('MCP project card', () => {
     registerGetProjectCardTool(server as never, db);
 
     const result = await server.handlers.get('get_project_card')!({});
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      card: {
+        embedding_provider: string;
+        embedding_model: string;
+        vector_search: string | null;
+      };
+    }>(result);
 
-    expect(text).toContain('Embedding:  ollama (test-embed)');
-    expect(text).toContain('Vector:     enabled');
+    expect(structured.data.card.embedding_provider).toBe('ollama');
+    expect(structured.data.card.embedding_model).toBe('test-embed');
+    expect(structured.data.card.vector_search).toBe('enabled');
+    expect(structured.display).toContain('Embedding:  ollama (test-embed)');
+    expect(structured.display).toContain('Vector:     enabled');
   });
 });

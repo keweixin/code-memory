@@ -4,7 +4,7 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
-Current source version: `0.3.9`.
+Current source version: `0.4.0`.
 
 Published npm status can lag the repository. Check before using `@latest`:
 
@@ -12,7 +12,7 @@ Published npm status can lag the repository. Check before using `@latest`:
 npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.3.9`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest structured MCP tool results, allowed-read constraints, real-repo benchmark runner, benchmark gate fixes, and CLI mirror hardening yet.
+If npm reports a version older than `0.4.0`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest global MCP watch routing, multi-repo project selection, structured real-repo benchmark metrics, structured MCP tool results, allowed-read constraints, benchmark gate fixes, and CLI mirror hardening yet.
 
 Run this from the project you want an agent to understand:
 
@@ -122,6 +122,9 @@ npx -y @keweixin/code-memory@latest serve --watch --project . --no-bootstrap
 | `init --project .` | Create `.code-memory/config.json` only |
 | `index --project . --full` | Full re-index |
 | `sync --project .` | Incremental index sync |
+| `repair --project .` | Bootstrap, register, and repair project routing state |
+| `upgrade --project .` | Apply storage/schema upgrades and report reindex needs |
+| `clean --project .` | Sync, clear inactive watch state, and vacuum local storage |
 | `watch --project .` | Watch files and keep the index fresh |
 | `query "auth" --project .` | Search indexed code from the CLI |
 | `tool --list --project .` | List MCP tools exposed through the CLI mirror |
@@ -249,7 +252,7 @@ npm run benchmark:gate -- --index benchmark-index.json --context benchmark-conte
 npm run benchmark:real-repos -- --dry-run
 ```
 
-The real-repo benchmark runner reads `benchmark/real-repos.json`, clones pinned commits only when not in `--dry-run`, bootstraps each project, runs the same CLI mirror tools an agent would use, and reports `realRepoKeyFileRecall`, `realRepoEvidenceCoverage`, `relatedTestRecall`, `wrongProjectRouteRate`, and `staleFailureRate`. Use `--repo <name>` or `--task <id>` for focused runs, and add `--fail-on-threshold` when you want configured minimums to fail the command.
+The real-repo benchmark runner reads `benchmark/real-repos.json`, clones pinned commits only when not in `--dry-run`, bootstraps each project, runs the same CLI mirror tools an agent would use, and reports `realRepoKeyFileRecall`, `realRepoEvidenceCoverage`, `relatedTestRecall`, `wrongProjectRouteRate`, and `staleFailureRate`. Full runs write `benchmark-results/real-repos.latest.json` and `benchmark-results/real-repos.summary.md`; release CI runs only the deterministic dry-run, while nightly/manual runs can use `--fail-on-threshold` for real scores. Use `--repo <name>` or `--task <id>` for focused runs.
 
 ## Language Support
 
@@ -287,6 +290,7 @@ More detailed docs:
 - [Agents](docs/agents.md)
 - [MCP tools](docs/mcp-tools.md)
 - [Resources](docs/resources.md)
+- [Schema freeze](docs/schema-freeze.md)
 - [Hooks](docs/hooks.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Development](docs/development.md)

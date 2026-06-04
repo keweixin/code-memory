@@ -21,6 +21,7 @@ import { registerWikiCommand } from './commands/wiki.js';
 import { registerBootstrapCommand } from './commands/bootstrap.js';
 import { registerAnalyzeCommand } from './commands/analyze.js';
 import { registerToolCommand } from './commands/tool.js';
+import { registerLifecycleCommands } from './commands/lifecycle.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -45,6 +46,7 @@ export function createCli(): Command {
   registerBootstrapCommand(program);
   registerAnalyzeCommand(program);
   registerToolCommand(program);
+  registerLifecycleCommands(program);
 
   return program;
 }

@@ -4,7 +4,7 @@
 
 import type { Command } from 'commander';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { CodeMemoryConfig } from '../../shared/types.js';
 import { CONFIG_DIR, CONFIG_FILE } from '../../shared/constants.js';
 import { createLogger } from '../../shared/logger.js';
@@ -70,6 +70,7 @@ export class ServeCommandError extends Error {
 export interface ServeDependencies {
   bootstrapProject?: (options: { project: string; embedding?: string; workers?: string }) => Promise<void>;
   startIndexWatcher?: (projectPath: string, config: CodeMemoryConfig) => unknown;
+  watchRegistry?: WatchRegistry;
   startMcpServer?: (
     projectPath?: string,
     options?: { installSignalHandlers?: boolean; onShutdownComplete?: (signal: string) => void },
@@ -86,6 +87,16 @@ export async function startServer(options: ServeOptions, deps: ServeDependencies
 
   if (options.autoProject) {
     log.info('Starting global MCP server with auto-project routing...');
+    const defaultProject = getAutoProjectDefault(options);
+    if (options.watch && defaultProject) {
+      if (options.bootstrap !== false) {
+        await bootstrapBeforeServe(defaultProject, deps);
+      }
+      const watchRegistry = deps.watchRegistry ?? new WatchRegistry(deps);
+      await watchRegistry.ensureWatching(defaultProject);
+    } else if (options.watch) {
+      log.info('No default project found for --auto-project; watcher will not bind to cwd.');
+    }
     await startMcp(undefined, deps);
     return;
   }
@@ -105,6 +116,35 @@ export async function startServer(options: ServeOptions, deps: ServeDependencies
   log.info('Starting MCP server...');
 
   await startMcp(projectPath, deps);
+}
+
+export class WatchRegistry {
+  private readonly handles = new Map<string, unknown>();
+
+  constructor(private readonly deps: ServeDependencies = {}) {}
+
+  async ensureWatching(projectRoot: string): Promise<void> {
+    const root = resolve(projectRoot);
+    if (this.handles.has(root)) return;
+    const config = loadServeConfig(root);
+    const handle = await startWatcher(root, config, this.deps);
+    this.handles.set(root, handle);
+  }
+
+  async stopAll(): Promise<void> {
+    const handles = [...this.handles.values()];
+    this.handles.clear();
+    for (const handle of handles) {
+      await stopWatcherHandle(handle);
+    }
+  }
+}
+
+function getAutoProjectDefault(options: ServeOptions): string | null {
+  const project = options.project?.trim();
+  if (project) return resolve(project);
+  const envProject = process.env.CODE_MEMORY_PROJECT?.trim();
+  return envProject ? resolve(envProject) : null;
 }
 
 async function startMcp(projectPath: string | undefined, deps: ServeDependencies): Promise<void> {
@@ -171,18 +211,34 @@ async function startWatcher(
   projectPath: string,
   config: CodeMemoryConfig,
   deps: ServeDependencies,
-): Promise<void> {
+): Promise<unknown> {
   try {
     const startIndexWatcher = deps.startIndexWatcher ??
       (await import('../../indexer/watch-service.js')).startIndexWatcher;
-    startIndexWatcher(projectPath, config);
+    const handle = startIndexWatcher(projectPath, config);
     log.info('Index watcher started');
+    return handle;
   } catch (err) {
     throw new ServeCommandError(
       'WATCH_START_FAILED',
       'Failed to start the index watcher.',
       err,
     );
+  }
+}
+
+async function stopWatcherHandle(handle: unknown): Promise<void> {
+  if (!handle || typeof handle !== 'object') return;
+  const candidate = handle as {
+    stop?: () => void | Promise<void>;
+    close?: () => void | Promise<void>;
+  };
+  if (typeof candidate.stop === 'function') {
+    await candidate.stop();
+    return;
+  }
+  if (typeof candidate.close === 'function') {
+    await candidate.close();
   }
 }
 

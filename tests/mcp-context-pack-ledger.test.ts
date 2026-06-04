@@ -15,6 +15,51 @@ const fixtureRoot = resolve('tests/fixtures/sample-ts-project');
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
 
+interface ContextPackEnvelope {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  data: {
+    contextPackId: string;
+    sessionId: string;
+    autoRecorded: boolean;
+    repeatedContext: {
+      omitted: boolean;
+      totalPriorTokens: number;
+      newFiles: number;
+      repeatedFiles: number;
+      newChunks: number;
+      repeatedChunks: number;
+      noveltyScore: number;
+      repeatedPenalty: number;
+    };
+    trustContract: {
+      confidence: string;
+      allowedNextReads: Array<{
+        path: string;
+        lineRange?: string;
+        reason: string;
+        readPriority: string;
+      }>;
+      discouragedReads: Array<{ pattern: string; reason: string }>;
+      exactSnippets: Array<{
+        path: string;
+        startLine: number;
+        endLine: number;
+        code: string;
+        whyIncluded: string;
+      }>;
+      evidence: Array<{
+        file: string | null;
+        line: number | null;
+        confidence: number;
+        provenance: string;
+      }>;
+      relatedTests: Array<{ path: string; reason: string; confidence: number }>;
+    };
+  };
+  display: string;
+}
+
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
 
@@ -85,6 +130,7 @@ describe('MCP context pack ledger integration', () => {
       avoidRepeated: true,
     });
     const firstText = first.content[0].text;
+    const firstStructured = JSON.parse(firstText) as ContextPackEnvelope;
 
     expect(firstText).toContain('=== Index Diagnostics ===');
     expect(firstText).toContain('Last indexed commit:');
@@ -94,6 +140,29 @@ describe('MCP context pack ledger integration', () => {
     expect(firstText).toContain('"code"');
     expect(firstText).toContain('Ledger entry:');
     expect(firstText).toContain('async login(request: LoginRequest)');
+    expect(firstStructured.status).toBe('ready');
+    expect(firstStructured.data.autoRecorded).toBe(true);
+    expect(firstStructured.data.contextPackId).toBeTruthy();
+    expect(firstStructured.data.sessionId).toBe('session-login');
+    expect(firstStructured.data.repeatedContext.omitted).toBe(false);
+    expect(firstStructured.data.trustContract.exactSnippets[0]).toMatchObject({
+      path: expect.any(String),
+      startLine: expect.any(Number),
+      endLine: expect.any(Number),
+      code: expect.any(String),
+      whyIncluded: expect.any(String),
+    });
+    expect(firstStructured.data.trustContract.evidence[0]).toMatchObject({
+      file: expect.any(String),
+      line: expect.any(Number),
+      confidence: expect.any(Number),
+      provenance: expect.any(String),
+    });
+    expect(firstStructured.data.trustContract.allowedNextReads[0]).toMatchObject({
+      path: expect.any(String),
+      reason: expect.any(String),
+      readPriority: expect.any(String),
+    });
 
     const second = await server.handlers.get('get_context_pack')!({
       query: 'login',
@@ -102,12 +171,35 @@ describe('MCP context pack ledger integration', () => {
       avoidRepeated: true,
     });
     const secondText = second.content[0].text;
+    const secondStructured = JSON.parse(secondText) as ContextPackEnvelope;
 
     expect(secondText).toContain('Repeated chunks:');
     expect(secondText).toContain('Repeated context omitted for session session-login.');
     expect(secondText).toContain('Fill-after-omit used 60 ranked candidates');
     expect(secondText).not.toContain('async login(request: LoginRequest)');
+    expect(secondStructured.data.autoRecorded).toBe(true);
+    expect(secondStructured.data.sessionId).toBe('session-login');
+    expect(secondStructured.data.repeatedContext.omitted).toBe(true);
+    expect(secondStructured.data.repeatedContext.repeatedChunks).toBeGreaterThan(0);
     expect(getContextLedgerEntries('session-login')).toHaveLength(2);
+  });
+
+  it('auto-records a context pack when callers omit sessionId and returns the generated session identity', async () => {
+    await indexFixture(tempRoot);
+    const server = new FakeMcpServer();
+    registerGetContextPackTool(server as never, getDatabaseSync());
+
+    const result = await server.handlers.get('get_context_pack')!({
+      query: 'login',
+      tokenBudget: 12000,
+      levels: 'L4',
+    });
+    const structured = JSON.parse(result.content[0].text) as ContextPackEnvelope;
+
+    expect(structured.data.autoRecorded).toBe(true);
+    expect(structured.data.contextPackId).toBeTruthy();
+    expect(structured.data.sessionId).toMatch(/^auto-/);
+    expect(getContextLedgerEntries(structured.data.sessionId)).toHaveLength(1);
   });
 
   it('fills with new code snippets after omitting lower-level repeated context', async () => {
@@ -122,9 +214,11 @@ describe('MCP context pack ledger integration', () => {
       avoidRepeated: true,
     });
     const firstText = first.content[0].text;
+    const firstStructured = JSON.parse(firstText) as ContextPackEnvelope;
 
     expect(firstText).toContain('New symbols:');
     expect(firstText).not.toContain('=== Code ===');
+    expect(firstStructured.data.repeatedContext.omitted).toBe(false);
 
     const second = await server.handlers.get('get_context_pack')!({
       query: 'login',
@@ -133,6 +227,7 @@ describe('MCP context pack ledger integration', () => {
       avoidRepeated: true,
     });
     const secondText = second.content[0].text;
+    const secondStructured = JSON.parse(secondText) as ContextPackEnvelope;
 
     expect(secondText).toContain('Repeated symbols:');
     expect(secondText).toContain('New chunks:');
@@ -140,6 +235,8 @@ describe('MCP context pack ledger integration', () => {
     expect(secondText).toContain('Fill-after-omit used 60 ranked candidates');
     expect(secondText).toContain('=== Code ===');
     expect(secondText).toContain('async function issueTokens(payload: TokenPayload): Promise<TokenPair>');
+    expect(secondStructured.data.repeatedContext.omitted).toBe(true);
+    expect(secondStructured.data.repeatedContext.repeatedFiles).toBeGreaterThan(0);
   });
 
   it('honors the requested maximum context detail level', async () => {
@@ -153,10 +250,13 @@ describe('MCP context pack ledger integration', () => {
       levels: 'L2',
     });
     const text = result.content[0].text;
+    const structured = JSON.parse(text) as ContextPackEnvelope;
 
     expect(text).toContain('=== Symbols ===');
     expect(text).not.toContain('=== Code ===');
     expect(text).not.toContain('const user = await findUserByEmail(request.email);');
     expect(text).toContain('[Context: level=L2,');
+    expect(structured.data.trustContract.exactSnippets).toHaveLength(0);
+    expect(structured.data.trustContract.allowedNextReads[0].path).toBeTruthy();
   });
 });

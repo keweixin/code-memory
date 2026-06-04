@@ -8,6 +8,14 @@ import { getContextLedgerEntries, getContextLedgerEntriesForDb } from '../src/me
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -20,6 +28,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 describe('MCP context ledger tools', () => {
@@ -56,10 +70,22 @@ describe('MCP context ledger tools', () => {
       contextType: 'file',
       feedback: 'stale',
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      contextId: string;
+      repeated: boolean;
+      seenCount: number;
+      priorTokens: number;
+      seenEntries: Array<{ query: string; agentFeedback: string | null }>;
+    }>(result);
 
-    expect(text).toContain('src/services/AuthService.ts is repeated for session session-feedback');
-    expect(text).toContain('query="first search" feedback=stale');
+    expect(structured.data.contextId).toBe('src/services/AuthService.ts');
+    expect(structured.data.repeated).toBe(true);
+    expect(structured.data.seenCount).toBe(1);
+    expect(structured.data.priorTokens).toBe(300);
+    expect(structured.data.seenEntries[0].query).toBe('first search');
+    expect(structured.data.seenEntries[0].agentFeedback).toBe('stale');
+    expect(structured.display).toContain('src/services/AuthService.ts is repeated for session session-feedback');
+    expect(structured.display).toContain('query="first search" feedback=stale');
 
     const entries = getContextLedgerEntries('session-feedback');
     expect(entries.map((entry) => [entry.query, entry.agentFeedback])).toEqual([
@@ -98,24 +124,43 @@ describe('MCP context ledger tools', () => {
       sessionId: 'same-session',
       candidateFiles: ['src/beta.ts'],
     });
-    expect(defaultDelta.content[0].text).toContain('New files: src/beta.ts');
-    expect(defaultDelta.content[0].text).toContain('Prior tokens: 10');
+    const structuredDefaultDelta = parseStructured<{
+      delta: { newFiles: string[]; repeatedFiles: string[]; totalPriorTokens: number };
+    }>(defaultDelta);
+    expect(structuredDefaultDelta.project.root).toBe(firstRoot);
+    expect(structuredDefaultDelta.data.delta.newFiles).toEqual(['src/beta.ts']);
+    expect(structuredDefaultDelta.data.delta.totalPriorTokens).toBe(10);
+    expect(structuredDefaultDelta.display).toContain('New files: src/beta.ts');
+    expect(structuredDefaultDelta.display).toContain('Prior tokens: 10');
 
     const routedDelta = await server.handlers.get('get_context_delta')!({
       repo: secondRoot,
       sessionId: 'same-session',
       candidateFiles: ['src/beta.ts'],
     });
-    expect(routedDelta.content[0].text).toContain('Repeated files: src/beta.ts');
-    expect(routedDelta.content[0].text).toContain('Prior tokens: 20');
+    const structuredRoutedDelta = parseStructured<{
+      delta: { newFiles: string[]; repeatedFiles: string[]; totalPriorTokens: number };
+    }>(routedDelta);
+    expect(structuredRoutedDelta.project.root).toBe(secondRoot);
+    expect(structuredRoutedDelta.data.delta.repeatedFiles).toEqual(['src/beta.ts']);
+    expect(structuredRoutedDelta.data.delta.totalPriorTokens).toBe(20);
+    expect(structuredRoutedDelta.display).toContain('Repeated files: src/beta.ts');
+    expect(structuredRoutedDelta.display).toContain('Prior tokens: 20');
 
     const routedRepeatCheck = await server.handlers.get('avoid_repeated_context')!({
       repo: secondRoot,
       sessionId: 'same-session',
       candidateFiles: ['src/beta.ts', 'src/gamma.ts'],
     });
-    expect(routedRepeatCheck.content[0].text).toContain('Keep files: src/gamma.ts');
-    expect(routedRepeatCheck.content[0].text).toContain('Drop repeated files: src/beta.ts');
+    const structuredRepeatCheck = parseStructured<{
+      keep: { files: string[] };
+      drop: { files: string[] };
+    }>(routedRepeatCheck);
+    expect(structuredRepeatCheck.project.root).toBe(secondRoot);
+    expect(structuredRepeatCheck.data.keep.files).toEqual(['src/gamma.ts']);
+    expect(structuredRepeatCheck.data.drop.files).toEqual(['src/beta.ts']);
+    expect(structuredRepeatCheck.display).toContain('Keep files: src/gamma.ts');
+    expect(structuredRepeatCheck.display).toContain('Drop repeated files: src/beta.ts');
 
     const routedExplanation = await server.handlers.get('explain_why_this_context')!({
       repo: secondRoot,
@@ -124,27 +169,45 @@ describe('MCP context ledger tools', () => {
       contextType: 'file',
       feedback: 'useful',
     });
-    expect(routedExplanation.content[0].text).toContain('src/beta.ts is repeated for session same-session');
-    expect(routedExplanation.content[0].text).toContain('feedback=useful');
+    const structuredExplanation = parseStructured<{
+      contextId: string;
+      repeated: boolean;
+      seenEntries: Array<{ agentFeedback: string | null }>;
+    }>(routedExplanation);
+    expect(structuredExplanation.project.root).toBe(secondRoot);
+    expect(structuredExplanation.data.contextId).toBe('src/beta.ts');
+    expect(structuredExplanation.data.repeated).toBe(true);
+    expect(structuredExplanation.data.seenEntries[0].agentFeedback).toBe('useful');
+    expect(structuredExplanation.display).toContain('src/beta.ts is repeated for session same-session');
+    expect(structuredExplanation.display).toContain('feedback=useful');
 
     const defaultCompact = await server.handlers.get('compact_session_context')!({
       sessionId: 'same-session',
     });
-    expect(defaultCompact.content[0].text).toContain('Files: src/alpha.ts');
-    expect(defaultCompact.content[0].text).not.toContain('src/beta.ts');
+    const structuredDefaultCompact = parseStructured<{ files: string[] }>(defaultCompact);
+    expect(structuredDefaultCompact.project.root).toBe(firstRoot);
+    expect(structuredDefaultCompact.data.files).toEqual(['src/alpha.ts']);
+    expect(structuredDefaultCompact.display).toContain('Files: src/alpha.ts');
+    expect(structuredDefaultCompact.display).not.toContain('src/beta.ts');
 
     const routedCompact = await server.handlers.get('compact_session_context')!({
       repo: secondRoot,
       sessionId: 'same-session',
     });
-    expect(routedCompact.content[0].text).toContain('Files: src/beta.ts');
-    expect(routedCompact.content[0].text).not.toContain('src/alpha.ts');
+    const structuredRoutedCompact = parseStructured<{ files: string[] }>(routedCompact);
+    expect(structuredRoutedCompact.project.root).toBe(secondRoot);
+    expect(structuredRoutedCompact.data.files).toEqual(['src/beta.ts']);
+    expect(structuredRoutedCompact.display).toContain('Files: src/beta.ts');
+    expect(structuredRoutedCompact.display).not.toContain('src/alpha.ts');
 
     const routedReset = await server.handlers.get('reset_context_session')!({
       repo: secondRoot,
       sessionId: 'same-session',
     });
-    expect(routedReset.content[0].text).toContain('Removed ledger entries: 1');
+    const structuredReset = parseStructured<{ removed: number }>(routedReset);
+    expect(structuredReset.project.root).toBe(secondRoot);
+    expect(structuredReset.data.removed).toBe(1);
+    expect(structuredReset.display).toContain('Removed ledger entries: 1');
 
     const secondDb = openExistingDatabase(secondRoot);
     try {

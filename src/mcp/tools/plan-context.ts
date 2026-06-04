@@ -22,6 +22,11 @@ import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
 import {
+  errorToolResult,
+  formatStructuredToolResult,
+  toolResultFromProject,
+} from "../tool-result.js";
+import {
   attachStaleBanner,
   partitionPending,
 } from "./_stale-banner.js";
@@ -50,7 +55,7 @@ export function registerPlanContextTool(server: McpServer, db?: SqlJsDatabase): 
     },
     async ({ query, tokenBudget, intent, searchMode, levels, sessionId, avoidRepeated, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const classification = classifySearchIntent(query, intent as SearchIntent | undefined);
           const graphProfile = getIntentGraphProfile(classification.intent);
           const metadata = getIndexMetadata(activeDb);
@@ -100,7 +105,67 @@ export function registerPlanContextTool(server: McpServer, db?: SqlJsDatabase): 
           log.info("Planned context retrieval for: " + query);
           const planText = applyOutputCharBudget(lines.join("\n"), adaptiveBudget.maxOutputChars);
           const baseText = prependIndexDiagnostics(planText, activeDb, projectRoot);
-          return { content: [{ type: "text" as const, text: wrapWithStaleBanner(baseText, activeDb) }] };
+          const display = wrapWithStaleBanner(baseText, activeDb);
+          return {
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                {
+                  query,
+                  schemaVersion: SCHEMA_VERSION,
+                  intent: classification.intent,
+                  intentSource: classification.source,
+                  matchedHints: classification.matchedHints,
+                  searchMode: recommendedMode,
+                  tokenBudget,
+                  maxLevel: suggestedLevel,
+                  adaptiveBudget,
+                  vectorStatus,
+                  indexCommit: metadata.get("current_commit") || null,
+                  indexCompleted: metadata.get("index_completed") || null,
+                  ledger: {
+                    sessionId: sessionId || null,
+                    priorEntries: ledgerEntries.length,
+                    priorTokens,
+                    avoidRepeated: Boolean(sessionId && avoidRepeated),
+                  },
+                  retrievalRoutes: {
+                    keyword: "FTS5 BM25 over files and symbols",
+                    graph: graphProfile
+                      ? {
+                        direction: graphProfile.direction,
+                        edgeTypes: graphProfile.edgeTypes,
+                      }
+                      : null,
+                    vector: vectorStatus === "enabled" ? "enabled" : "skipped unless embeddings are indexed",
+                    memory: "query/scope/evidence relevance, stale commit memories filtered",
+                    ledger: sessionId && avoidRepeated
+                      ? "pre-pack rerank penalty plus post-pack repeated evidence removal"
+                      : "not active without sessionId + avoidRepeated",
+                  },
+                  recommendedCall: {
+                    tool: "get_context_pack",
+                    args: {
+                      query,
+                      tokenBudget,
+                      levels: suggestedLevel,
+                      sessionId: sessionId || "",
+                      avoidRepeated: Boolean(sessionId && avoidRepeated),
+                      repo: repo || "",
+                    },
+                  },
+                },
+                display,
+                {
+                  tool: "get_context_pack",
+                  reason: "Use get_context_pack next for bounded evidence. Avoid broad Read/Grep unless the returned confidence is low or stale.",
+                },
+              )),
+            }],
+          };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -112,33 +177,41 @@ export function registerPlanContextTool(server: McpServer, db?: SqlJsDatabase): 
         if (isUninitializedRepo) {
           log.warn(`[Auto-Bootstrap] Trapped raw repo entry event for path "${repo || 'current'}". Injecting self-awakening guide.`);
           const repoArg = typeof repo === 'string' ? repo : process.cwd();
+          const display = [
+            `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===`,
+            `Target Repository Workspace: "${repoArg}"`,
+            `Status: RAW / UNINITIALIZED (No index database found on physical disk.)`,
+            ``,
+            `CRITICAL MANDATE FOR AGENT:`,
+            `1. 目标仓库暂未建立 code-memory 本地高维依赖网，当前严禁强行调用 get_repo_map 或 get_context_pack 等依赖数据库的重型检索工具。`,
+            `2. 终止盲目的任务代码推导。你必须立即引导用户在主机终端运行：`,
+            `   npx -y ${NPM_PACKAGE_SPEC} bootstrap --project ${JSON.stringify(repoArg)}`,
+            `3. 如果这是 MCP 启动路径，推荐配置为 npx -y ${NPM_PACKAGE_SPEC} serve --watch --auto-project；工具调用会先 resolve_project，再按目标项目 bootstrap 或返回修复命令。`,
+            `4. 初始化完成后再重新调用 plan_context / get_context_pack 等依赖数据库的检索工具。`,
+          ].join('\n');
           return {
             content: [{
               type: "text" as const,
-              text: [
-                `=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===`,
-                `Target Repository Workspace: "${repoArg}"`,
-                `Status: RAW / UNINITIALIZED (No index database found on physical disk.)`,
-                ``,
-                `CRITICAL MANDATE FOR AGENT:`,
-                `1. 目标仓库暂未建立 code-memory 本地高维依赖网，当前严禁强行调用 get_repo_map 或 get_context_pack 等依赖数据库的重型检索工具。`,
-                `2. 终止盲目的任务代码推导。你必须立即引导用户在主机终端运行：`,
-                `   npx -y ${NPM_PACKAGE_SPEC} bootstrap --project ${JSON.stringify(repoArg)}`,
-                `3. 如果这是 MCP 启动路径，推荐配置为 npx -y ${NPM_PACKAGE_SPEC} serve --watch --auto-project；工具调用会先 resolve_project，再按目标项目 bootstrap 或返回修复命令。`,
-                `4. 初始化完成后再重新调用 plan_context / get_context_pack 等依赖数据库的检索工具。`,
-              ].join('\n'),
+              text: formatStructuredToolResult(errorToolResult(
+                "Target repository has no Code Memory index.",
+                { query, repo: repoArg },
+                display,
+              )),
             }],
             isError: false,  // Do NOT block the AI workflow — this is a guidance signal, not an error
           };
         }
 
-        // Other errors: keep original behavior
         log.error("Plan context failed: " + errorMsg);
         const text = "Error: Plan context failed - " + errorMsg;
         return {
           content: [{
             type: "text" as const,
-            text: wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { query },
+              wrapWithStaleBanner(db ? prependIndexDiagnostics(text, db) : text, db),
+            )),
           }],
           isError: true,
         };

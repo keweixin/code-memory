@@ -72,6 +72,55 @@ describe('ProjectResolver', () => {
     expect(resolution.projectRoot).toBe(projectRoot);
   });
 
+  it('requires project selection when multiple registry repos exist and cwd has no project identity', () => {
+    const firstRoot = readyProject('first-target');
+    const secondRoot = readyProject('second-target');
+    const unrelatedCwd = join(tempRoot, 'unrelated');
+    mkdirSync(unrelatedCwd, { recursive: true });
+    registerRepo(firstRoot, 'first-target', { homeDir });
+    registerRepo(secondRoot, 'second-target', { homeDir });
+
+    const resolution = resolveProject({ cwd: unrelatedCwd });
+
+    expect(resolution.status).toBe('needs_project_selection');
+    expect(resolution.nextAction).toBe('choose_project');
+    expect(resolution.projectRoot).toBeNull();
+    expect(resolution.candidates).toEqual([
+      expect.objectContaining({
+        name: 'first-target',
+        root: firstRoot,
+        indexStatus: 'fresh',
+        registered: true,
+      }),
+      expect.objectContaining({
+        name: 'second-target',
+        root: secondRoot,
+        indexStatus: 'fresh',
+        registered: true,
+      }),
+    ]);
+  });
+
+  it('does not require selection when repo, project, env, or workspace roots identify the project', () => {
+    const firstRoot = readyProject('first-explicit');
+    const secondRoot = readyProject('second-explicit');
+    const envRoot = readyProject('env-explicit');
+    const workspaceRoot = readyProject('workspace-explicit');
+    const unrelatedCwd = join(tempRoot, 'unrelated-explicit');
+    mkdirSync(unrelatedCwd, { recursive: true });
+    registerRepo(firstRoot, 'first-explicit', { homeDir });
+    registerRepo(secondRoot, 'second-explicit', { homeDir });
+
+    expect(resolveProject({ repo: 'second-explicit', cwd: unrelatedCwd }).projectRoot).toBe(secondRoot);
+    expect(resolveProject({ project: firstRoot, cwd: unrelatedCwd }).projectRoot).toBe(firstRoot);
+
+    process.env.CODE_MEMORY_PROJECT = envRoot;
+    expect(resolveProject({ cwd: unrelatedCwd }).projectRoot).toBe(envRoot);
+
+    delete process.env.CODE_MEMORY_PROJECT;
+    expect(resolveProject({ cwd: unrelatedCwd, workspaceRoots: [workspaceRoot] }).projectRoot).toBe(workspaceRoot);
+  });
+
   it('reports stale when a ready git project has changed files', () => {
     const projectRoot = readyProject('stale-target');
     execSync('git init', { cwd: projectRoot, stdio: 'ignore' });

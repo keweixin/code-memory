@@ -34,7 +34,7 @@ export function getServerInstructions(): string {
     'Read/Grep budget strategy:',
     '',
     '- After a ready get_context_pack result, use Read only on data.trustContract.allowedNextReads unless confidence is low or freshness is stale.',
-    '- Respect allowedNextReads path, reason, and maxLines. Do not read unrelated files just to re-search the repository.',
+    '- Respect allowedNextReads path, reason, lineRange, and readPriority. Do not read unrelated files just to re-search the repository.',
     '- Do not run broad Grep/Glob after a ready context pack. Use Grep/Glob only after resolve_project and get_context_pack/search_code return insufficient, low-confidence, or stale evidence.',
     '- If resolve_project reports missing, stale, or unregistered project state, call bootstrap_project, sync_project, or register_project before trusting broad file reads.',
     '',

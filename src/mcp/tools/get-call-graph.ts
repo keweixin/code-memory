@@ -14,6 +14,7 @@ import { resolveTargetId } from "../../graph/target-resolver.js";
 import { createLogger } from "../../shared/logger.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
+import { errorToolResult, formatStructuredToolResult, toolResultFromProject } from "../tool-result.js";
 import { attachStaleBanner, partitionPending } from "./_stale-banner.js";
 
 const log = createLogger("mcp:get-call-graph");
@@ -48,14 +49,25 @@ export function registerGetCallGraphTool(server: McpServer, db?: SqlJsDatabase):
     },
     async ({ symbolName, depth, repo, project, cwd, workspaceRoots }) => {
       try {
-        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb) => {
+        return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const symbolId = resolveTargetId(activeDb, symbolName);
           if (!symbolId) {
+            const display = wrapWithStaleBanner("No symbol found for: " + symbolName + ". Try search_symbols to find the correct name.", activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner("No symbol found for: " + symbolName + ". Try search_symbols to find the correct name.", activeDb),
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  { symbolName, found: false, symbolId: null, maxDepth: Math.min(Math.max(depth, 1), 5), nodes: [], edges: [] },
+                  display,
+                  {
+                    tool: "search_symbols",
+                    reason: "No symbol matched. Use search_symbols to find the exact indexed name.",
+                  },
+                )),
               }],
             };
           }
@@ -64,38 +76,58 @@ export function registerGetCallGraphTool(server: McpServer, db?: SqlJsDatabase):
           const subGraph = activeGraphEngine.getCallGraph(symbolId, maxDepth);
 
           if (subGraph.nodes.length === 0) {
+            const display = wrapWithStaleBanner("No call graph edges found for: " + symbolName + ". The symbol may not call or be called by other indexed symbols.", activeDb);
             return {
               content: [{
                 type: "text" as const,
-                text: wrapWithStaleBanner("No call graph edges found for: " + symbolName + ". The symbol may not call or be called by other indexed symbols.", activeDb),
+                text: formatStructuredToolResult(toolResultFromProject(
+                  projectRoot,
+                  resolution.repoName ?? "",
+                  activeDb,
+                  { symbolName, found: true, symbolId, maxDepth, nodes: [], edges: [] },
+                  display,
+                  {
+                    tool: "find_references",
+                    reason: "No call edges were found. Check references or dependency graph for other relationships.",
+                  },
+                )),
               }],
             };
           }
 
-          const text = formatCallGraph(symbolName, subGraph);
+          const text = wrapWithStaleBanner(formatCallGraph(symbolName, subGraph), activeDb);
           log.info("Call graph for " + symbolName + ": " + subGraph.nodes.length + " nodes, " + subGraph.edges.length + " edges");
 
           return {
-            content: [{ type: "text" as const, text: wrapWithStaleBanner(text, activeDb) }],
+            content: [{
+              type: "text" as const,
+              text: formatStructuredToolResult(toolResultFromProject(
+                projectRoot,
+                resolution.repoName ?? "",
+                activeDb,
+                { symbolName, found: true, symbolId, maxDepth, nodes: subGraph.nodes, edges: subGraph.edges },
+                text,
+                {
+                  tool: "impact_analysis",
+                  reason: "Run impact_analysis before changing symbols in this call graph.",
+                },
+              )),
+            }],
           };
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const isUninitializedRepo = errorMsg.includes("is not registered") || errorMsg.includes("does not contain");
-
-        if (isUninitializedRepo) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: wrapWithStaleBanner(`=== [CODE-MEMORY BOOTSTRAP PROTOCOL] ===\nTarget repository has NO indexes compiled yet.\n-> Run \`code-memory setup --project .\` for full AI onboarding, or \`code-memory bootstrap --project .\` for index-only initialization.`, db),
-            }],
-            isError: false,
-          };
-        }
 
         log.error("Get call graph failed: " + errorMsg);
         return {
-          content: [{ type: "text" as const, text: wrapWithStaleBanner("Error: Get call graph failed - " + errorMsg, db) }],
+          content: [{
+            type: "text" as const,
+            text: formatStructuredToolResult(errorToolResult(
+              errorMsg,
+              { symbolName, depth },
+              wrapWithStaleBanner("Error: Get call graph failed - " + errorMsg, db),
+            )),
+          }],
           isError: true,
         };
       }

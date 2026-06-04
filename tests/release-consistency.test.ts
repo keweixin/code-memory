@@ -41,6 +41,9 @@ describe('release consistency', () => {
       'init',
       'index',
       'sync',
+      'repair',
+      'upgrade',
+      'clean',
       'watch',
       'query',
       'tool',
@@ -90,6 +93,7 @@ describe('release consistency', () => {
   it('keeps MCP workflow docs aligned with context ledger tools', () => {
     const readme = readFileSync('README.md', 'utf-8');
     const mcpTools = readFileSync('docs/mcp-tools.md', 'utf-8');
+    const schemaFreeze = readFileSync('docs/schema-freeze.md', 'utf-8');
 
     for (const text of [readme, mcpTools]) {
       expect(text).toContain('resolve_project');
@@ -104,5 +108,20 @@ describe('release consistency', () => {
       expect(text).toContain('get_context_delta');
       expect(text).toContain('avoid_repeated_context');
     }
+    expect(readme).toContain('docs/schema-freeze.md');
+    expect(mcpTools).toContain('needs_project_selection');
+    expect(mcpTools).toContain('watcherActive');
+    expect(schemaFreeze).toContain('CodeMemoryToolResult');
+    expect(schemaFreeze).toContain('code-memory://repo/{name}/schema');
+  });
+
+  it('keeps release and nightly workflows aligned with real repo benchmark policy', () => {
+    const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf-8');
+    const realRepoWorkflow = readFileSync('.github/workflows/real-repo-benchmark.yml', 'utf-8');
+
+    expect(releaseWorkflow).toContain('npm run benchmark:real-repos -- --dry-run');
+    expect(realRepoWorkflow).toContain('workflow_dispatch');
+    expect(realRepoWorkflow).toContain('npm run benchmark:real-repos -- --fail-on-threshold');
+    expect(realRepoWorkflow).toContain('upload-artifact');
   });
 });

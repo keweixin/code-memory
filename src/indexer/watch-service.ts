@@ -8,6 +8,7 @@ import { IndexManager } from './index-manager.js';
 import { createIgnoreRule, isIgnored } from '../scanner/ignore-rules.js';
 import { normalizePath } from '../shared/utils.js';
 import { MemoryManager } from '../memory/memory-manager.js';
+import { writeWatchState } from './watch-state.js';
 
 const log = createLogger('watch');
 
@@ -84,6 +85,15 @@ export function startIndexWatcherWithState(
     ignoreInitial: true,
     persistent: true,
   });
+  writeWatchState(projectRoot, {
+    active: true,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    pendingFiles: [],
+    syncing: false,
+    lastError: null,
+    lastErrorAt: null,
+  });
 
   const schedule = (changedPath?: string, triggerReason = 'unknown') => {
     const normalizedPath = changedPath
@@ -94,6 +104,12 @@ export function startIndexWatcherWithState(
     }
     lastTriggerReason = triggerReason;
     pending = true;
+    writeWatchState(projectRoot, {
+      active: true,
+      pid: process.pid,
+      pendingFiles: [...pendingPaths.keys()],
+      syncing: running,
+    });
     if (timer) clearTimeout(timer);
     timer = setTimeout(runIndex, debounceMs);
     if (!maxTimer) maxTimer = setTimeout(runIndex, MAX_WATCH_BATCH_MS);
@@ -112,6 +128,12 @@ export function startIndexWatcherWithState(
     const pendingCount = pendingPaths.size;
     const triggerReason = lastTriggerReason;
     const startedAt = Date.now();
+    writeWatchState(projectRoot, {
+      active: true,
+      pid: process.pid,
+      pendingFiles: changedPaths,
+      syncing: true,
+    });
     try {
       await manager.incrementalIndex({
         changedPaths,
@@ -135,12 +157,29 @@ export function startIndexWatcherWithState(
         syncDurationMs: Date.now() - startedAt,
         pendingCount,
       });
+      writeWatchState(projectRoot, {
+        active: true,
+        pid: process.pid,
+        lastSyncAt: new Date().toISOString(),
+        pendingFiles: [],
+        syncing: false,
+        lastError: null,
+        lastErrorAt: null,
+      });
       log.info('Watch sync complete (' + changedPaths.length + ' path(s))');
     } catch (err) {
       await recordWatchSyncFailure(projectRoot, err, changedPaths, {
         triggerReason,
         syncDurationMs: Date.now() - startedAt,
         pendingCount,
+      });
+      writeWatchState(projectRoot, {
+        active: true,
+        pid: process.pid,
+        pendingFiles: changedPaths,
+        syncing: false,
+        lastError: err instanceof Error ? err.message : String(err),
+        lastErrorAt: new Date().toISOString(),
       });
       log.error('Watch sync failed', err);
     } finally {
@@ -161,6 +200,14 @@ export function startIndexWatcherWithState(
       triggerReason: 'error',
       pendingCount: pendingPaths.size,
     });
+    writeWatchState(projectRoot, {
+      active: true,
+      pid: process.pid,
+      pendingFiles: [...pendingPaths.keys()],
+      syncing: false,
+      lastError: err instanceof Error ? err.message : String(err),
+      lastErrorAt: new Date().toISOString(),
+    });
     log.error('Watch backend failed', err);
   });
 
@@ -170,6 +217,12 @@ export function startIndexWatcherWithState(
       if (maxTimer) clearTimeout(maxTimer);
       await watcher.close();
       activeWatchStates.delete(projectRoot);
+      writeWatchState(projectRoot, {
+        active: false,
+        pid: null,
+        pendingFiles: [],
+        syncing: false,
+      });
     },
     getPendingFiles(): PendingFile[] {
       const result: PendingFile[] = [];

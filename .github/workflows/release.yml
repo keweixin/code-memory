@@ -41,6 +41,7 @@ jobs:
       - run: npm run benchmark:context > benchmark-context.json 2>&1
       - run: npm run benchmark:agent > benchmark-agent.json 2>&1
       - run: npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json
+      - run: npm run benchmark:real-repos -- --dry-run
       - name: Publish to npm
         if: ${{ env.NPM_TOKEN != '' }}
         env:

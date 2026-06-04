@@ -96,8 +96,18 @@ describe('CLI MCP tool mirror', () => {
     });
 
     const output = logSpy.mock.calls.map(([line]) => String(line)).join('\n');
-    expect(output).toContain('Symbol search for: "AuthService"');
-    expect(output).toContain('AuthService');
+    const result = JSON.parse(output.split('\n\n')[0]) as {
+      status: string;
+      data: { query: string; resultCount: number };
+      nextAction: { tool?: string; reason: string };
+      display: string;
+    };
+    expect(result.status).toBe('ready');
+    expect(result.data.query).toBe('AuthService');
+    expect(result.data.resultCount).toBeGreaterThan(0);
+    expect(result.display).toContain('Symbol search for: "AuthService"');
+    expect(result.display).toContain('AuthService');
+    expect(result.nextAction.tool).toBe('find_definition');
     expect(output).toContain('[Next:');
   });
 

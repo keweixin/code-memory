@@ -19,6 +19,7 @@ const limit = String(options.limit ?? '20');
 const dryRun = Boolean(options.dryRun);
 const keep = Boolean(options.keep);
 const failOnThreshold = Boolean(options.failOnThreshold);
+const outputDir = resolve(repoRoot, String(options.outputDir ?? 'benchmark-results'));
 const workRoot = options.workDir
   ? resolve(String(options.workDir))
   : mkdtempSync(join(tmpdir(), 'code-memory-real-repos-'));
@@ -104,6 +105,7 @@ try {
   };
 
   console.log(JSON.stringify(output, null, 2));
+  writeBenchmarkArtifacts(output, outputDir);
 
   if (failOnThreshold && failures.length > 0) {
     process.exit(1);
@@ -114,6 +116,48 @@ try {
   } else if (!options.workDir) {
     rmSync(workRoot, { recursive: true, force: true });
   }
+}
+
+function writeBenchmarkArtifacts(output, dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'real-repos.latest.json'), JSON.stringify(output, null, 2) + '\n', 'utf8');
+  writeFileSync(join(dir, 'real-repos.summary.md'), formatBenchmarkSummary(output), 'utf8');
+}
+
+function formatBenchmarkSummary(output) {
+  const lines = [
+    '# Real Repo Benchmark Summary',
+    '',
+    `Generated: ${output.completedAt}`,
+    `Status: ${output.status}`,
+    `Repos: ${output.repoCount}`,
+    `Tasks: ${output.taskCount}`,
+    '',
+    '| Metric | Result |',
+    '|---|---:|',
+  ];
+  for (const [name, value] of Object.entries(output.metrics)) {
+    lines.push(`| ${name} | ${value === null || value === undefined ? 'n/a' : value} |`);
+  }
+  lines.push('', '| Repo | Tasks | Key file recall | Evidence coverage | Related test recall | Wrong route rate | Stale failure rate |');
+  lines.push('|---|---:|---:|---:|---:|---:|---:|');
+  for (const repo of output.repos) {
+    lines.push([
+      `| ${repo.name}`,
+      repo.taskCount,
+      repo.metrics.realRepoKeyFileRecall ?? 'n/a',
+      repo.metrics.realRepoEvidenceCoverage ?? 'n/a',
+      repo.metrics.relatedTestRecall ?? 'n/a',
+      repo.metrics.wrongProjectRouteRate ?? 'n/a',
+      `${repo.metrics.staleFailureRate ?? 'n/a'} |`,
+    ].join(' | '));
+  }
+  if (output.failures.length > 0) {
+    lines.push('', '## Failures', '');
+    for (const failure of output.failures) lines.push('- ' + failure);
+  }
+  lines.push('');
+  return lines.join('\n');
 }
 
 async function runTask(repo, task, projectRoot) {
@@ -181,10 +225,18 @@ async function runTask(repo, task, projectRoot) {
     if (structured) structuredResults.push(structured);
   }
 
-  const foundFiles = task.expectedFiles.filter((file) => textContainsPath(combinedText, file));
-  const foundSymbols = task.expectedSymbols.filter((symbol) => combinedText.includes(symbol));
+  const structuredFacts = collectStructuredFacts(structuredResults);
+  const foundFiles = task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.paths, file));
+  const foundSymbols = task.expectedSymbols.filter((symbol) => containsStringValue(structuredFacts.symbols, symbol));
   const expectedTestFiles = task.expectedFiles.filter((file) => /(^|[/.\\])(?:test|tests|__tests__|spec)([/.\\]|$)|\.(?:test|spec)\./i.test(file));
-  const foundTestFiles = expectedTestFiles.filter((file) => textContainsPath(combinedText, file));
+  const foundTestFiles = expectedTestFiles.filter((file) => containsNormalizedPath(structuredFacts.testPaths, file));
+  const textOnlyHitRate = calculateTextOnlyHitRate({
+    combinedText,
+    expectedFiles: task.expectedFiles,
+    expectedSymbols: task.expectedSymbols,
+    expectedTestFiles,
+    structuredFacts,
+  });
 
   const wrongProjectRoutes = structuredResults.filter((result) => {
     const root = result?.project?.root;
@@ -214,6 +266,20 @@ async function runTask(repo, task, projectRoot) {
       relatedTestRecall: expectedTestFiles.length > 0 ? ratio(foundTestFiles.length, expectedTestFiles.length) : null,
       wrongProjectRouteRate: ratio(wrongProjectRoutes, structuredResults.length),
       staleFailureRate: ratio(staleFailures, structuredResults.length),
+      structuredResultCoverage: ratio(structuredResults.length, outputs.length),
+      textOnlyHitRate,
+      allowedNextReadsRecall: ratio(
+        task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.allowedReadPaths, file)).length,
+        task.expectedFiles.length,
+      ),
+      exactSnippetCoverage: ratio(
+        task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.exactSnippetPaths, file)).length,
+        task.expectedFiles.length,
+      ),
+      fileLineEvidenceCoverage: ratio(
+        task.expectedFiles.filter((file) => containsNormalizedPath(structuredFacts.evidencePaths, file)).length,
+        task.expectedFiles.length,
+      ),
     },
   };
 }
@@ -296,6 +362,11 @@ function aggregateTaskMetrics(tasks) {
     relatedTestRecall: averageMetric(tasks, 'relatedTestRecall'),
     wrongProjectRouteRate: averageMetric(tasks, 'wrongProjectRouteRate'),
     staleFailureRate: averageMetric(tasks, 'staleFailureRate'),
+    structuredResultCoverage: averageMetric(tasks, 'structuredResultCoverage'),
+    textOnlyHitRate: averageMetric(tasks, 'textOnlyHitRate'),
+    allowedNextReadsRecall: averageMetric(tasks, 'allowedNextReadsRecall'),
+    exactSnippetCoverage: averageMetric(tasks, 'exactSnippetCoverage'),
+    fileLineEvidenceCoverage: averageMetric(tasks, 'fileLineEvidenceCoverage'),
   };
 }
 
@@ -337,6 +408,143 @@ function round(value) {
 
 function textContainsPath(text, expectedPath) {
   return normalizePath(text).includes(normalizePath(expectedPath));
+}
+
+function containsNormalizedPath(paths, expectedPath) {
+  const normalizedExpected = normalizePath(expectedPath);
+  return paths.some((pathValue) => normalizePath(pathValue).includes(normalizedExpected));
+}
+
+function containsStringValue(values, expectedValue) {
+  const expected = String(expectedValue).toLowerCase();
+  return values.some((value) => String(value).toLowerCase().includes(expected));
+}
+
+function collectStructuredFacts(results) {
+  const facts = {
+    paths: [],
+    symbols: [],
+    evidencePaths: [],
+    allowedReadPaths: [],
+    exactSnippetPaths: [],
+    testPaths: [],
+  };
+
+  for (const result of results) {
+    collectFactsFromValue(result, [], facts);
+  }
+
+  facts.paths = uniqueValues(facts.paths);
+  facts.symbols = uniqueValues(facts.symbols);
+  facts.evidencePaths = uniqueValues(facts.evidencePaths);
+  facts.allowedReadPaths = uniqueValues(facts.allowedReadPaths);
+  facts.exactSnippetPaths = uniqueValues(facts.exactSnippetPaths);
+  facts.testPaths = uniqueValues(facts.testPaths);
+  return facts;
+}
+
+function collectFactsFromValue(value, path, facts) {
+  if (value === null || value === undefined) return;
+  if (typeof value === 'string') {
+    if (looksLikePathValue(value)) addPathFact(value, path, facts);
+    if (looksLikeSymbolValue(value)) facts.symbols.push(value);
+    return;
+  }
+  if (typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectFactsFromValue(item, [...path, String(index)], facts));
+    return;
+  }
+
+  const entries = Object.entries(value);
+  const objectPathValue = getObjectPathValue(value);
+  if (objectPathValue) {
+    addPathFact(objectPathValue, path, facts);
+    if (hasLineEvidence(value)) facts.evidencePaths.push(objectPathValue);
+    if (hasExactSnippetEvidence(value)) facts.exactSnippetPaths.push(objectPathValue);
+    if (isAllowedReadPath(path)) facts.allowedReadPaths.push(objectPathValue);
+  }
+
+  const nameValue = typeof value.name === 'string' ? value.name : typeof value.symbolName === 'string' ? value.symbolName : null;
+  if (nameValue) facts.symbols.push(nameValue);
+
+  for (const [key, child] of entries) {
+    if (key === 'display') continue;
+    collectFactsFromValue(child, [...path, key], facts);
+  }
+}
+
+function addPathFact(value, path, facts) {
+  facts.paths.push(value);
+  if (isTestPath(value)) facts.testPaths.push(value);
+  if (isAllowedReadPath(path)) facts.allowedReadPaths.push(value);
+  if (isExactSnippetPath(path)) facts.exactSnippetPaths.push(value);
+  if (isEvidencePath(path)) facts.evidencePaths.push(value);
+}
+
+function getObjectPathValue(value) {
+  for (const key of ['path', 'file', 'filePath', 'relativePath']) {
+    if (typeof value[key] === 'string') return value[key];
+  }
+  return null;
+}
+
+function hasLineEvidence(value) {
+  return typeof value.line === 'number' ||
+    typeof value.startLine === 'number' ||
+    typeof value.endLine === 'number' ||
+    typeof value.lines === 'string' ||
+    Array.isArray(value.lineRange);
+}
+
+function hasExactSnippetEvidence(value) {
+  return typeof value.code === 'string' &&
+    (hasLineEvidence(value) || typeof value.whyIncluded === 'string' || typeof value.why === 'string');
+}
+
+function isAllowedReadPath(path) {
+  return path.some((part) => part === 'allowedNextReads' || part === 'nextAllowedReads');
+}
+
+function isExactSnippetPath(path) {
+  return path.some((part) => part === 'exactSnippets');
+}
+
+function isEvidencePath(path) {
+  return path.some((part) => part === 'evidence' || part === 'whyIncluded' || part === 'exactSnippets');
+}
+
+function looksLikePathValue(value) {
+  return /[\\/]/.test(value) && /\.[a-z0-9]+$/i.test(value.split(/[#?]/)[0]);
+}
+
+function looksLikeSymbolValue(value) {
+  return /^[A-Za-z_$][A-Za-z0-9_$.:#-]{1,120}$/.test(value);
+}
+
+function isTestPath(value) {
+  return /(^|[/.\\])(?:test|tests|__tests__|spec)([/.\\]|$)|\.(?:test|spec)\./i.test(value);
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()))];
+}
+
+function calculateTextOnlyHitRate({ combinedText, expectedFiles, expectedSymbols, expectedTestFiles, structuredFacts }) {
+  const expectedItems = [
+    ...expectedFiles.map((value) => ({ type: 'file', value })),
+    ...expectedSymbols.map((value) => ({ type: 'symbol', value })),
+    ...expectedTestFiles.map((value) => ({ type: 'test', value })),
+  ];
+  if (expectedItems.length === 0) return 0;
+  const textOnlyHits = expectedItems.filter((item) => {
+    if (item.type === 'symbol') {
+      return combinedText.includes(item.value) && !containsStringValue(structuredFacts.symbols, item.value);
+    }
+    const structuredPaths = item.type === 'test' ? structuredFacts.testPaths : structuredFacts.paths;
+    return textContainsPath(combinedText, item.value) && !containsNormalizedPath(structuredPaths, item.value);
+  });
+  return ratio(textOnlyHits.length, expectedItems.length);
 }
 
 function normalizePath(value) {

@@ -6,6 +6,7 @@ import { DEFAULT_IGNORE_PATTERNS } from '../src/shared/constants.js';
 import { DEFAULT_TOKEN_BUDGETS, type CodeMemoryConfig } from '../src/shared/types.js';
 import { IndexManager } from '../src/indexer/index-manager.js';
 import { closeDatabase, getDatabaseSync } from '../src/storage/database.js';
+import { readWatchState } from '../src/indexer/watch-state.js';
 
 type WatchHandler = (path: string) => void;
 
@@ -77,10 +78,22 @@ describe('watch service', () => {
     const service = startIndexWatcher(tempRoot, createConfig(tempRoot));
     const options = watchMock.mock.calls[0]?.[1] as { ignored?: (path: string) => boolean };
 
+    expect(readWatchState(tempRoot)).toMatchObject({
+      active: true,
+      pid: process.pid,
+      pendingFiles: [],
+      syncing: false,
+    });
     expect(options.ignored?.(join(tempRoot, 'ignored', 'main.ts'))).toBe(true);
     expect(options.ignored?.(join(tempRoot, 'src', 'main.ts'))).toBe(false);
 
     await service.close();
+    expect(readWatchState(tempRoot)).toMatchObject({
+      active: false,
+      pid: null,
+      pendingFiles: [],
+      syncing: false,
+    });
   });
 
   it('passes changed paths to incremental indexing after debounce', async () => {
@@ -94,6 +107,10 @@ describe('watch service', () => {
 
     const service = startIndexWatcher(tempRoot, createConfig(tempRoot), { debounceMs: 10 });
     handlers.get('change')?.(join(tempRoot, 'src', 'main.ts'));
+    expect(readWatchState(tempRoot)).toMatchObject({
+      active: true,
+      pendingFiles: ['src/main.ts'],
+    });
     await vi.runAllTimersAsync();
 
     expect(incrementalSpy).toHaveBeenCalledWith({
@@ -112,6 +129,12 @@ describe('watch service', () => {
     expect(getDatabaseSync().get<{ value: string }>(
       "SELECT value FROM index_metadata WHERE key = 'watch_pending_count'",
     )?.value).toBe('1');
+    expect(readWatchState(tempRoot)).toMatchObject({
+      active: true,
+      pendingFiles: [],
+      syncing: false,
+      lastError: null,
+    });
 
     await service.close();
   });

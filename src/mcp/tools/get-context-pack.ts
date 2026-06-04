@@ -25,6 +25,7 @@ import type { ContextDelta, ContextPack } from "../../shared/types.js";
 import { CONFIG_DIR, DATABASE_FILE } from "../../shared/constants.js";
 import { estimateTokens } from "../../shared/token-counter.js";
 import { createLogger } from "../../shared/logger.js";
+import { generateId } from "../../shared/utils.js";
 import { prependIndexDiagnostics } from "../index-diagnostics.js";
 import { withRepoDatabase } from "../repo-router.js";
 import { TOOL_CONTEXT_INPUT_SCHEMA } from "../tool-context.js";
@@ -109,11 +110,19 @@ export function registerGetContextPackTool(
             pack.files = pack.files.slice(0, adaptiveBudget.maxFiles);
           }
 
+          const effectiveSessionId = sessionId || "auto-" + generateId(
+            "context-pack-session",
+            projectRoot,
+            query,
+            new Date().toISOString(),
+          );
           let ledgerText = "";
-          if (sessionId) {
+          let contextPackId = "";
+          let repeatedContext: RepeatedContextSummary;
+          {
             const candidates = collectPackContext(pack);
-            const delta = getContextDeltaForDb(sessionId, candidates, activeDb);
-            const omitted = avoidRepeated ? omitRepeatedContext(pack, delta, sessionId) : false;
+            const delta = getContextDeltaForDb(effectiveSessionId, candidates, activeDb);
+            const omitted = avoidRepeated ? omitRepeatedContext(pack, delta, effectiveSessionId) : false;
             const finalContext = collectPackContext(pack);
             if (omitted) {
               pack.tokensUsed = estimatePackTokens(pack);
@@ -123,8 +132,8 @@ export function registerGetContextPackTool(
               );
             }
             const baseText = activePacker.formatAsText(pack);
-            const entryId = markContextUsed({
-              sessionId,
+            contextPackId = markContextUsed({
+              sessionId: effectiveSessionId,
               query,
               repoRoot: projectRoot,
               returnedFiles: finalContext.files,
@@ -132,8 +141,11 @@ export function registerGetContextPackTool(
               returnedChunks: finalContext.chunks,
               tokenEstimate: estimateTokens(baseText),
               evidenceIds: finalContext.evidenceIds,
+              noveltyScore: delta.noveltyScore,
+              repeatedPenalty: delta.repeatedPenalty,
             }, activeDb);
-            ledgerText = formatLedgerSection(sessionId, delta, entryId, omitted);
+            repeatedContext = summarizeRepeatedContext(delta, omitted);
+            ledgerText = formatLedgerSection(effectiveSessionId, delta, contextPackId, omitted);
           }
 
           // Phase 3: Format
@@ -159,6 +171,10 @@ export function registerGetContextPackTool(
                   tokensUsed: pack.tokensUsed,
                   tokenBudget: budget,
                   trustContract,
+                  contextPackId,
+                  sessionId: effectiveSessionId,
+                  autoRecorded: true,
+                  repeatedContext,
                 },
                 text,
                 {
@@ -212,11 +228,31 @@ interface ToolTrustContract {
   dbPath: string;
   indexStatus: string;
   exactSnippets: Array<{
+    path: string;
+    startLine: number;
+    endLine: number;
+    whyIncluded: string;
     file: string;
     lines: string;
+    lineRange: string;
     symbol: string;
     code: string;
     why: string;
+  }>;
+  evidence: Array<{
+    id: string;
+    kind: string;
+    file: string | null;
+    line: number | null;
+    endLine: number | null;
+    confidence: number;
+    provenance: "parser" | "memory" | "resolver" | "heuristic";
+    preview: string | null;
+  }>;
+  relatedTests: Array<{
+    path: string;
+    reason: string;
+    confidence: number;
   }>;
   whyIncluded: Array<{
     file: string;
@@ -226,7 +262,9 @@ interface ToolTrustContract {
   nextAllowedReads: string[];
   allowedNextReads: Array<{
     path: string;
+    lineRange?: string;
     reason: string;
+    readPriority: "high" | "medium" | "low";
     maxLines: string;
   }>;
   discouragedReads: Array<{
@@ -241,15 +279,53 @@ interface ToolTrustContract {
   };
 }
 
+interface RepeatedContextSummary {
+  omitted: boolean;
+  totalPriorTokens: number;
+  newFiles: number;
+  repeatedFiles: number;
+  newSymbols: number;
+  repeatedSymbols: number;
+  newChunks: number;
+  repeatedChunks: number;
+  newEvidenceIds: number;
+  repeatedEvidenceIds: number;
+  noveltyScore: number;
+  repeatedPenalty: number;
+}
+
 function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJsDatabase): ToolTrustContract {
   const freshness = getIndexStaleness(projectRoot, db);
   const exactSnippets = pack.codeSnippets.slice(0, 5).map((snippet) => ({
+    path: snippet.filePath,
+    startLine: snippet.lineRange[0],
+    endLine: snippet.lineRange[1],
+    whyIncluded: snippet.reason,
     file: snippet.filePath,
     lines: snippet.lineRange[0] + "-" + snippet.lineRange[1],
+    lineRange: snippet.lineRange[0] + "-" + snippet.lineRange[1],
     symbol: snippet.symbolName ?? "",
     code: truncateSnippetCode(snippet.content),
     why: snippet.reason,
   }));
+  const evidence = (pack.evidence || []).slice(0, 12).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    file: item.filePath ?? null,
+    line: item.startLine ?? null,
+    endLine: item.endLine ?? null,
+    confidence: Number(item.confidence.toFixed(3)),
+    provenance: evidenceProvenance(item.kind, item.filePath),
+    preview: item.preview ?? null,
+  }));
+  const relatedTests = pack.files
+    .filter((file) => file.role === "test" || /(?:^|\/|\\)(?:tests?|__tests__)(?:\/|\\)|\.(?:test|spec)\./i.test(file.path))
+    .slice(0, 8)
+    .map((file) => ({
+      path: file.path,
+      reason: file.reason || "Test file returned with this context pack.",
+      confidence: Number(file.confidence.toFixed(2)),
+    }));
   const whyIncluded = pack.files.slice(0, 8).map((file) => ({
     file: file.path,
     reason: file.reason,
@@ -261,12 +337,15 @@ function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJ
   const allowedNextReads = pack.codeSnippets.length > 0
     ? pack.codeSnippets.slice(0, 5).map((snippet) => ({
       path: snippet.filePath,
+      lineRange: snippet.lineRange[0] + "-" + snippet.lineRange[1],
       reason: snippet.reason || "Code Memory returned this snippet as task evidence.",
+      readPriority: "high" as const,
       maxLines: snippet.lineRange[0] + "-" + snippet.lineRange[1],
     }))
     : pack.files.slice(0, 5).map((file) => ({
       path: file.path,
       reason: file.reason,
+      readPriority: file.role === "test" ? "medium" as const : "high" as const,
       maxLines: "targeted read only",
     }));
   const confidence = freshness.indexStatus === "fresh" && (pack.codeSnippets.length > 0 || pack.files.length > 0)
@@ -281,6 +360,8 @@ function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJ
     dbPath: join(projectRoot, CONFIG_DIR, DATABASE_FILE),
     indexStatus: freshness.indexStatus,
     exactSnippets,
+    evidence,
+    relatedTests,
     whyIncluded,
     nextAllowedReads,
     allowedNextReads,
@@ -302,6 +383,29 @@ function formatToolTrustContract(contract: ToolTrustContract): string {
     "=== Tool Trust Contract ===",
     JSON.stringify(contract, null, 2),
   ].join("\n");
+}
+
+function summarizeRepeatedContext(delta: ContextDelta, omitted: boolean): RepeatedContextSummary {
+  return {
+    omitted,
+    totalPriorTokens: delta.totalPriorTokens,
+    newFiles: delta.newFiles.length,
+    repeatedFiles: delta.repeatedFiles.length,
+    newSymbols: delta.newSymbols.length,
+    repeatedSymbols: delta.repeatedSymbols.length,
+    newChunks: delta.newChunks.length,
+    repeatedChunks: delta.repeatedChunks.length,
+    newEvidenceIds: delta.newEvidenceIds.length,
+    repeatedEvidenceIds: delta.repeatedEvidenceIds.length,
+    noveltyScore: delta.noveltyScore,
+    repeatedPenalty: delta.repeatedPenalty,
+  };
+}
+
+function evidenceProvenance(kind: string, filePath: string | undefined): "parser" | "memory" | "resolver" | "heuristic" {
+  if (kind === "memory") return "memory";
+  if (filePath) return "parser";
+  return "heuristic";
 }
 
 function unique(values: string[]): string[] {

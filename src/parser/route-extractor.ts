@@ -12,6 +12,7 @@ export function extractRouteEndpoints(
 ): RouteEndpointRecord[] {
   return [
     ...extractNextAppRouterEndpoints(filePath, fileId, symbols),
+    ...extractExpressEndpoints(sourceCode, fileId, symbols, lang),
     ...extractFastApiEndpoints(sourceCode, fileId, symbols, lang),
   ];
 }
@@ -84,13 +85,16 @@ function extractFastApiEndpoints(
   if (lang !== ParserLanguage.Python) return [];
 
   const endpoints: RouteEndpointRecord[] = [];
-  const decoratorRegex = /@[\w.]+\s*\.\s*(get|post|put|patch|delete|options|head)\s*\(\s*(['"])([^'"]+)\2[^\n]*\)\s*\r?\n\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/g;
+  const routerPrefixes = extractFastApiRouterPrefixes(sourceCode);
+  const decoratorRegex = /@([\w.]+)\s*\.\s*(get|post|put|patch|delete|options|head)\s*\(\s*(['"])([^'"]+)\3[^\n]*\)\s*\r?\n\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/g;
   let match: RegExpExecArray | null;
   while ((match = decoratorRegex.exec(sourceCode)) !== null) {
-    const routePath = normalizeRoutePath(match[3]);
+    const decoratorObject = match[1].split('.').pop() || match[1];
+    const prefix = routerPrefixes.get(decoratorObject) || '';
+    const routePath = normalizeRoutePath(joinRoutePaths(prefix, match[4]));
     if (!routePath) continue;
-    const method = match[1].toUpperCase();
-    const functionName = match[4];
+    const method = match[2].toUpperCase();
+    const functionName = match[5];
     const line = lineFromOffset(sourceCode, match.index);
     const symbol = findSymbolByNameAfterLine(symbols, functionName, line);
     endpoints.push({
@@ -105,6 +109,71 @@ function extractFastApiEndpoints(
     });
   }
   return endpoints;
+}
+
+function extractExpressEndpoints(
+  sourceCode: string,
+  fileId: string,
+  symbols: SymbolRecord[],
+  lang: ParserLanguage,
+): RouteEndpointRecord[] {
+  if (
+    lang !== ParserLanguage.TypeScript &&
+    lang !== ParserLanguage.TSX &&
+    lang !== ParserLanguage.JavaScript &&
+    lang !== ParserLanguage.JSX
+  ) {
+    return [];
+  }
+
+  const endpoints: RouteEndpointRecord[] = [];
+  const routeRegex = /\b(?:app|router|[A-Za-z_$][\w$]*)\s*\.\s*(get|post|put|patch|delete|options|head)\s*\(\s*(['"`])([^'"`]+)\2\s*(?:,\s*([A-Za-z_$][\w$]*))?/g;
+  let match: RegExpExecArray | null;
+  while ((match = routeRegex.exec(sourceCode)) !== null) {
+    const routePath = normalizeRoutePath(match[3]);
+    if (!routePath) continue;
+    const method = match[1].toUpperCase();
+    const handlerName = match[4] || null;
+    const line = lineFromOffset(sourceCode, match.index);
+    const symbol = handlerName
+      ? findSymbolByName(symbols, handlerName)
+      : findEnclosingSymbol(symbols, line);
+    endpoints.push({
+      fileId,
+      symbolId: symbol?.id ?? null,
+      routePath,
+      httpMethod: method,
+      framework: 'express',
+      startLine: line,
+      startColumn: columnFromOffset(sourceCode, match.index),
+      evidence: `${method} ${routePath}`,
+    });
+  }
+  return endpoints;
+}
+
+function extractFastApiRouterPrefixes(sourceCode: string): Map<string, string> {
+  const prefixes = new Map<string, string>();
+  const routerRegex = /\b([A-Za-z_]\w*)\s*=\s*(?:[\w.]+\.)?APIRouter\s*\(([^)]*)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = routerRegex.exec(sourceCode)) !== null) {
+    const prefix = extractPythonKeywordString(match[2], 'prefix');
+    prefixes.set(match[1], normalizeRoutePath(prefix || '/') || '');
+  }
+
+  const includeRegex = /\.include_router\s*\(\s*([A-Za-z_]\w*)(?:\s*,([^)]*))?\)/g;
+  while ((match = includeRegex.exec(sourceCode)) !== null) {
+    const includePrefix = extractPythonKeywordString(match[2] || '', 'prefix');
+    if (!includePrefix) continue;
+    const existing = prefixes.get(match[1]) || '';
+    prefixes.set(match[1], normalizeRoutePath(joinRoutePaths(includePrefix, existing)) || existing);
+  }
+  return prefixes;
+}
+
+function extractPythonKeywordString(args: string, keyword: string): string | null {
+  const pattern = new RegExp(`\\b${keyword}\\s*=\\s*(['"])([^'"]+)\\1`);
+  return pattern.exec(args)?.[2] ?? null;
 }
 
 function routePathFromNextAppFile(filePath: string): string | null {
@@ -143,6 +212,14 @@ function normalizeRoutePath(raw: string): string | null {
   return path;
 }
 
+function joinRoutePaths(prefix: string, routePath: string): string {
+  const left = prefix.trim();
+  const right = routePath.trim();
+  if (!left || left === '/') return right;
+  if (!right || right === '/') return left;
+  return `${left.replace(/\/$/, '')}/${right.replace(/^\//, '')}`;
+}
+
 function extractFetchMethod(optionsText: string): string | null {
   const match = optionsText.match(/\bmethod\s*:\s*(['"`])([A-Za-z]+)\1/i);
   if (!match) return null;
@@ -159,6 +236,12 @@ function findEnclosingSymbol(symbols: SymbolRecord[], line: number): SymbolRecor
 function findSymbolByNameAfterLine(symbols: SymbolRecord[], name: string, line: number): SymbolRecord | null {
   return symbols
     .filter((symbol) => symbol.name === name && symbol.startLine >= line)
+    .sort((a, b) => a.startLine - b.startLine)[0] ?? null;
+}
+
+function findSymbolByName(symbols: SymbolRecord[], name: string): SymbolRecord | null {
+  return symbols
+    .filter((symbol) => symbol.name === name)
     .sort((a, b) => a.startLine - b.startLine)[0] ?? null;
 }
 

@@ -11,6 +11,14 @@ import { registerGetRouteMapTool } from '../src/mcp/tools/get-route-map.js';
 
 type ToolResult = Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
 type ToolHandler = (args: Record<string, unknown>) => ToolResult;
+type StructuredToolResult<TData = Record<string, unknown>> = {
+  status: string;
+  project: { root: string; repoName: string; dbPath: string };
+  freshness: { indexStatus: string; changedFiles: string[]; recommendedAction: string };
+  data: TData;
+  nextAction: { tool?: string; command?: string; reason: string };
+  display: string;
+};
 
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
@@ -23,6 +31,12 @@ class FakeMcpServer {
   ): void {
     this.handlers.set(name, handler);
   }
+}
+
+function parseStructured<TData = Record<string, unknown>>(
+  result: Awaited<ToolResult>,
+): StructuredToolResult<TData> {
+  return JSON.parse(result.content[0].text) as StructuredToolResult<TData>;
 }
 
 function createConfig(rootPath: string): CodeMemoryConfig {
@@ -74,6 +88,10 @@ function writeRouteSample(rootPath: string): void {
       "  await fetch('/api/health');",
       '}',
       '',
+      'export async function loadOrders(): Promise<void> {',
+      "  await fetch('/api/orders');",
+      '}',
+      '',
       'export async function missingRoute(): Promise<void> {',
       "  await fetch('/api/missing', { method: 'DELETE' });",
       '}',
@@ -94,13 +112,32 @@ function writeRouteSample(rootPath: string): void {
   writeFileSync(
     join(rootPath, 'src', 'api.py'),
     [
-      'from fastapi import FastAPI',
+      'from fastapi import APIRouter, FastAPI',
       '',
       'app = FastAPI()',
+      'router = APIRouter(prefix="/health")',
       '',
-      '@app.get("/api/health")',
+      '@router.get("/")',
       'async def health():',
       '    return {"ok": True}',
+      '',
+      'app.include_router(router, prefix="/api")',
+    ].join('\n'),
+    'utf-8',
+  );
+
+  writeFileSync(
+    join(rootPath, 'src', 'express.js'),
+    [
+      'import express from "express";',
+      '',
+      'const app = express();',
+      '',
+      'export function listOrders(req, res) {',
+      '  res.json([]);',
+      '}',
+      '',
+      'app.get("/api/orders", listOrders);',
     ].join('\n'),
     'utf-8',
   );
@@ -138,6 +175,7 @@ describe('route mapping metadata and graph edges', () => {
     );
     expect(endpoints).toEqual([
       ['/api/health', 'GET', 'fastapi'],
+      ['/api/orders', 'GET', 'express'],
       ['/api/user/save', 'POST', 'next_app_router'],
     ]);
 
@@ -149,6 +187,7 @@ describe('route mapping metadata and graph edges', () => {
     expect(references).toEqual([
       ['/api/health', 'GET', 'resolved'],
       ['/api/missing', 'DELETE', 'unresolved'],
+      ['/api/orders', 'GET', 'resolved'],
       ['/api/user/save', 'POST', 'resolved'],
     ]);
 
@@ -163,6 +202,7 @@ describe('route mapping metadata and graph edges', () => {
     );
     expect(routeEdges).toEqual([
       ['checkHealth', 'health', 0.88],
+      ['loadOrders', 'listOrders', 0.88],
       ['saveUser', 'POST', 0.88],
     ]);
   });
@@ -196,6 +236,7 @@ describe('route mapping metadata and graph edges', () => {
     );
     expect(restored).toEqual([
       ['checkHealth', 'health'],
+      ['loadOrders', 'listOrders'],
       ['saveUser', 'POST'],
     ]);
   });
@@ -208,10 +249,33 @@ describe('route mapping metadata and graph edges', () => {
     const result = await server.handlers.get('get_route_map')!({
       route: '/api/user/save',
     });
-    const text = result.content[0].text;
+    const structured = parseStructured<{
+      route: string;
+      endpointCount: number;
+      referenceCount: number;
+      endpoints: Array<{ route_path: string; http_method: string; framework: string; file_path: string }>;
+      references: Array<{ route_path: string; http_method: string; resolution_status: string; file_path: string }>;
+    }>(result);
 
-    expect(text).toContain('POST /api/user/save [next_app_router] src/app/api/user/save/route.ts:1 (POST)');
-    expect(text).toContain('POST /api/user/save [resolved] src/client.ts:2 (saveUser)');
-    expect(text).not.toContain('/api/missing');
+    expect(structured.status).toBe('ready');
+    expect(structured.project.root).toBe(tempRoot);
+    expect(structured.data.route).toBe('/api/user/save');
+    expect(structured.data.endpointCount).toBe(1);
+    expect(structured.data.referenceCount).toBe(1);
+    expect(structured.data.endpoints[0]).toMatchObject({
+      route_path: '/api/user/save',
+      http_method: 'POST',
+      framework: 'next_app_router',
+      file_path: 'src/app/api/user/save/route.ts',
+    });
+    expect(structured.data.references[0]).toMatchObject({
+      route_path: '/api/user/save',
+      http_method: 'POST',
+      resolution_status: 'resolved',
+      file_path: 'src/client.ts',
+    });
+    expect(structured.display).toContain('POST /api/user/save [next_app_router] src/app/api/user/save/route.ts:1 (POST)');
+    expect(structured.display).toContain('POST /api/user/save [resolved] src/client.ts:2 (saveUser)');
+    expect(structured.display).not.toContain('/api/missing');
   });
 });
