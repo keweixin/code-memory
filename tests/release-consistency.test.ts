@@ -129,7 +129,8 @@ describe('release consistency', () => {
 
     expect(pkg.scripts['release:gate']).toBe('node tools/release-gate.mjs');
 
-    expect(releaseWorkflow).toContain('npm run benchmark:real-repos -- --dry-run');
+    expect(releaseWorkflow).toContain('npm run release:gate');
+    expect(releaseWorkflow).not.toContain('npm run benchmark:real-repos -- --dry-run');
     expect(releaseWorkflow).toContain('workflow_dispatch');
     expect(releaseWorkflow).toContain('git checkout "$TAG"');
     expect(releaseWorkflow).toContain('Release source must be exactly tag v$VERSION');

@@ -51,18 +51,7 @@ jobs:
             exit 1
           fi
       - run: npm ci --registry=https://registry.npmjs.org
-      - run: npm run lint
-      - run: npm run build
-      - run: npm test -- --maxWorkers=1 --minWorkers=1 --no-file-parallelism
-      - run: npm run test:coverage -- --maxWorkers=1 --minWorkers=1 --no-file-parallelism
-      - run: npm run pack:check
-      - run: npm run test:smoke
-      - run: npm run audit:official
-      - run: npm run benchmark:index -- --files 2000 --workers auto --embedding none > benchmark-index.json 2>&1
-      - run: npm run benchmark:context > benchmark-context.json 2>&1
-      - run: npm run benchmark:agent > benchmark-agent.json 2>&1
-      - run: npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json
-      - run: npm run benchmark:real-repos -- --dry-run
+      - run: npm run release:gate
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}

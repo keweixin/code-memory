@@ -4,16 +4,7 @@ Use this checklist before publishing a public Code Memory release.
 
 - [ ] Update `package.json`, `package-lock.json`, and `src/shared/constants.ts`.
 - [ ] Update `CHANGELOG.md`.
-- [ ] Run `npm run lint`.
-- [ ] Run `npm run build`.
-- [ ] Run `npm test -- --maxWorkers=1 --minWorkers=1 --no-file-parallelism`.
-- [ ] Run `npm run pack:check`.
-- [ ] Run `npm run test:smoke`.
-- [ ] Run `npm run audit:official`.
-- [ ] Run `npm run benchmark:index -- --files 2000 --workers auto --embedding none > benchmark-index.json`.
-- [ ] Run `npm run benchmark:context > benchmark-context.json`.
-- [ ] Run `npm run benchmark:agent > benchmark-agent.json`.
-- [ ] Run `npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json`.
+- [ ] Run `npm run release:gate`.
 - [ ] Run `npx gitnexus analyze`.
 - [ ] Run `npx gitnexus detect-changes --repo code-memory --scope all`.
 - [ ] Run `codegraph sync . && codegraph status .`.

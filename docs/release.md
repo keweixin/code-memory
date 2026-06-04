@@ -5,19 +5,12 @@ Current source release target: `0.4.1`.
 Release readiness checks:
 
 ```bash
-npm run lint
-npm run build
-npm test
-npm run test:coverage
-npm run pack:check
-npm run test:smoke
-npm run audit:official
-npm run benchmark:index -- --files 2000 --workers auto --embedding none > benchmark-index.json
-npm run benchmark:context > benchmark-context.json
-npm run benchmark:agent > benchmark-agent.json
-npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json
-npm run benchmark:real-repos -- --dry-run
+npm run release:gate
 ```
+
+`release:gate` runs lint, build, full tests, coverage, pack, smoke, official
+npm audit, synthetic benchmark gate, and real-repo dry-run. The release
+workflow calls this same local gate to avoid CI drift.
 
 Version consistency is enforced by tests:
 
