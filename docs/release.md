@@ -1,6 +1,6 @@
 # Release
 
-Current source release target: `0.4.1`.
+Current source release target: `1.0.0`.
 
 Release readiness checks:
 
@@ -23,8 +23,8 @@ Version consistency is enforced by tests:
 Publishing is tag-driven:
 
 ```bash
-git tag v0.4.1
-git push origin v0.4.1
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 The release workflow verifies the tag matches `package.json`, runs the full release gate, creates a GitHub Release, and publishes to npm only when repository secret `NPM_TOKEN` is configured.

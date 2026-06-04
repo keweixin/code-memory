@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.0] - 2026-06-05
+
+### Added
+- Freeze the v1 MCP result contract around `CodeMemoryToolResult` with machine-readable `status`, `project`, `freshness`, `data`, `nextAction`, and human fallback `display`
+- Expose graph edge trust data through graph-backed tool payloads, including `confidence`, `evidence`, `provenance`, and per-site `evidenceRecords`
+- Publish reproducible real-repo benchmark artifacts for pinned Next.js, FastAPI, Express, and Axios tasks
+- Add MCP lifecycle coverage for rename/delete freshness so synced tools do not return orphaned old paths
+
+### Changed
+- Treat global MCP routing, project resolution, lifecycle management tools, Context Ledger deltas, allowed-read constraints, freshness diagnostics, and release gates as the stable v1 baseline
+- Keep real-repo benchmark primary metrics sourced from structured tool fields rather than human-readable `display`
+- Make the real-repo benchmark runner's `--help` path side-effect free
+
 ## [0.4.1] - 2026-06-04
 
 ### Fixed
