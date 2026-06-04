@@ -1,8 +1,8 @@
 {
   "benchmark": "real-repos",
   "status": "measured",
-  "startedAt": "2026-06-04T14:33:17.811Z",
-  "completedAt": "2026-06-04T14:34:05.023Z",
+  "startedAt": "2026-06-04T16:29:46.592Z",
+  "completedAt": "2026-06-04T16:30:33.385Z",
   "configPath": "benchmark/real-repos.json",
   "workRoot": "<benchmark-workdir>",
   "embedding": "none",
