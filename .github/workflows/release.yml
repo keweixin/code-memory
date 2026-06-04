@@ -64,10 +64,13 @@ jobs:
       - run: npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json
       - run: npm run benchmark:real-repos -- --dry-run
       - name: Publish to npm
-        if: ${{ env.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
         run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is required for release publishing." >&2
+            exit 1
+          fi
           PACKAGE_NAME="$(node -p "require('./package.json').name")"
           VERSION="$(node -p "require('./package.json').version")"
           if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
@@ -87,12 +90,6 @@ jobs:
           done
           echo "npm latest did not resolve to $VERSION" >&2
           exit 1
-      - name: Report skipped npm publish
-        if: ${{ env.NPM_TOKEN == '' }}
-        run: |
-          PACKAGE_NAME="$(node -p "require('./package.json').name")"
-          VERSION="$(node -p "require('./package.json').version")"
-          echo "NPM_TOKEN is not configured; skipped npm publish for $PACKAGE_NAME@$VERSION."
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
