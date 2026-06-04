@@ -90,6 +90,10 @@ describe('real repo benchmark config', () => {
     expect(script).toContain('function isProjectManagementTool(toolName)');
     expect(script).toContain('const target = task.target ?? task.expectedSymbols[0] ?? task.expectedFiles[0] ?? task.query;');
     expect(script).toContain('function isInputEchoPath(path)');
+    expect(script).toContain("allowedNextReadsRecall: numberEnv('CODE_MEMORY_REAL_REPO_MIN_ALLOWED_NEXT_READS_RECALL', 0.9)");
+    expect(script).toContain("exactSnippetCoverage: numberEnv('CODE_MEMORY_REAL_REPO_MIN_EXACT_SNIPPET_COVERAGE', 0.8)");
+    expect(script).toContain("fileLineEvidenceCoverage: numberEnv('CODE_MEMORY_REAL_REPO_MIN_FILE_LINE_EVIDENCE_COVERAGE', 0.95)");
+    expect(script).toContain('if (failOnThreshold) checkGlobalThresholds(metrics, failures);');
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.latest.json')");
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.summary.md')");
     expect(script).toContain('sanitizeBenchmarkArtifact(output)');

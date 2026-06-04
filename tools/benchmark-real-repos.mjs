@@ -20,6 +20,14 @@ const commandTimeoutMinutes = Number(options.commandTimeoutMinutes ?? options.ti
 const dryRun = Boolean(options.dryRun);
 const keep = Boolean(options.keep);
 const failOnThreshold = Boolean(options.failOnThreshold);
+const globalThresholds = {
+  allowedNextReadsRecall: numberEnv('CODE_MEMORY_REAL_REPO_MIN_ALLOWED_NEXT_READS_RECALL', 0.9),
+  exactSnippetCoverage: numberEnv('CODE_MEMORY_REAL_REPO_MIN_EXACT_SNIPPET_COVERAGE', 0.8),
+  fileLineEvidenceCoverage: numberEnv('CODE_MEMORY_REAL_REPO_MIN_FILE_LINE_EVIDENCE_COVERAGE', 0.95),
+  structuredResultCoverage: numberEnv('CODE_MEMORY_REAL_REPO_MIN_STRUCTURED_RESULT_COVERAGE', 1),
+  wrongProjectRouteRate: numberEnv('CODE_MEMORY_REAL_REPO_MAX_WRONG_PROJECT_ROUTE_RATE', 0),
+  staleFailureRate: numberEnv('CODE_MEMORY_REAL_REPO_MAX_STALE_FAILURE_RATE', 0),
+};
 const outputDir = resolve(repoRoot, String(options.outputDir ?? 'benchmark-results'));
 const workRoot = options.workDir
   ? resolve(String(options.workDir))
@@ -90,6 +98,7 @@ try {
   }
 
   const metrics = aggregateRepoMetrics(repoResults);
+  if (failOnThreshold) checkGlobalThresholds(metrics, failures);
   const output = {
     benchmark: 'real-repos',
     status: failures.length > 0 ? 'failed' : 'measured',
@@ -446,6 +455,31 @@ function checkThresholds(repo, failures) {
   }
 }
 
+function checkGlobalThresholds(metrics, failures) {
+  checkMin(metrics.allowedNextReadsRecall, globalThresholds.allowedNextReadsRecall, 'global allowedNextReadsRecall', failures);
+  checkMin(metrics.exactSnippetCoverage, globalThresholds.exactSnippetCoverage, 'global exactSnippetCoverage', failures);
+  checkMin(metrics.fileLineEvidenceCoverage, globalThresholds.fileLineEvidenceCoverage, 'global fileLineEvidenceCoverage', failures);
+  checkMin(metrics.structuredResultCoverage, globalThresholds.structuredResultCoverage, 'global structuredResultCoverage', failures);
+  checkMax(metrics.wrongProjectRouteRate, globalThresholds.wrongProjectRouteRate, 'global wrongProjectRouteRate', failures);
+  checkMax(metrics.staleFailureRate, globalThresholds.staleFailureRate, 'global staleFailureRate', failures);
+}
+
+function checkMin(value, threshold, label, failures) {
+  if (value === null || value === undefined) {
+    failures.push(`${label} is missing`);
+  } else if (value < threshold) {
+    failures.push(`${label} ${value} is below ${threshold}`);
+  }
+}
+
+function checkMax(value, threshold, label, failures) {
+  if (value === null || value === undefined) {
+    failures.push(`${label} is missing`);
+  } else if (value > threshold) {
+    failures.push(`${label} ${value} exceeds ${threshold}`);
+  }
+}
+
 function isProjectManagementTool(toolName) {
   return toolName === 'resolve_project' ||
     toolName === 'bootstrap_project' ||
@@ -693,4 +727,9 @@ function parseArgs(args) {
     }
   }
   return parsed;
+}
+
+function numberEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? value : fallback;
 }
