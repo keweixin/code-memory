@@ -11,7 +11,7 @@
  */
 
 import type { SqlJsDatabase } from '../storage/database.js';
-import type { EdgeType, FileRole, GraphNode, GraphEdge, GraphPath, SubGraph, SymbolKind } from '../shared/types.js';
+import type { EdgeType, FileRole, GraphNode, GraphEdge, GraphEdgeEvidence, GraphPath, SubGraph, SymbolKind } from '../shared/types.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('graph-engine');
@@ -219,20 +219,20 @@ export class GraphEngine {
     const params: unknown[] = [fromId, maxDepth];
 
     const cteSql = `
-      WITH RECURSIVE path_search(id, predecessor, edge_from, edge_to, edge_type, edge_confidence, depth) AS (
-        SELECT ?, NULL, NULL, NULL, NULL, NULL, 0
+      WITH RECURSIVE path_search(id, predecessor, edge_id, edge_from, edge_to, edge_type, edge_confidence, edge_evidence, depth) AS (
+        SELECT ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0
         UNION ALL
-        SELECT e.to_id, ps.id, e.from_id, e.to_id, e.type, e.confidence, ps.depth + 1
+        SELECT e.to_id, ps.id, e.id, e.from_id, e.to_id, e.type, e.confidence, e.evidence, ps.depth + 1
         FROM path_search ps
         JOIN edges e ON e.from_id = ps.id
         WHERE ps.depth < ?
           AND e.to_id NOT IN (SELECT id FROM path_search)
       )
-      SELECT id, predecessor, edge_from, edge_to, edge_type, edge_confidence, depth
+      SELECT id, predecessor, edge_id, edge_from, edge_to, edge_type, edge_confidence, edge_evidence, depth
       FROM path_search
     `;
 
-    let rows: Array<{ id: string; predecessor: string | null; edge_from: string | null; edge_to: string | null; edge_type: string | null; edge_confidence: number | null; depth: number }>;
+    let rows: Array<{ id: string; predecessor: string | null; edge_id: string | null; edge_from: string | null; edge_to: string | null; edge_type: string | null; edge_confidence: number | null; edge_evidence: string | null; depth: number }>;
     try {
       const results = this.db.exec(cteSql, params);
       if (results.length === 0 || results[0].values.length === 0) return null;
@@ -240,11 +240,13 @@ export class GraphEngine {
       rows = results[0].values.map((row) => ({
         id: String(row[0]),
         predecessor: row[1] !== null ? String(row[1]) : null,
-        edge_from: row[2] !== null ? String(row[2]) : null,
-        edge_to: row[3] !== null ? String(row[3]) : null,
-        edge_type: row[4] !== null ? String(row[4]) : null,
-        edge_confidence: row[5] !== null ? Number(row[5]) : null,
-        depth: Number(row[6]),
+        edge_id: row[2] !== null ? String(row[2]) : null,
+        edge_from: row[3] !== null ? String(row[3]) : null,
+        edge_to: row[4] !== null ? String(row[4]) : null,
+        edge_type: row[5] !== null ? String(row[5]) : null,
+        edge_confidence: row[6] !== null ? Number(row[6]) : null,
+        edge_evidence: row[7] !== null ? String(row[7]) : null,
+        depth: Number(row[8]),
       }));
     } catch (err) {
       log.warn(`CTE path finding failed, falling back: ${err instanceof Error ? err.message : String(err)}`);
@@ -265,10 +267,13 @@ export class GraphEngine {
       pathIds.unshift(current.predecessor);
       if (current.edge_from !== null && current.edge_to !== null && current.edge_type !== null) {
         pathEdges.unshift({
+          id: current.edge_id ?? undefined,
           from: current.edge_from,
           to: current.edge_to,
           type: current.edge_type as EdgeType,
           confidence: current.edge_confidence ?? 1.0,
+          evidence: current.edge_evidence,
+          provenance: inferEdgeProvenance(current.edge_evidence),
         });
       }
       const pred = rows.find((r) => r.id === current.predecessor);
@@ -487,7 +492,7 @@ export class GraphEngine {
       const placeholders = nodeIds.map(() => '?').join(', ');
       const params: unknown[] = [...nodeIds, ...nodeIds];
 
-      let sql = `SELECT from_id, to_id, type, confidence FROM edges WHERE (from_id IN (${placeholders}) OR to_id IN (${placeholders}))`;
+      let sql = `SELECT id, from_id, to_id, type, confidence, evidence FROM edges WHERE (from_id IN (${placeholders}) OR to_id IN (${placeholders}))`;
 
       if (edgeTypes && edgeTypes.length > 0) {
         const typePlaceholders = edgeTypes.map(() => '?').join(', ');
@@ -498,15 +503,19 @@ export class GraphEngine {
       const results = this.db.exec(sql, params);
       if (results.length > 0) {
         for (const row of results[0].values) {
-          const fromId = String(row[0]);
-          const toId = String(row[1]);
+          const edgeId = String(row[0]);
+          const fromId = String(row[1]);
+          const toId = String(row[2]);
           // Only include edges where both endpoints are in the discovered node set
           if (nodeIdSet.has(fromId) && nodeIdSet.has(toId)) {
             edges.push({
+              id: edgeId,
               from: fromId,
               to: toId,
-              type: String(row[2]) as EdgeType,
-              confidence: Number(row[3]),
+              type: String(row[3]) as EdgeType,
+              confidence: Number(row[4]),
+              evidence: row[5] !== null ? String(row[5]) : null,
+              provenance: inferEdgeProvenance(row[5] !== null ? String(row[5]) : null),
             });
           }
         }
@@ -515,7 +524,7 @@ export class GraphEngine {
       log.warn(`Batch edges query failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    return edges;
+    return this.attachEvidenceRecords(edges);
   }
 
   // ============================================================
@@ -527,7 +536,7 @@ export class GraphEngine {
 
     try {
       if (direction === 'outgoing') {
-        let sql = 'SELECT from_id, to_id, type, confidence FROM edges WHERE from_id = ?';
+        let sql = 'SELECT id, from_id, to_id, type, confidence, evidence FROM edges WHERE from_id = ?';
         const params: string[] = [nodeId];
         if (edgeType) {
           sql += ' AND type = ?';
@@ -537,15 +546,18 @@ export class GraphEngine {
         if (results.length > 0) {
           for (const row of results[0].values) {
             edges.push({
-              from: String(row[0]),
-              to: String(row[1]),
-              type: String(row[2]) as EdgeType,
-              confidence: Number(row[3]),
+              id: String(row[0]),
+              from: String(row[1]),
+              to: String(row[2]),
+              type: String(row[3]) as EdgeType,
+              confidence: Number(row[4]),
+              evidence: row[5] !== null ? String(row[5]) : null,
+              provenance: inferEdgeProvenance(row[5] !== null ? String(row[5]) : null),
             });
           }
         }
       } else {
-        let sql = 'SELECT from_id, to_id, type, confidence FROM edges WHERE to_id = ?';
+        let sql = 'SELECT id, from_id, to_id, type, confidence, evidence FROM edges WHERE to_id = ?';
         const params: string[] = [nodeId];
         if (edgeType) {
           sql += ' AND type = ?';
@@ -555,10 +567,13 @@ export class GraphEngine {
         if (results.length > 0) {
           for (const row of results[0].values) {
             edges.push({
-              from: String(row[0]),
-              to: String(row[1]),
-              type: String(row[2]) as EdgeType,
-              confidence: Number(row[3]),
+              id: String(row[0]),
+              from: String(row[1]),
+              to: String(row[2]),
+              type: String(row[3]) as EdgeType,
+              confidence: Number(row[4]),
+              evidence: row[5] !== null ? String(row[5]) : null,
+              provenance: inferEdgeProvenance(row[5] !== null ? String(row[5]) : null),
             });
           }
         }
@@ -567,7 +582,56 @@ export class GraphEngine {
       log.warn(`Failed to get edges for ${nodeId}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    return edges;
+    return this.attachEvidenceRecords(edges);
+  }
+
+  private attachEvidenceRecords(edges: GraphEdge[]): GraphEdge[] {
+    const edgeIds = edges.map((edge) => edge.id).filter((id): id is string => Boolean(id));
+    if (edgeIds.length === 0) return edges;
+    const evidenceByEdge = this.loadEdgeEvidence(edgeIds);
+    return edges.map((edge) => {
+      if (!edge.id) return edge;
+      return {
+        ...edge,
+        evidenceRecords: evidenceByEdge.get(edge.id) ?? [],
+      };
+    });
+  }
+
+  private loadEdgeEvidence(edgeIds: string[]): Map<string, GraphEdgeEvidence[]> {
+    const evidenceByEdge = new Map<string, GraphEdgeEvidence[]>();
+    if (edgeIds.length === 0) return evidenceByEdge;
+
+    try {
+      const uniqueIds = [...new Set(edgeIds)];
+      const placeholders = uniqueIds.map(() => '?').join(', ');
+      const results = this.db.exec(
+        `SELECT gee.edge_id, f.path, gee.start_line, gee.start_column, gee.evidence, gee.source_table
+         FROM graph_edge_evidence gee
+         LEFT JOIN files f ON f.id = gee.file_id
+         WHERE gee.edge_id IN (${placeholders})
+         ORDER BY gee.edge_id, gee.start_line, gee.start_column`,
+        uniqueIds,
+      );
+      if (results.length === 0) return evidenceByEdge;
+
+      for (const row of results[0].values) {
+        const edgeId = String(row[0]);
+        const records = evidenceByEdge.get(edgeId) ?? [];
+        records.push({
+          filePath: row[1] !== null ? String(row[1]) : null,
+          line: row[2] !== null ? Number(row[2]) : null,
+          column: row[3] !== null ? Number(row[3]) : null,
+          evidence: row[4] !== null ? String(row[4]) : null,
+          provenance: provenanceFromSourceTable(row[5] !== null ? String(row[5]) : null),
+        });
+        evidenceByEdge.set(edgeId, records);
+      }
+    } catch (err) {
+      log.warn(`Failed to load graph edge evidence: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return evidenceByEdge;
   }
 
   /**
@@ -633,4 +697,21 @@ export class GraphEngine {
       columnRange: null,
     };
   }
+}
+
+function inferEdgeProvenance(evidence: string | null): GraphEdgeEvidence['provenance'] {
+  if (!evidence) return 'heuristic';
+  const lower = evidence.toLowerCase();
+  if (lower.includes('route') || lower.includes('framework')) return 'framework';
+  if (lower.includes('resolve') || lower.includes('resolver')) return 'resolver';
+  if (lower.includes('heuristic') || lower.includes('naming')) return 'heuristic';
+  return 'parser';
+}
+
+function provenanceFromSourceTable(sourceTable: string | null): GraphEdgeEvidence['provenance'] {
+  if (!sourceTable) return 'heuristic';
+  if (sourceTable.includes('route')) return 'framework';
+  if (sourceTable.includes('resolution') || sourceTable.includes('resolver')) return 'resolver';
+  if (sourceTable.includes('call_refs') || sourceTable.includes('imports') || sourceTable.includes('parse')) return 'parser';
+  return sourceTable === 'graph_builder' ? 'parser' : 'heuristic';
 }

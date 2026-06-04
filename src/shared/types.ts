@@ -673,10 +673,22 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
+  id?: string;
   from: string;
   to: string;
   type: EdgeType;
   confidence: number;
+  evidence?: string | null;
+  provenance?: 'parser' | 'resolver' | 'framework' | 'heuristic';
+  evidenceRecords?: GraphEdgeEvidence[];
+}
+
+export interface GraphEdgeEvidence {
+  filePath: string | null;
+  line: number | null;
+  column: number | null;
+  evidence: string | null;
+  provenance: 'parser' | 'resolver' | 'framework' | 'heuristic';
 }
 
 export interface SubGraph {
