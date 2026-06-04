@@ -113,7 +113,12 @@ describe('release consistency', () => {
     expect(mcpTools).toContain('watcherActive');
     expect(mcpTools).toContain('freshness.changedFiles');
     expect(mcpTools).toContain('Do not scrape `display` to discover stale paths.');
+    expect(mcpTools).toContain('Graph-backed tools put edge trust data in `data.edges`');
+    expect(mcpTools).toContain('provenance: "parser" | "resolver" | "framework"');
     expect(schemaFreeze).toContain('CodeMemoryToolResult');
+    expect(schemaFreeze).toContain('type GraphEdge =');
+    expect(schemaFreeze).toContain('evidenceRecords?: Array');
+    expect(schemaFreeze).toContain('weak or heuristic edges must remain visibly marked');
     expect(schemaFreeze).toContain('code-memory://repo/{name}/schema');
     expect(schemaFreeze).toContain('`freshness.changedFiles` is a machine-readable list of stale indexed paths');
     expect(schemaFreeze).toContain('Watcher pending paths may be used as a fallback only when no stale');

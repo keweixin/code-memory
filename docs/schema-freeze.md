@@ -112,6 +112,32 @@ type CodeMemoryToolResult<T> = {
 Machine logic must use `status`, `project`, `freshness`, `data`, and
 `nextAction`. `display` is human fallback only.
 
+Graph-backed tool payloads such as `get_call_graph` and
+`get_dependency_graph` expose edge evidence in machine-readable `data.edges`:
+
+```ts
+type GraphEdge = {
+  id?: string;
+  from: string;
+  to: string;
+  type: string;
+  confidence: number;
+  evidence?: string | null;
+  provenance?: 'parser' | 'resolver' | 'framework' | 'heuristic';
+  evidenceRecords?: Array<{
+    filePath: string | null;
+    line: number | null;
+    column: number | null;
+    evidence: string | null;
+    provenance: 'parser' | 'resolver' | 'framework' | 'heuristic';
+  }>;
+};
+```
+
+`confidence`, `evidence`, `provenance`, and `evidenceRecords` are the
+machine-readable graph trust contract. Do not infer exactness from `display`;
+weak or heuristic edges must remain visibly marked as such in `provenance`.
+
 `freshness.changedFiles` is a machine-readable list of stale indexed paths when
 the working tree no longer matches the index. It must include indexable files
 whose content hash changed, newly relevant indexable files, and deleted indexed

@@ -42,6 +42,12 @@ type CodeMemoryToolResult<T> = {
 
 Parse `status`, `project`, `freshness`, `data`, and `nextAction` for agent control flow. Use `display` only for human-readable fallback text.
 
+Graph-backed tools put edge trust data in `data.edges`, not in `display`.
+Each edge may include `confidence`, collapsed `evidence`, `provenance`, and
+per-site `evidenceRecords` with `filePath`, `line`, `column`, `evidence`, and
+`provenance`. Treat only `provenance: "parser" | "resolver" | "framework"` as
+strong evidence; `heuristic` edges require confirmation before risky edits.
+
 `freshness.changedFiles` is the bounded machine-readable stale file list. It
 contains indexable paths whose indexed hash is stale, newly relevant files, or
 deleted indexed files. After `sync_project` refreshes those paths,
