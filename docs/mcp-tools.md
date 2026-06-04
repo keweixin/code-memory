@@ -42,6 +42,12 @@ type CodeMemoryToolResult<T> = {
 
 Parse `status`, `project`, `freshness`, `data`, and `nextAction` for agent control flow. Use `display` only for human-readable fallback text.
 
+`freshness.changedFiles` is the bounded machine-readable stale file list. It
+contains indexable paths whose indexed hash is stale, newly relevant files, or
+deleted indexed files. After `sync_project` refreshes those paths,
+`freshness.indexStatus` returns to `fresh` and `freshness.changedFiles` is empty.
+Do not scrape `display` to discover stale paths.
+
 After a ready `get_context_pack`, prefer `data.trustContract.allowedNextReads`:
 
 ```json

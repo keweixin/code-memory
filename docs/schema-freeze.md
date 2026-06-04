@@ -112,6 +112,14 @@ type CodeMemoryToolResult<T> = {
 Machine logic must use `status`, `project`, `freshness`, `data`, and
 `nextAction`. `display` is human fallback only.
 
+`freshness.changedFiles` is a machine-readable list of stale indexed paths when
+the working tree no longer matches the index. It must include indexable files
+whose content hash changed, newly relevant indexable files, and deleted indexed
+files. After `sync_project` or `code-memory sync` refreshes the index,
+`freshness.indexStatus` must return to `fresh` and `freshness.changedFiles` must
+be empty. Watcher pending paths may be used as a fallback only when no stale
+indexed paths are available.
+
 ## Resource URI Schema
 
 Stable resources:

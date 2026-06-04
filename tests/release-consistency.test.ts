@@ -111,8 +111,13 @@ describe('release consistency', () => {
     expect(readme).toContain('docs/schema-freeze.md');
     expect(mcpTools).toContain('needs_project_selection');
     expect(mcpTools).toContain('watcherActive');
+    expect(mcpTools).toContain('freshness.changedFiles');
+    expect(mcpTools).toContain('Do not scrape `display` to discover stale paths.');
     expect(schemaFreeze).toContain('CodeMemoryToolResult');
     expect(schemaFreeze).toContain('code-memory://repo/{name}/schema');
+    expect(schemaFreeze).toContain('`freshness.changedFiles` is a machine-readable list of stale indexed paths');
+    expect(schemaFreeze).toContain('Watcher pending paths may be used as a fallback only when no stale');
+    expect(schemaFreeze).toContain('indexed paths are available.');
   });
 
   it('keeps release and nightly workflows aligned with real repo benchmark policy', () => {
