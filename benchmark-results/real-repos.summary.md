@@ -1,6 +1,6 @@
 # Real Repo Benchmark Summary
 
-Generated: 2026-06-04T13:44:22.933Z
+Generated: 2026-06-04T14:30:28.419Z
 Status: measured
 Repos: 4
 Tasks: 8
@@ -14,9 +14,9 @@ Tasks: 8
 | staleFailureRate | 0 |
 | structuredResultCoverage | 1 |
 | textOnlyHitRate | 0 |
-| allowedNextReadsRecall | 0.8125 |
-| exactSnippetCoverage | 0 |
-| fileLineEvidenceCoverage | 0.875 |
+| allowedNextReadsRecall | 0.9375 |
+| exactSnippetCoverage | 0.875 |
+| fileLineEvidenceCoverage | 1 |
 
 | Repo | Tasks | Key file recall | Evidence coverage | Related test recall | Wrong route rate | Stale failure rate |
 |---|---:|---:|---:|---:|---:|---:|

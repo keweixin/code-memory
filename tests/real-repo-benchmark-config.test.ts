@@ -6,6 +6,7 @@ interface RealRepoBenchmarkTask {
   id: string;
   type: string;
   query: string;
+  target?: string;
   expectedFiles: string[];
   expectedSymbols: string[];
 }
@@ -58,6 +59,10 @@ describe('real repo benchmark config', () => {
         taskTypes.add(task.type);
         expect(task.query.length).toBeGreaterThan(20);
         expect(task.expectedFiles.length).toBeGreaterThan(0);
+        if (task.type === 'related_tests') {
+          expect(task.target).toBeTruthy();
+          expect(task.target).not.toBe(task.expectedFiles[0]);
+        }
       }
     }
 
@@ -83,6 +88,8 @@ describe('real repo benchmark config', () => {
     expect(script).toContain('const foundSymbols = task.expectedSymbols.filter((symbol) => containsStringValue(structuredFacts.symbols, symbol));');
     expect(script).toContain('const staleCheckedResults = structuredResults.filter(({ toolName }) => !isProjectManagementTool(toolName));');
     expect(script).toContain('function isProjectManagementTool(toolName)');
+    expect(script).toContain('const target = task.target ?? task.expectedSymbols[0] ?? task.expectedFiles[0] ?? task.query;');
+    expect(script).toContain('function isInputEchoPath(path)');
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.latest.json')");
     expect(script).toContain("writeFileSync(join(dir, 'real-repos.summary.md')");
     expect(script).toContain('sanitizeBenchmarkArtifact(output)');

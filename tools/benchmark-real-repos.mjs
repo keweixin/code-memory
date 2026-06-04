@@ -199,7 +199,7 @@ async function runTask(repo, task, projectRoot) {
   }));
 
   if (task.type === 'related_tests') {
-    const target = task.expectedFiles[0] ?? task.expectedSymbols[0] ?? task.query;
+    const target = task.target ?? task.expectedSymbols[0] ?? task.expectedFiles[0] ?? task.query;
     outputs.push(await runTool(projectRoot, 'get_related_tests', { project: projectRoot, target }));
   }
 
@@ -509,6 +509,7 @@ function collectStructuredFacts(results) {
 
 function collectFactsFromValue(value, path, facts) {
   if (value === null || value === undefined) return;
+  if (isInputEchoPath(path)) return;
   if (typeof value === 'string') {
     if (looksLikePathValue(value)) addPathFact(value, path, facts);
     if (looksLikeSymbolValue(value)) facts.symbols.push(value);
@@ -576,6 +577,11 @@ function isExactSnippetPath(path) {
 
 function isEvidencePath(path) {
   return path.some((part) => part === 'evidence' || part === 'whyIncluded' || part === 'exactSnippets');
+}
+
+function isInputEchoPath(path) {
+  const key = path[path.length - 1];
+  return key === 'query' || key === 'target' || key === 'command' || key === 'runCommand';
 }
 
 function looksLikePathValue(value) {

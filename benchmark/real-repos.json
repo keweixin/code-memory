@@ -29,6 +29,7 @@
         "id": "nextjs-related-tests",
         "type": "related_tests",
         "query": "Find tests related to route handler behavior.",
+        "target": "packages/next/src/server/route-modules/app-route/module.ts",
         "expectedFiles": ["test/e2e/app-dir/app-routes/app-custom-routes.test.ts"],
         "expectedSymbols": []
       }

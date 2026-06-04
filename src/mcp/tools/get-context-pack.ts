@@ -296,7 +296,8 @@ interface RepeatedContextSummary {
 
 function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJsDatabase): ToolTrustContract {
   const freshness = getIndexStaleness(projectRoot, db);
-  const exactSnippets = pack.codeSnippets.slice(0, 5).map((snippet) => ({
+  const exactSnippets = pack.codeSnippets.length > 0
+    ? pack.codeSnippets.slice(0, 5).map((snippet) => ({
     path: snippet.filePath,
     startLine: snippet.lineRange[0],
     endLine: snippet.lineRange[1],
@@ -307,7 +308,24 @@ function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJ
     symbol: snippet.symbolName ?? "",
     code: truncateSnippetCode(snippet.content),
     why: snippet.reason,
-  }));
+  }))
+    : pack.level >= "L3"
+      ? (pack.evidence || [])
+      .filter((item) => item.filePath && item.startLine && item.endLine && item.preview)
+      .slice(0, 5)
+      .map((item) => ({
+        path: item.filePath!,
+        startLine: item.startLine!,
+        endLine: item.endLine!,
+        whyIncluded: "Parser evidence selected for this context pack.",
+        file: item.filePath!,
+        lines: item.startLine + "-" + item.endLine,
+        lineRange: item.startLine + "-" + item.endLine,
+        symbol: item.id.startsWith("symbol:") ? item.id : "",
+        code: truncateSnippetCode(item.preview!),
+        why: "Parser evidence selected for this context pack.",
+      }))
+      : [];
   const evidence = (pack.evidence || []).slice(0, 12).map((item) => ({
     id: item.id,
     kind: item.kind,

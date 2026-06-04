@@ -53,6 +53,9 @@ export function registerGetRelatedTestsTool(server: McpServer, db?: SqlJsDatabas
         return await withRepoDatabase({ repo, project, cwd, workspaceRoots }, db, async (activeDb, projectRoot, resolution) => {
           const activeGraphEngine = graphEngine && activeDb === db ? graphEngine : new GraphEngine(activeDb);
           const testResults = findRelatedTests(activeDb, activeGraphEngine, target);
+          if (testResults.length === 0) {
+            testResults.push(...findTestsByPathTokenOverlap(activeDb, target));
+          }
 
           if (testResults.length === 0) {
             const display = wrapWithStaleBanner("No related tests found for: " + target + ".", activeDb);
@@ -78,6 +81,7 @@ export function registerGetRelatedTestsTool(server: McpServer, db?: SqlJsDatabas
             };
           }
 
+          const testEvidence = buildRelatedTestEvidence(activeDb, testResults);
           const text = wrapWithStaleBanner(formatTestResults(target, testResults), activeDb);
           log.info("Found " + testResults.length + " related tests for: " + target);
 
@@ -92,6 +96,14 @@ export function registerGetRelatedTestsTool(server: McpServer, db?: SqlJsDatabas
                   target,
                   resultCount: testResults.length,
                   tests: testResults,
+                  allowedNextReads: testEvidence.allowedNextReads,
+                  exactSnippets: testEvidence.exactSnippets,
+                  evidence: testEvidence.evidence,
+                  relatedTests: testResults.map((test) => ({
+                    path: test.filePath,
+                    reason: test.details,
+                    confidence: test.confidence ?? 0.7,
+                  })),
                   runCommand: "npx vitest run " + testResults.map((test) => test.filePath).join(" "),
                 },
                 text,
@@ -127,6 +139,7 @@ interface TestInfo {
   filePath: string;
   method: string;
   details: string;
+  confidence?: number;
 }
 
 function findRelatedTests(
@@ -156,6 +169,7 @@ function findRelatedTests(
           filePath: symInfo.filePath,
           method: "graph (TESTS edge)",
           details: "Test symbol: " + symInfo.name,
+          confidence: 0.95,
         });
       }
     }
@@ -171,6 +185,7 @@ function findRelatedTests(
           filePath: testPath,
           method: "graph (TESTS edge)",
           details: "Test file covers this module",
+          confidence: 0.9,
         });
       }
     }
@@ -205,6 +220,7 @@ function findRelatedTests(
               filePath: testPath,
               method: "import graph",
               details: "Test file imports from this module",
+              confidence: 0.85,
             });
           }
         }
@@ -304,6 +320,7 @@ function findTestsByNamingConvention(db: SqlJsDatabase, sourcePath: string): Tes
           filePath: String(results[0].values[0][0]),
           method: "naming convention",
           details: "Matches test naming: " + candidate,
+          confidence: 0.75,
         });
       }
     } catch {
@@ -312,6 +329,115 @@ function findTestsByNamingConvention(db: SqlJsDatabase, sourcePath: string): Tes
   }
 
   return tests;
+}
+
+function findTestsByPathTokenOverlap(db: SqlJsDatabase, target: string): TestInfo[] {
+  const targetTokens = tokenizePathForTestMatching(target);
+  if (targetTokens.size === 0) return [];
+
+  try {
+    const rows = db.exec("SELECT path FROM files WHERE role = 'test' LIMIT 500")[0]?.values ?? [];
+    return rows
+      .map((row) => {
+        const filePath = String(row[0]);
+        const testTokens = tokenizePathForTestMatching(filePath);
+        const overlap = [...targetTokens].filter((token) => testTokens.has(token));
+        return { filePath, overlap };
+      })
+      .filter((item) => item.overlap.length > 0)
+      .sort((a, b) => b.overlap.length - a.overlap.length || a.filePath.localeCompare(b.filePath))
+      .slice(0, 5)
+      .map((item) => ({
+        filePath: item.filePath,
+        method: "path token overlap",
+        details: "Shares path tokens with target: " + item.overlap.join(", "),
+        confidence: Math.min(0.7, 0.45 + item.overlap.length * 0.1),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function buildRelatedTestEvidence(db: SqlJsDatabase, tests: TestInfo[]): {
+  allowedNextReads: Array<{ path: string; lineRange?: string; reason: string; readPriority: "high" | "medium" | "low"; maxLines: string }>;
+  exactSnippets: Array<{ path: string; startLine: number; endLine: number; code: string; whyIncluded: string }>;
+  evidence: Array<{ file: string; line: number; endLine: number; confidence: number; provenance: "parser" | "resolver" | "heuristic"; preview: string | null }>;
+} {
+  const exactSnippets = tests
+    .map((test) => {
+      const chunk = getFirstChunkForFile(db, test.filePath);
+      if (!chunk) return null;
+      return {
+        path: test.filePath,
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        code: chunk.content,
+        whyIncluded: test.details,
+      };
+    })
+    .filter((snippet): snippet is { path: string; startLine: number; endLine: number; code: string; whyIncluded: string } => Boolean(snippet));
+
+  const evidence = tests.map((test) => {
+    const snippet = exactSnippets.find((item) => item.path === test.filePath);
+    return {
+      file: test.filePath,
+      line: snippet?.startLine ?? 1,
+      endLine: snippet?.endLine ?? snippet?.startLine ?? 1,
+      confidence: test.confidence ?? 0.7,
+      provenance: test.method.includes("graph") || test.method.includes("naming")
+        ? "resolver" as const
+        : "heuristic" as const,
+      preview: snippet?.code.slice(0, 240) ?? null,
+    };
+  });
+
+  return {
+    allowedNextReads: tests.map((test) => {
+      const snippet = exactSnippets.find((item) => item.path === test.filePath);
+      return {
+        path: test.filePath,
+        ...(snippet ? { lineRange: snippet.startLine + "-" + snippet.endLine } : {}),
+        reason: test.details,
+        readPriority: "medium" as const,
+        maxLines: snippet ? snippet.startLine + "-" + snippet.endLine : "targeted test read only",
+      };
+    }),
+    exactSnippets,
+    evidence,
+  };
+}
+
+function getFirstChunkForFile(db: SqlJsDatabase, filePath: string): { startLine: number; endLine: number; content: string } | null {
+  try {
+    const rows = db.exec(
+      `SELECT c.start_line, c.end_line, c.content
+       FROM chunks c
+       JOIN files f ON f.id = c.file_id
+       WHERE f.path = ?
+       ORDER BY c.start_line ASC
+       LIMIT 1`,
+      [filePath],
+    )[0]?.values ?? [];
+    if (rows.length === 0) return null;
+    return {
+      startLine: Number(rows[0][0]),
+      endLine: Number(rows[0][1]),
+      content: String(rows[0][2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function tokenizePathForTestMatching(value: string): Set<string> {
+  const stop = new Set(["src", "lib", "test", "tests", "__tests__", "spec", "e2e", "unit", "module", "index", "js", "jsx", "ts", "tsx", "py"]);
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.endsWith("s") ? token.slice(0, -1) : token)
+      .filter((token) => token.length > 2 && !stop.has(token)),
+  );
 }
 
 function formatTestResults(target: string, tests: TestInfo[]): string {
