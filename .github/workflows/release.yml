@@ -17,22 +17,38 @@ jobs:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Checkout release tag for manual run
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
+          git fetch --tags --force
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Manual release requires existing tag $TAG" >&2
+            exit 1
+          fi
+          git checkout "$TAG"
       - name: Verify tag matches package version
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            TAG="${GITHUB_REF_NAME#v}"
-            if [ "$VERSION" != "$TAG" ]; then
-              echo "Tag v$TAG does not match package.json version $VERSION" >&2
+            REF_TAG="${GITHUB_REF_NAME#v}"
+            if [ "$VERSION" != "$REF_TAG" ]; then
+              echo "Tag v$REF_TAG does not match package.json version $VERSION" >&2
               exit 1
             fi
-          else
-            echo "Manual release run for package version $VERSION on $GITHUB_REF_NAME"
+          fi
+          HEAD_TAG="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+          if [ "$HEAD_TAG" != "v$VERSION" ]; then
+            echo "Release source must be exactly tag v$VERSION, got '${HEAD_TAG:-untagged}'" >&2
+            exit 1
           fi
       - run: npm ci --registry=https://registry.npmjs.org
       - run: npm run lint
