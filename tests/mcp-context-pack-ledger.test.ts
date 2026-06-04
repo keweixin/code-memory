@@ -199,7 +199,26 @@ describe('MCP context pack ledger integration', () => {
     expect(secondStructured.data.repeatedContext.repeatedFiles).toBeGreaterThan(0);
     expect(secondStructured.data.repeatedContext.newChunks).toBeLessThan(firstStructured.data.trustContract.exactSnippets.length + secondStructured.data.repeatedContext.repeatedChunks);
     expect(secondStructured.data.repeatedContext.repeatedPenalty).toBeGreaterThanOrEqual(0.5);
-    expect(getContextLedgerEntries('session-login')).toHaveLength(2);
+    const entries = getContextLedgerEntries('session-login');
+    expect(entries).toHaveLength(2);
+    const firstEntry = entries[0]!;
+    const secondEntry = entries[1]!;
+    const repeatedFileOverlap = firstEntry.returnedFiles
+      .filter((file) => secondEntry.returnedFiles.includes(file)).length;
+    const repeatedChunkOverlap = firstEntry.returnedChunks
+      .filter((chunk) => secondEntry.returnedChunks.includes(chunk)).length;
+    const repeatedFileReduction = firstEntry.returnedFiles.length === 0
+      ? 1
+      : 1 - repeatedFileOverlap / firstEntry.returnedFiles.length;
+    const repeatedChunkReduction = firstEntry.returnedChunks.length === 0
+      ? 1
+      : 1 - repeatedChunkOverlap / firstEntry.returnedChunks.length;
+    const usefulDeltaRate = secondEntry.returnedFiles.length > 0 || secondEntry.returnedChunks.length > 0 ? 1 : 0;
+    const overPruningRate = secondEntry.returnedFiles.length === 0 && secondEntry.returnedChunks.length === 0 ? 1 : 0;
+    expect(repeatedFileReduction).toBeGreaterThanOrEqual(0.5);
+    expect(repeatedChunkReduction).toBeGreaterThanOrEqual(0.6);
+    expect(usefulDeltaRate).toBeGreaterThanOrEqual(0.8);
+    expect(overPruningRate).toBeLessThanOrEqual(0.1);
   });
 
   it('auto-records a context pack when callers omit sessionId and returns the generated session identity', async () => {
