@@ -22,6 +22,46 @@ type StructuredToolResult = {
   display: string;
 };
 
+const dbBackedContractToolNames = [
+  'get_project_card',
+  'plan_context',
+  'get_context_pack',
+  'search_code',
+  'search_symbols',
+  'find_definition',
+  'find_references',
+  'explain_module',
+  'impact_analysis',
+  'get_related_tests',
+  'get_repo_map',
+  'get_process',
+  'get_call_graph',
+  'get_dependency_graph',
+  'get_community',
+  'get_route_map',
+  'mark_context_used',
+  'get_context_delta',
+  'avoid_repeated_context',
+  'explain_why_this_context',
+  'compact_session_context',
+  'remember_project_fact',
+  'invalidate_memory',
+  'reset_context_session',
+] as const;
+
+const globalManagementToolNames = [
+  'resolve_project',
+  'bootstrap_project',
+  'sync_project',
+  'register_project',
+  'get_unified_repo_map',
+] as const;
+
+const expectedRegisteredToolNames = [
+  ...dbBackedContractToolNames,
+  ...globalManagementToolNames,
+].sort();
+
 class FakeMcpServer {
   readonly handlers = new Map<string, ToolHandler>();
 
@@ -108,6 +148,8 @@ describe('MCP core tool result contract', () => {
     const processes = db.all<{ name: string }>('SELECT name FROM processes ORDER BY name');
     expect(processes.length).toBeGreaterThan(0);
 
+    expect([...server.handlers.keys()].sort()).toEqual(expectedRegisteredToolNames);
+
     const toolCalls: Array<[string, Record<string, unknown>]> = [
       ['get_project_card', {}],
       ['plan_context', { query: 'debug login failure', tokenBudget: 1500 }],
@@ -154,6 +196,7 @@ describe('MCP core tool result contract', () => {
       ['invalidate_memory', { type: 'decision' }],
       ['reset_context_session', { sessionId: 'core-contract-session' }],
     ];
+    expect(toolCalls.map(([name]) => name).sort()).toEqual([...dbBackedContractToolNames].sort());
 
     for (const [toolName, args] of toolCalls) {
       const handler = server.handlers.get(toolName);
