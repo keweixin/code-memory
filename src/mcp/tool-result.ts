@@ -108,7 +108,9 @@ export function toolResultFromProject<T>(
     },
     freshness: {
       indexStatus: freshness.indexStatus,
-      changedFiles: freshness.watchLastChangedPaths,
+      changedFiles: freshness.changedFilePaths.length > 0
+        ? freshness.changedFilePaths
+        : freshness.watchLastChangedPaths,
       lastIndexedAt: freshness.lastIndexedAt,
       watcherActive: freshness.watcherActive,
       syncing: freshness.watchState?.syncing ?? false,
@@ -168,7 +170,9 @@ function freshnessFromResolution(resolution: ProjectResolution): ToolFreshnessIn
   const freshness = getIndexStaleness(resolution.projectRoot);
   return {
     indexStatus: freshness.indexStatus,
-    changedFiles: freshness.watchLastChangedPaths,
+    changedFiles: freshness.changedFilePaths.length > 0
+      ? freshness.changedFilePaths
+      : freshness.watchLastChangedPaths,
     lastIndexedAt: freshness.lastIndexedAt,
     watcherActive: freshness.watcherActive,
     syncing: freshness.watchState?.syncing ?? false,

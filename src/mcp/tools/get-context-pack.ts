@@ -371,7 +371,9 @@ function buildToolTrustContract(pack: ContextPack, projectRoot: string, db: SqlJ
     }],
     freshness: {
       changedFiles: freshness.changedFiles,
-      changedFilePaths: freshness.watchLastChangedPaths,
+      changedFilePaths: freshness.changedFilePaths.length > 0
+        ? freshness.changedFilePaths
+        : freshness.watchLastChangedPaths,
       watchPendingCount: freshness.watchPendingCount,
       recommendedAction: freshness.recommendedAction,
     },

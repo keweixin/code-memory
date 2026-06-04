@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { CodeMemoryConfig } from '../src/shared/types.js';
@@ -183,5 +184,49 @@ describe('MCP registry index diagnostics', () => {
 
     expect(recoveredStructured?.status).toBe('ready');
     expect(recoveredStructured?.freshness?.indexStatus).toBe('fresh');
+  });
+
+  it('reports stale file paths from DB-backed MCP tools until sync refreshes the index', async () => {
+    execSync('git init', { cwd: tempRoot, stdio: 'ignore' });
+    execSync('git config user.email code-memory-test@example.com', { cwd: tempRoot, stdio: 'ignore' });
+    execSync('git config user.name "Code Memory Test"', { cwd: tempRoot, stdio: 'ignore' });
+    writeFileSync(join(tempRoot, '.gitignore'), '.code-memory/\n', 'utf-8');
+    execSync('git add .', { cwd: tempRoot, stdio: 'ignore' });
+    execSync('git commit -m initial', { cwd: tempRoot, stdio: 'ignore' });
+
+    await indexFixture(tempRoot);
+
+    const targetFile = join(tempRoot, 'src', 'services', 'AuthService.ts');
+    const originalContent = readFileSync(targetFile, 'utf-8');
+    const updatedContent = originalContent.replace('Invalid credentials', 'Invalid login');
+    expect(updatedContent).not.toBe(originalContent);
+    writeFileSync(targetFile, updatedContent, 'utf-8');
+
+    const server = new FakeMcpServer();
+    const db = getDatabaseSync();
+    registerAllTools(server as never, db);
+
+    const staleResult = await server.handlers.get('search_code')!({
+      query: 'login',
+      limit: 5,
+      searchMode: 'keyword',
+    });
+    const staleStructured = parseStructuredResult(staleResult.content[0].text);
+    expect(staleStructured?.status).toBe('stale');
+    expect(staleStructured?.freshness?.indexStatus).toBe('stale');
+    expect(staleStructured?.freshness?.changedFiles).toEqual(['src/services/AuthService.ts']);
+    expect(staleStructured?.freshness?.recommendedAction).toBe('run code-memory sync');
+
+    await new IndexManager(tempRoot, createConfig(tempRoot)).incrementalIndex();
+
+    const freshResult = await server.handlers.get('search_code')!({
+      query: 'login',
+      limit: 5,
+      searchMode: 'keyword',
+    });
+    const freshStructured = parseStructuredResult(freshResult.content[0].text);
+    expect(freshStructured?.status).toBe('ready');
+    expect(freshStructured?.freshness?.indexStatus).toBe('fresh');
+    expect(freshStructured?.freshness?.changedFiles).toEqual([]);
   });
 });

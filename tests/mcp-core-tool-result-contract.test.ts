@@ -22,6 +22,12 @@ type StructuredToolResult = {
   display: string;
 };
 
+type ToolCallCase = {
+  name: string;
+  args: Record<string, unknown>;
+  requiredDataValues?: string[];
+};
+
 const dbBackedContractToolNames = [
   'get_project_card',
   'plan_context',
@@ -127,15 +133,39 @@ function expectEnvelope(result: StructuredToolResult, projectRoot: string): void
   expect(result.display.length).toBeGreaterThan(0);
 }
 
+function expectCriticalDataValues(result: StructuredToolResult, values: string[] = []): void {
+  const machinePayload = JSON.stringify({
+    project: result.project,
+    freshness: result.freshness,
+    data: result.data,
+    nextAction: result.nextAction,
+  });
+  for (const value of values) {
+    const encodedValue = JSON.stringify(value).slice(1, -1);
+    expect(
+      machinePayload.includes(value) || machinePayload.includes(encodedValue),
+      `${value} must be present in machine-readable fields, not only display`,
+    ).toBe(true);
+  }
+}
+
 describe('MCP core tool result contract', () => {
   let tempRoot: string;
+  let originalGlobalHome: string | undefined;
 
   beforeEach(() => {
+    originalGlobalHome = process.env.CODE_MEMORY_GLOBAL_HOME;
     tempRoot = mkdtempSync(join(tmpdir(), 'code-memory-core-contract-'));
+    process.env.CODE_MEMORY_GLOBAL_HOME = join(tempRoot, 'home');
     cpSync(fixtureRoot, tempRoot, { recursive: true });
   });
 
   afterEach(async () => {
+    if (originalGlobalHome === undefined) {
+      delete process.env.CODE_MEMORY_GLOBAL_HOME;
+    } else {
+      process.env.CODE_MEMORY_GLOBAL_HOME = originalGlobalHome;
+    }
     await closeDatabase();
     rmSync(tempRoot, { recursive: true, force: true });
   });
@@ -150,59 +180,177 @@ describe('MCP core tool result contract', () => {
 
     expect([...server.handlers.keys()].sort()).toEqual(expectedRegisteredToolNames);
 
-    const toolCalls: Array<[string, Record<string, unknown>]> = [
-      ['get_project_card', {}],
-      ['plan_context', { query: 'debug login failure', tokenBudget: 1500 }],
-      ['get_context_pack', { query: 'login', tokenBudget: 3000, levels: 'L3', sessionId: 'core-contract-pack' }],
-      ['search_code', { query: 'login', limit: 5, searchMode: 'keyword' }],
-      ['search_symbols', { query: 'login', kind: 'method', limit: 5 }],
-      ['find_definition', { symbolName: 'AuthService.login' }],
-      ['find_references', { symbolName: 'findUserByEmail', maxResults: 5 }],
-      ['explain_module', { filePath: 'src/services/AuthService.ts' }],
-      ['impact_analysis', { target: 'src/services/AuthService.ts' }],
-      ['get_related_tests', { target: 'src/services/AuthService.ts' }],
-      ['get_repo_map', { tokenBudget: 2500, directory: 'src/services' }],
-      ['get_process', { name: processes[0]!.name }],
-      ['get_call_graph', { symbolName: 'AuthService.login', depth: 1 }],
-      ['get_dependency_graph', { filePath: 'src/services/AuthService.ts', depth: 1 }],
-      ['get_community', { name: db.all<{ name: string }>('SELECT name FROM communities ORDER BY name')[0]!.name }],
-      ['get_route_map', {}],
-      ['mark_context_used', {
-        sessionId: 'core-contract-session',
-        query: 'login',
-        returnedFiles: ['src/services/AuthService.ts'],
-        tokenEstimate: 100,
-      }],
-      ['get_context_delta', {
-        sessionId: 'core-contract-session',
-        candidateFiles: ['src/services/AuthService.ts', 'src/services/token-service.ts'],
-      }],
-      ['avoid_repeated_context', {
-        sessionId: 'core-contract-session',
-        candidateFiles: ['src/services/AuthService.ts', 'src/services/token-service.ts'],
-      }],
-      ['explain_why_this_context', {
-        sessionId: 'core-contract-session',
-        contextId: 'src/services/AuthService.ts',
-        contextType: 'file',
-      }],
-      ['compact_session_context', { sessionId: 'core-contract-session' }],
-      ['remember_project_fact', {
-        type: 'decision',
-        content: 'AuthService.login is covered by auth tests',
-        scope: ['src/services/AuthService.ts'],
-        confidence: 0.9,
-      }],
-      ['invalidate_memory', { type: 'decision' }],
-      ['reset_context_session', { sessionId: 'core-contract-session' }],
+    const processName = processes[0]!.name;
+    const communityName = db.all<{ name: string }>('SELECT name FROM communities ORDER BY name')[0]!.name;
+    const toolCalls: ToolCallCase[] = [
+      { name: 'get_project_card', args: {}, requiredDataValues: ['sample-ts-project'] },
+      {
+        name: 'plan_context',
+        args: { query: 'debug login failure', tokenBudget: 1500 },
+        requiredDataValues: ['debug login failure', 'get_context_pack'],
+      },
+      {
+        name: 'get_context_pack',
+        args: { query: 'login', tokenBudget: 3000, levels: 'L3', sessionId: 'core-contract-pack' },
+        requiredDataValues: ['login', 'core-contract-pack'],
+      },
+      {
+        name: 'search_code',
+        args: { query: 'login', limit: 5, searchMode: 'keyword' },
+        requiredDataValues: ['login'],
+      },
+      {
+        name: 'search_symbols',
+        args: { query: 'login', kind: 'method', limit: 5 },
+        requiredDataValues: ['login'],
+      },
+      {
+        name: 'find_definition',
+        args: { symbolName: 'AuthService.login' },
+        requiredDataValues: ['AuthService.login', 'AuthService.ts'],
+      },
+      {
+        name: 'find_references',
+        args: { symbolName: 'findUserByEmail', maxResults: 5 },
+        requiredDataValues: ['findUserByEmail'],
+      },
+      {
+        name: 'explain_module',
+        args: { filePath: 'src/services/AuthService.ts' },
+        requiredDataValues: ['src/services/AuthService.ts', 'AuthService'],
+      },
+      {
+        name: 'impact_analysis',
+        args: { target: 'src/services/AuthService.ts' },
+        requiredDataValues: ['src/services/AuthService.ts'],
+      },
+      {
+        name: 'get_related_tests',
+        args: { target: 'src/services/AuthService.ts' },
+        requiredDataValues: ['src/services/AuthService.ts', 'tests/auth.test.ts'],
+      },
+      {
+        name: 'get_repo_map',
+        args: { tokenBudget: 2500, directory: 'src/services' },
+        requiredDataValues: ['src/services', 'AuthService.ts'],
+      },
+      { name: 'get_process', args: { name: processName }, requiredDataValues: [processName] },
+      {
+        name: 'get_call_graph',
+        args: { symbolName: 'AuthService.login', depth: 1 },
+        requiredDataValues: ['AuthService.login'],
+      },
+      {
+        name: 'get_dependency_graph',
+        args: { filePath: 'src/services/AuthService.ts', depth: 1 },
+        requiredDataValues: ['src/services/AuthService.ts'],
+      },
+      { name: 'get_community', args: { name: communityName }, requiredDataValues: [communityName] },
+      { name: 'get_route_map', args: {} },
+      {
+        name: 'mark_context_used',
+        args: {
+          sessionId: 'core-contract-session',
+          query: 'login',
+          returnedFiles: ['src/services/AuthService.ts'],
+          tokenEstimate: 100,
+        },
+        requiredDataValues: ['core-contract-session', 'login', 'src/services/AuthService.ts'],
+      },
+      {
+        name: 'get_context_delta',
+        args: {
+          sessionId: 'core-contract-session',
+          candidateFiles: ['src/services/AuthService.ts', 'src/services/token-service.ts'],
+        },
+        requiredDataValues: ['core-contract-session', 'src/services/token-service.ts'],
+      },
+      {
+        name: 'avoid_repeated_context',
+        args: {
+          sessionId: 'core-contract-session',
+          candidateFiles: ['src/services/AuthService.ts', 'src/services/token-service.ts'],
+        },
+        requiredDataValues: ['core-contract-session', 'src/services/token-service.ts'],
+      },
+      {
+        name: 'explain_why_this_context',
+        args: {
+          sessionId: 'core-contract-session',
+          contextId: 'src/services/AuthService.ts',
+          contextType: 'file',
+        },
+        requiredDataValues: ['core-contract-session', 'src/services/AuthService.ts'],
+      },
+      {
+        name: 'compact_session_context',
+        args: { sessionId: 'core-contract-session' },
+        requiredDataValues: ['core-contract-session'],
+      },
+      {
+        name: 'remember_project_fact',
+        args: {
+          type: 'decision',
+          content: 'AuthService.login is covered by auth tests',
+          scope: ['src/services/AuthService.ts'],
+          confidence: 0.9,
+        },
+        requiredDataValues: ['decision', 'AuthService.login', 'src/services/AuthService.ts'],
+      },
+      { name: 'invalidate_memory', args: { type: 'decision' }, requiredDataValues: ['decision'] },
+      {
+        name: 'reset_context_session',
+        args: { sessionId: 'core-contract-session' },
+        requiredDataValues: ['core-contract-session'],
+      },
     ];
-    expect(toolCalls.map(([name]) => name).sort()).toEqual([...dbBackedContractToolNames].sort());
+    expect(toolCalls.map(({ name }) => name).sort()).toEqual([...dbBackedContractToolNames].sort());
 
-    for (const [toolName, args] of toolCalls) {
+    for (const { name: toolName, args, requiredDataValues } of toolCalls) {
       const handler = server.handlers.get(toolName);
       expect(handler, `${toolName} should be registered`).toBeDefined();
       const result = parseStructured(await handler!(args));
       expectEnvelope(result, tempRoot);
+      expectCriticalDataValues(result, requiredDataValues);
     }
   });
+
+  it('returns machine-readable envelopes for global project management tools', async () => {
+    const server = new FakeMcpServer();
+    registerAllTools(server as never);
+
+    const resolveMissing = parseStructured(await server.handlers.get('resolve_project')!({ project: tempRoot }));
+    expect(resolveMissing.status).toBe('needs_bootstrap');
+    expect(resolveMissing.project.root).toBe(tempRoot);
+    expect(resolveMissing.nextAction.tool).toBe('bootstrap_project');
+    expectCriticalDataValues(resolveMissing, [tempRoot, 'needs_bootstrap', 'bootstrap_project']);
+
+    const bootstrap = parseStructured(await server.handlers.get('bootstrap_project')!({
+      project: tempRoot,
+      embedding: 'none',
+      workers: '1',
+    }));
+    expect(bootstrap.status).toBe('ready');
+    expect(bootstrap.project.root).toBe(tempRoot);
+    expect(bootstrap.nextAction.tool).toBe('plan_context');
+    expectCriticalDataValues(bootstrap, [tempRoot, 'ready']);
+
+    const sync = parseStructured(await server.handlers.get('sync_project')!({
+      project: tempRoot,
+      workers: '1',
+    }));
+    expect(sync.status).toBe('ready');
+    expect(sync.project.root).toBe(tempRoot);
+    expect(sync.nextAction.tool).toBe('plan_context');
+    expectCriticalDataValues(sync, [tempRoot, 'ready']);
+
+    const registered = parseStructured(await server.handlers.get('register_project')!({
+      project: tempRoot,
+      name: 'contract-project',
+    }));
+    expect(registered.status).toBe('ready');
+    expect(registered.project.root).toBe(tempRoot);
+    expect(registered.nextAction.tool).toBe('plan_context');
+    expectCriticalDataValues(registered, [tempRoot, 'contract-project', 'ready']);
+  }, 20_000);
 });
