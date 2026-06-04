@@ -160,6 +160,7 @@ describe('MCP context pack ledger integration', () => {
     });
     expect(firstStructured.data.trustContract.allowedNextReads[0]).toMatchObject({
       path: expect.any(String),
+      lineRange: expect.any(String),
       reason: expect.any(String),
       readPriority: expect.any(String),
     });

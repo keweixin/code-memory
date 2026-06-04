@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -24,10 +25,14 @@ jobs:
       - name: Verify tag matches package version
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          TAG="${GITHUB_REF_NAME#v}"
-          if [ "$VERSION" != "$TAG" ]; then
-            echo "Tag v$TAG does not match package.json version $VERSION" >&2
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$VERSION" != "$TAG" ]; then
+              echo "Tag v$TAG does not match package.json version $VERSION" >&2
+              exit 1
+            fi
+          else
+            echo "Manual release run for package version $VERSION on $GITHUB_REF_NAME"
           fi
       - run: npm ci --registry=https://registry.npmjs.org
       - run: npm run lint

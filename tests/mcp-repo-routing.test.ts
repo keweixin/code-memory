@@ -310,7 +310,12 @@ describe('MCP repo routing', () => {
       data: {
         trustContract: {
           confidence: string;
-          allowedNextReads: Array<{ path: string; reason: string; maxLines: string }>;
+          allowedNextReads: Array<{
+            path: string;
+            lineRange?: string;
+            reason: string;
+            readPriority: string;
+          }>;
           discouragedReads: Array<{ pattern: string; reason: string }>;
         };
       };
@@ -323,7 +328,7 @@ describe('MCP repo routing', () => {
     expect(structuredContext.data.trustContract.confidence).toBe('ready');
     expect(structuredContext.data.trustContract.allowedNextReads[0].path).toContain('src/');
     expect(structuredContext.data.trustContract.allowedNextReads[0].reason).toBeTruthy();
-    expect(structuredContext.data.trustContract.allowedNextReads[0].maxLines).toBeTruthy();
+    expect(structuredContext.data.trustContract.allowedNextReads[0].readPriority).toBeTruthy();
     expect(structuredContext.data.trustContract.discouragedReads[0].pattern).toBe('whole repo grep');
     expect(structuredContext.nextAction.tool).toBe('impact_analysis');
     expect(structuredContext.display).toContain('=== Tool Trust Contract ===');
