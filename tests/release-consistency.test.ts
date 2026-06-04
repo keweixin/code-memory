@@ -142,7 +142,8 @@ describe('release consistency', () => {
     expect(releaseWorkflow).toContain('is already published; skipping npm publish.');
     expect(releaseWorkflow).toContain('npm dist-tag add "$PACKAGE_NAME@$VERSION" latest');
     expect(releaseWorkflow).toContain('npm latest verified: $PACKAGE_NAME@$LATEST');
-    expect(releaseWorkflow).toContain('NPM_TOKEN is required for release publishing.');
+    expect(releaseWorkflow).toContain('NPM_TOKEN is required to publish $PACKAGE_NAME@$VERSION.');
+    expect(releaseWorkflow).toContain("NPM_TOKEN is required to move latest from '${CURRENT_LATEST:-unavailable}' to $VERSION.");
     expect(releaseWorkflow).not.toContain('skipped npm publish');
     expect(realRepoWorkflow).toContain('workflow_dispatch');
     expect(realRepoWorkflow).toContain('npm run benchmark:real-repos -- --fail-on-threshold');
