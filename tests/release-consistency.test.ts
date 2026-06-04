@@ -120,6 +120,13 @@ describe('release consistency', () => {
     const realRepoWorkflow = readFileSync('.github/workflows/real-repo-benchmark.yml', 'utf-8');
 
     expect(releaseWorkflow).toContain('npm run benchmark:real-repos -- --dry-run');
+    expect(releaseWorkflow).toContain('workflow_dispatch');
+    expect(releaseWorkflow).toContain('git checkout "$TAG"');
+    expect(releaseWorkflow).toContain('Release source must be exactly tag v$VERSION');
+    expect(releaseWorkflow).toContain('is already published; skipping npm publish.');
+    expect(releaseWorkflow).toContain('npm dist-tag add "$PACKAGE_NAME@$VERSION" latest');
+    expect(releaseWorkflow).toContain('npm latest verified: $PACKAGE_NAME@$LATEST');
+    expect(releaseWorkflow).toContain('NPM_TOKEN is not configured; skipped npm publish');
     expect(realRepoWorkflow).toContain('workflow_dispatch');
     expect(realRepoWorkflow).toContain('npm run benchmark:real-repos -- --fail-on-threshold');
     expect(realRepoWorkflow).toContain('upload-artifact');

@@ -67,7 +67,32 @@ jobs:
         if: ${{ env.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$VERSION is already published; skipping npm publish."
+          else
+            npm publish --access public --provenance
+          fi
+          npm dist-tag add "$PACKAGE_NAME@$VERSION" latest --registry=https://registry.npmjs.org
+          for attempt in 1 2 3 4 5 6; do
+            LATEST="$(npm view "$PACKAGE_NAME" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
+            if [ "$LATEST" = "$VERSION" ]; then
+              echo "npm latest verified: $PACKAGE_NAME@$LATEST"
+              exit 0
+            fi
+            echo "npm latest is '${LATEST:-unavailable}', waiting for $VERSION (attempt $attempt/6)"
+            sleep 10
+          done
+          echo "npm latest did not resolve to $VERSION" >&2
+          exit 1
+      - name: Report skipped npm publish
+        if: ${{ env.NPM_TOKEN == '' }}
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "NPM_TOKEN is not configured; skipped npm publish for $PACKAGE_NAME@$VERSION."
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
