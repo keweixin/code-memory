@@ -121,8 +121,13 @@ describe('release consistency', () => {
   });
 
   it('keeps release and nightly workflows aligned with real repo benchmark policy', () => {
+    const pkg = readJson<{ scripts: Record<string, string> }>('package.json');
     const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf-8');
     const realRepoWorkflow = readFileSync('.github/workflows/real-repo-benchmark.yml', 'utf-8');
+    const releaseGate = readFileSync('tools/release-gate.mjs', 'utf-8');
+    const npmChild = readFileSync('tools/npm-child.mjs', 'utf-8');
+
+    expect(pkg.scripts['release:gate']).toBe('node tools/release-gate.mjs');
 
     expect(releaseWorkflow).toContain('npm run benchmark:real-repos -- --dry-run');
     expect(releaseWorkflow).toContain('workflow_dispatch');
@@ -136,5 +141,24 @@ describe('release consistency', () => {
     expect(realRepoWorkflow).toContain('workflow_dispatch');
     expect(realRepoWorkflow).toContain('npm run benchmark:real-repos -- --fail-on-threshold');
     expect(realRepoWorkflow).toContain('upload-artifact');
+    expect(npmChild).toContain("process.env.ComSpec || 'cmd.exe'");
+    expect(npmChild).not.toContain('npm_execpath');
+
+    for (const command of [
+      "npmRun('lint')",
+      "npmRun('build')",
+      "npmRun('test', ['--', '--maxWorkers=1', '--minWorkers=1', '--no-file-parallelism'])",
+      "npmRun('test:coverage', ['--', '--maxWorkers=1', '--minWorkers=1', '--no-file-parallelism'])",
+      "npmRun('pack:check')",
+      "npmRun('test:smoke')",
+      "npmRun('audit:official')",
+      "npmRun('benchmark:index', ['--', '--files', '2000', '--workers', 'auto', '--embedding', 'none']",
+      "npmRun('benchmark:context', [], contextOutput)",
+      "npmRun('benchmark:agent', [], agentOutput)",
+      "npmRun('benchmark:gate', ['--', '--index', indexOutput, '--context', contextOutput, '--agent', agentOutput])",
+      "npmRun('benchmark:real-repos', ['--', '--dry-run'])",
+    ]) {
+      expect(releaseGate).toContain(command);
+    }
   });
 });

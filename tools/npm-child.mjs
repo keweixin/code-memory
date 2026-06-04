@@ -12,14 +12,14 @@ export function npmChildEnv() {
 
 export function runNpm(args, options = {}) {
   const env = npmChildEnv();
-  if (process.env.npm_execpath) {
-    return execFileSync(process.execPath, [process.env.npm_execpath, ...args], {
+  if (process.platform === 'win32') {
+    return execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', ['npm', ...args].join(' ')], {
       ...options,
       env,
     });
   }
 
-  return execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+  return execFileSync('npm', args, {
     ...options,
     env,
   });

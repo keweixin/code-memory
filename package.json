@@ -40,6 +40,7 @@
     "benchmark:agent": "node tools/benchmark-agent.mjs",
     "benchmark:real-repos": "node tools/benchmark-real-repos.mjs",
     "benchmark:gate": "node tools/benchmark-quality-gate.mjs",
+    "release:gate": "node tools/release-gate.mjs",
     "bench": "vitest run tests/bench/"
   },
   "keywords": [
