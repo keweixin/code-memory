@@ -74,15 +74,15 @@
         "id": "express-router-chain",
         "type": "impact_analysis",
         "query": "Find blast radius for changes to router route registration.",
-        "expectedFiles": ["lib/application.js", "lib/router/index.js"],
+        "expectedFiles": ["lib/application.js", "test/Router.js"],
         "expectedSymbols": ["route", "use"]
       },
       {
         "id": "express-bug-location",
         "type": "bug_location",
         "query": "Locate where request handlers are dispatched through middleware.",
-        "expectedFiles": ["lib/router/index.js", "lib/router/layer.js"],
-        "expectedSymbols": ["handle", "Layer"]
+        "expectedFiles": ["lib/application.js", "test/app.router.js"],
+        "expectedSymbols": ["Router", "router"]
       }
     ]
   },

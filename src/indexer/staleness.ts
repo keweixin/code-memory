@@ -47,7 +47,7 @@ export function getIndexStaleness(projectRoot: string, db?: SqlJsDatabase): Inde
   const currentCommit = getGitValue(projectRoot, 'rev-parse HEAD');
   const lastIndexedCommit = meta.get('current_commit') || null;
   const lastIndexedAt = meta.get('last_incremental_index') || meta.get('last_full_index') || null;
-  const changedFiles = db ? getStaleIndexedFileCount(projectRoot, db) : getGitChangedPaths(projectRoot).length;
+  const changedFiles = db ? getStaleIndexedFileCount(projectRoot, db) : getRelevantGitChangedPaths(projectRoot).length;
   const rebuilding = meta.get('is_indexing') === 'true';
   const lastWatchError = meta.get('last_watch_error') || null;
   const watchFailed = meta.get('watch_sync_status') === 'failed' || Boolean(lastWatchError);
@@ -110,7 +110,7 @@ function readMetadata(db: SqlJsDatabase): Map<string, string> {
 }
 
 function getStaleIndexedFileCount(projectRoot: string, db: SqlJsDatabase): number {
-  const changedPaths = getGitChangedPaths(projectRoot);
+  const changedPaths = getRelevantGitChangedPaths(projectRoot);
   if (changedPaths.length === 0) return 0;
 
   let count = 0;
@@ -134,6 +134,11 @@ function getStaleIndexedFileCount(projectRoot: string, db: SqlJsDatabase): numbe
     }
   }
   return count;
+}
+
+function getRelevantGitChangedPaths(projectRoot: string): string[] {
+  return getGitChangedPaths(projectRoot)
+    .filter((relPath) => !isNeverIndexedPath(normalizePath(relPath)));
 }
 
 function getGitChangedPaths(projectRoot: string): string[] {

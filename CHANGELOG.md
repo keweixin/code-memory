@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.9] - 2026-06-04
+
+### Added
+- Add `npm run benchmark:real-repos` as a runnable pinned-repository benchmark harness for `benchmark/real-repos.json`
+- Support real-repo benchmark dry-run validation, focused `--repo` / `--task` runs, and optional threshold failure with `--fail-on-threshold`
+
 ## [0.3.8] - 2026-06-04
 
 ### Fixed

@@ -4,7 +4,7 @@ Local-first code intelligence for AI coding agents: project map, symbol search, 
 
 ## 30 Second Quick Start
 
-Current source version: `0.3.8`.
+Current source version: `0.3.9`.
 
 Published npm status can lag the repository. Check before using `@latest`:
 
@@ -12,7 +12,7 @@ Published npm status can lag the repository. Check before using `@latest`:
 npm view @keweixin/code-memory version
 ```
 
-If npm reports a version older than `0.3.8`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest structured MCP tool results, allowed-read constraints, real-repo benchmark config, benchmark gate fixes, and CLI mirror hardening yet.
+If npm reports a version older than `0.3.9`, the GitHub source is ahead of the published package and `npx @keweixin/code-memory@latest` will not include the latest structured MCP tool results, allowed-read constraints, real-repo benchmark runner, benchmark gate fixes, and CLI mirror hardening yet.
 
 Run this from the project you want an agent to understand:
 
@@ -246,7 +246,10 @@ npm run benchmark:index -- --files 2000 --workers auto --embedding none > benchm
 npm run benchmark:context > benchmark-context.json
 npm run benchmark:agent > benchmark-agent.json
 npm run benchmark:gate -- --index benchmark-index.json --context benchmark-context.json --agent benchmark-agent.json
+npm run benchmark:real-repos -- --dry-run
 ```
+
+The real-repo benchmark runner reads `benchmark/real-repos.json`, clones pinned commits only when not in `--dry-run`, bootstraps each project, runs the same CLI mirror tools an agent would use, and reports `realRepoKeyFileRecall`, `realRepoEvidenceCoverage`, `relatedTestRecall`, `wrongProjectRouteRate`, and `staleFailureRate`. Use `--repo <name>` or `--task <id>` for focused runs, and add `--fail-on-threshold` when you want configured minimums to fail the command.
 
 ## Language Support
 

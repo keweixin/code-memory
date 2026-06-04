@@ -86,6 +86,17 @@ describe('ProjectResolver', () => {
     expect(resolution.command).toContain('npx -y @keweixin/code-memory@latest sync --project');
   });
 
+  it('does not report stale just because code-memory storage is untracked', () => {
+    const projectRoot = readyProject('self-storage-target');
+    execSync('git init', { cwd: projectRoot, stdio: 'ignore' });
+
+    const resolution = resolveProject({ project: projectRoot });
+
+    expect(resolution.status).toBe('ready');
+    expect(resolution.indexStatus).toBe('fresh');
+    expect(resolution.nextAction).toBe('use_code_memory');
+  });
+
   function readyProject(name: string): string {
     const root = join(tempRoot, name);
     const codeMemoryDir = join(root, '.code-memory');
